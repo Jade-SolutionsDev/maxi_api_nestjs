@@ -10,8 +10,9 @@ export class ConfigService {
   private readonly config: AppConfig;
 
   constructor() {
+    const rawPort = parseInt(process.env.PORT ?? '3000', 10);
     this.config = {
-      port: parseInt(process.env.PORT ?? '3000', 10),
+      port: Number.isNaN(rawPort) ? 3000 : rawPort,
       nodeEnv: process.env.NODE_ENV ?? 'development',
     };
   }
