@@ -29,6 +29,19 @@
 
 ```bash
 $ pnpm install
+$ cp .env.example .env
+```
+
+Start the PostgreSQL container before running the app:
+
+```bash
+$ pnpm run docker:db:start
+```
+
+Seed the first superadmin user:
+
+```bash
+$ pnpm run seed:superadmin
 ```
 
 ## Compile and run the project
@@ -55,6 +68,36 @@ $ pnpm run test:e2e
 
 # test coverage
 $ pnpm run test:cov
+```
+
+## Database (Docker)
+
+A Docker Compose file is provided for local PostgreSQL 16 development. It creates two databases:
+- `maxihabana` — default development database.
+- `maxihabana_test` — isolated database for e2e tests.
+
+Copy `.env.example` to `.env` and adjust values if needed:
+
+```bash
+$ cp .env.example .env
+```
+
+Start the database:
+
+```bash
+$ pnpm run docker:db:start
+```
+
+Stop the database:
+
+```bash
+$ pnpm run docker:db:stop
+```
+
+Reset the database (removes all data and volumes):
+
+```bash
+$ pnpm run docker:db:reset
 ```
 
 ## Deployment

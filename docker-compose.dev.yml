@@ -1,0 +1,22 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: maxihabana-postgres-dev
+    environment:
+      POSTGRES_DB: maxihabana
+      POSTGRES_USER: maxihabana
+      POSTGRES_PASSWORD: maxihabana
+    ports:
+      - "5432:5432"
+    volumes:
+      - maxihabana-postgres-data:/var/lib/postgresql/data
+      - ./scripts/init-multi-db.sh:/docker-entrypoint-initdb.d/init-multi-db.sh:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U maxihabana -d maxihabana"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+      start_period: 5s
+
+volumes:
+  maxihabana-postgres-data:
