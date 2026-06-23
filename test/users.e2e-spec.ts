@@ -5,6 +5,7 @@ import request from 'supertest';
 import { Repository } from 'typeorm';
 import { AppModule } from '../src/app.module';
 import { User } from '../src/users/entities/user.entity';
+import { configureApp } from './test-setup';
 
 describe('UsersController (e2e)', () => {
   let app: INestApplication;
@@ -16,7 +17,7 @@ describe('UsersController (e2e)', () => {
     }).compile();
 
     app = moduleRef.createNestApplication();
-    app.useGlobalPipes();
+    configureApp(app);
     await app.init();
 
     repository = moduleRef.get(getRepositoryToken(User));
@@ -27,6 +28,7 @@ describe('UsersController (e2e)', () => {
   });
 
   afterAll(async () => {
+    await repository.clear();
     await app.close();
   });
 

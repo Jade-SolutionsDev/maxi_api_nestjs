@@ -160,7 +160,7 @@ describe('UsersService', () => {
         affected: 1,
         raw: [],
         generatedMaps: [],
-      } as never);
+      });
       await service.remove(user.id);
       expect(repository.softDelete).toHaveBeenCalledWith(user.id);
     });
@@ -170,7 +170,7 @@ describe('UsersService', () => {
         affected: 0,
         raw: [],
         generatedMaps: [],
-      } as never);
+      });
       await expect(service.remove(user.id)).rejects.toBeInstanceOf(
         NotFoundException,
       );

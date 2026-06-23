@@ -3,8 +3,7 @@ import { INestApplication } from '@nestjs/common';
 import request from 'supertest';
 import { App } from 'supertest/types';
 import { AppModule } from './../src/app.module';
-import { ResponseInterceptor } from './../src/common/interceptors/response.interceptor';
-import { AllExceptionsFilter } from './../src/common/filters/all-exceptions.filter';
+import { configureApp } from './test-setup';
 
 interface HealthResponseBody {
   data?: {
@@ -26,8 +25,7 @@ describe('HealthController (e2e)', () => {
     }).compile();
 
     app = moduleFixture.createNestApplication();
-    app.useGlobalInterceptors(new ResponseInterceptor());
-    app.useGlobalFilters(new AllExceptionsFilter());
+    configureApp(app);
     await app.init();
   });
 

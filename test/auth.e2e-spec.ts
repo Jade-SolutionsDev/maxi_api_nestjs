@@ -5,6 +5,7 @@ import request from 'supertest';
 import { Repository } from 'typeorm';
 import { AppModule } from '../src/app.module';
 import { hashPassword } from '../src/common/helpers/password.helper';
+import { configureApp } from './test-setup';
 import { User, UserStatus, UserType } from '../src/users/entities/user.entity';
 
 describe('AuthController (e2e)', () => {
@@ -17,7 +18,7 @@ describe('AuthController (e2e)', () => {
     }).compile();
 
     app = moduleRef.createNestApplication();
-    app.useGlobalPipes();
+    configureApp(app);
     await app.init();
 
     repository = moduleRef.get(getRepositoryToken(User));
@@ -28,6 +29,7 @@ describe('AuthController (e2e)', () => {
   });
 
   afterAll(async () => {
+    await repository.clear();
     await app.close();
   });
 
