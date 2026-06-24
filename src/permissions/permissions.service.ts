@@ -38,6 +38,7 @@ const SYSTEM_MODULES = [
   'roles',
   'analytics',
   'settings',
+  'users',
 ] as const;
 
 const ACTIONS = ['create', 'read', 'update', 'delete', 'list'] as const;
