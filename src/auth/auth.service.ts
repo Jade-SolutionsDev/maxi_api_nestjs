@@ -1,15 +1,10 @@
 import { Injectable, UnauthorizedException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { sign, SignOptions } from 'jsonwebtoken';
-import { comparePassword } from '../common/helpers/password.helper';
+import { verifyToken } from '@clerk/backend';
+import { verify } from 'jsonwebtoken';
 import { UserResponseDto } from '../users/dto/user-response.dto';
+import { User } from '../users/entities/user.entity';
 import { UsersService } from '../users/users.service';
-import { LoginDto } from './dto/login.dto';
-
-export interface LoginResult {
-  accessToken: string;
-  user: UserResponseDto;
-}
 
 @Injectable()
 export class AuthService {
@@ -18,39 +13,66 @@ export class AuthService {
     private readonly configService: ConfigService,
   ) {}
 
-  async login(loginDto: LoginDto): Promise<LoginResult> {
-    const user = await this.usersService.findByEmail(loginDto.email);
+  async authenticateByBearerToken(token: string): Promise<User> {
+    let clerkId: string;
 
-    if (!user) {
-      throw new UnauthorizedException('Invalid credentials');
+    try {
+      clerkId = await this.verifyClerkToken(token);
+    } catch {
+      throw new UnauthorizedException('Invalid access token');
     }
 
-    const isPasswordValid = await comparePassword(
-      loginDto.password,
-      user.passwordHash,
+    const user = await this.usersService.findByClerkId(clerkId);
+    if (!user) {
+      throw new UnauthorizedException('User not registered in backoffice');
+    }
+    if (!user.isActive) {
+      throw new UnauthorizedException('Account is inactive');
+    }
+
+    return user;
+  }
+
+  async me(clerkId: string): Promise<UserResponseDto> {
+    const user = await this.usersService.findByClerkId(clerkId);
+    if (!user) {
+      throw new UnauthorizedException('User not found');
+    }
+    return UserResponseDto.fromEntity(user);
+  }
+
+  private async verifyClerkToken(token: string): Promise<string> {
+    const secretKey = this.configService.get<string>('clerk.secretKey');
+    const backofficeSecretKey = this.configService.get<string>(
+      'clerk.backofficeSecretKey',
     );
 
-    if (!isPasswordValid) {
-      throw new UnauthorizedException('Invalid credentials');
+    // Providers/staff live in the storefront Clerk instance; admins live in a
+    // separate backoffice Clerk instance. Try both before falling back.
+    if (secretKey) {
+      const payload = await verifyToken(token, { secretKey });
+      if (payload.sub) {
+        return payload.sub;
+      }
     }
 
-    const payload = {
-      sub: user.id,
-      email: user.email,
-      userType: user.userType,
-      status: user.status,
-    };
+    if (backofficeSecretKey) {
+      const payload = await verifyToken(token, {
+        secretKey: backofficeSecretKey,
+      });
+      if (payload.sub) {
+        return payload.sub;
+      }
+    }
 
-    const secret = this.configService.get<string>('jwt.secret') ?? 'dev-secret';
-    const expiresIn = this.configService.get<string>('jwt.expiresIn') ?? '1d';
+    if (secretKey || backofficeSecretKey) {
+      throw new Error('Unable to verify Clerk token against known instances');
+    }
 
-    const accessToken = sign(payload, secret, {
-      expiresIn,
-    } as SignOptions);
-
-    return {
-      accessToken,
-      user: UserResponseDto.fromEntity(user),
-    };
+    // ponytail: dev fallback when no Clerk secrets are configured
+    const devSecret =
+      this.configService.get<string>('clerk.jwtSecret') ?? 'dev-secret';
+    const payload = verify(token, devSecret) as { sub: string };
+    return payload.sub;
   }
 }
