@@ -6,6 +6,7 @@ import {
   Param,
   Patch,
   Post,
+  Query,
 } from '@nestjs/common';
 import { CreateUserDto } from './dto/create-user.dto';
 import { UpdateUserDto } from './dto/update-user.dto';
@@ -20,6 +21,14 @@ export class UsersController {
   async findAll(): Promise<UserResponseDto[]> {
     const users = await this.usersService.findAll();
     return users.map(UserResponseDto.fromEntity);
+  }
+
+  @Get('lookup')
+  async findByClerkId(
+    @Query('clerkId') clerkId: string,
+  ): Promise<UserResponseDto | null> {
+    const user = await this.usersService.findByClerkId(clerkId);
+    return user ? UserResponseDto.fromEntity(user) : null;
   }
 
   @Get(':id')

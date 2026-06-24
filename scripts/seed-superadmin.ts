@@ -1,7 +1,6 @@
 import * as readline from 'readline';
 import { DataSource } from 'typeorm';
-import { hashPassword } from '../src/common/helpers/password.helper';
-import { User, UserStatus, UserType } from '../src/users/entities/user.entity';
+import { User, UserType } from '../src/users/entities/user.entity';
 
 const DATABASE_URL =
   process.env.DATABASE_URL ??
@@ -29,11 +28,11 @@ function ask(question: string): Promise<string> {
 }
 
 async function main() {
+  const clerkId = await ask('Superadmin clerkId: ');
   const email = await ask('Superadmin email: ');
-  const password = await ask('Superadmin password: ');
 
-  if (!email || !password) {
-    console.error('Email and password are required.');
+  if (!clerkId || !email) {
+    console.error('clerkId and email are required.');
     process.exit(1);
   }
 
@@ -41,20 +40,20 @@ async function main() {
   const repository = dataSource.getRepository(User);
 
   const existing = await repository.findOne({
-    where: { email: email.toLowerCase() },
+    where: { clerkId },
     withDeleted: true,
   });
 
   if (existing) {
-    console.warn(`A user with email "${email}" already exists. Skipping.`);
+    console.warn(`A user with clerkId "${clerkId}" already exists. Skipping.`);
   } else {
     const user = repository.create({
+      clerkId,
       firstName: 'Super',
       lastName: 'Admin',
       email: email.toLowerCase(),
       userType: UserType.ADMIN,
-      status: UserStatus.ACTIVE,
-      passwordHash: await hashPassword(password),
+      isActive: true,
     });
 
     await repository.save(user);

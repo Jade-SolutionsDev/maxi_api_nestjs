@@ -2,7 +2,7 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { CreateUserDto } from './dto/create-user.dto';
 import { UpdateUserDto } from './dto/update-user.dto';
 import { UserResponseDto } from './dto/user-response.dto';
-import { UserStatus, UserType } from './entities/user.entity';
+import { UserType } from './entities/user.entity';
 import { UsersController } from './users.controller';
 import { UsersService } from './users.service';
 
@@ -12,13 +12,19 @@ describe('UsersController', () => {
 
   const user: UserResponseDto = {
     id: '550e8400-e29b-41d4-a716-446655440000',
-    clerkUserId: null,
+    clerkId: 'clerk_user_1',
+    userType: UserType.ADMIN,
+    email: 'jane@example.com',
     firstName: 'Jane',
     lastName: 'Doe',
-    email: 'jane@example.com',
     phone: null,
-    userType: UserType.ADMIN,
-    status: UserStatus.ACTIVE,
+    avatarUrl: null,
+    businessName: null,
+    businessDescription: null,
+    businessLogoUrl: null,
+    clerkOrgId: null,
+    isActive: true,
+    createdBy: null,
     createdAt: new Date(),
     updatedAt: new Date(),
   };
@@ -32,6 +38,7 @@ describe('UsersController', () => {
           useValue: {
             findAll: jest.fn(),
             findOne: jest.fn(),
+            findByClerkId: jest.fn(),
             create: jest.fn(),
             update: jest.fn(),
             remove: jest.fn(),
@@ -57,14 +64,17 @@ describe('UsersController', () => {
     expect(result.id).toBe(user.id);
   });
 
+  it('should lookup a user by clerkId', async () => {
+    service.findByClerkId.mockResolvedValue(user as unknown as never);
+    const result = await controller.findByClerkId(user.clerkId);
+    expect(result?.clerkId).toBe(user.clerkId);
+  });
+
   it('should create a user', async () => {
     const createDto: CreateUserDto = {
-      firstName: 'Jane',
-      lastName: 'Doe',
+      clerkId: 'clerk_user_2',
       email: 'jane@example.com',
       userType: UserType.ADMIN,
-      status: UserStatus.ACTIVE,
-      password: 'SecurePass1',
     };
     service.create.mockResolvedValue(user as unknown as never);
     const result = await controller.create(createDto);

@@ -12,21 +12,21 @@ describe('UpdateUserDto', () => {
   it('should validate a partial update payload', async () => {
     const dto = plainToInstance(UpdateUserDto, {
       firstName: 'Updated',
-      status: 'inactive',
+      isActive: false,
     });
     const errors = await validate(dto);
     expect(errors).toHaveLength(0);
-  });
-
-  it('should reject invalid password when provided', async () => {
-    const dto = plainToInstance(UpdateUserDto, { password: 'weak' });
-    const errors = await validate(dto);
-    expect(errors.some((error) => error.property === 'password')).toBe(true);
   });
 
   it('should reject invalid email when provided', async () => {
     const dto = plainToInstance(UpdateUserDto, { email: 'bad-email' });
     const errors = await validate(dto);
     expect(errors.some((error) => error.property === 'email')).toBe(true);
+  });
+
+  it('should reject unknown userType when provided', async () => {
+    const dto = plainToInstance(UpdateUserDto, { userType: 'customer' });
+    const errors = await validate(dto);
+    expect(errors.some((error) => error.property === 'userType')).toBe(true);
   });
 });

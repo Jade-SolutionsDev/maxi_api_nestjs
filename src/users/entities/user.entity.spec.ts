@@ -1,4 +1,3 @@
-import { instanceToPlain } from 'class-transformer';
 import { getMetadataArgsStorage } from 'typeorm';
 import { User } from './user.entity';
 
@@ -12,14 +11,19 @@ describe('User entity', () => {
     expect(names).toEqual(
       expect.arrayContaining([
         'id',
-        'clerkUserId',
+        'clerkId',
+        'userType',
+        'email',
         'firstName',
         'lastName',
-        'email',
         'phone',
-        'userType',
-        'status',
-        'passwordHash',
+        'avatarUrl',
+        'businessName',
+        'businessDescription',
+        'businessLogoUrl',
+        'clerkOrgId',
+        'isActive',
+        'createdBy',
         'createdAt',
         'updatedAt',
         'deletedAt',
@@ -36,7 +40,7 @@ describe('User entity', () => {
     expect(idColumn?.options.primary).toBe(true);
   });
 
-  it('should mark email and clerkUserId as unique', () => {
+  it('should mark email, clerkId and clerkOrgId as unique', () => {
     const uniques = getMetadataArgsStorage().uniques.filter(
       (unique) => unique.target === User,
     );
@@ -45,15 +49,7 @@ describe('User entity', () => {
     );
 
     expect(uniqueColumns).toContain('email');
-    expect(uniqueColumns).toContain('clerkUserId');
-  });
-
-  it('should exclude passwordHash when serialized with class-transformer', () => {
-    const user = new User();
-    user.passwordHash = 'secret-hash';
-
-    const plain = instanceToPlain(user);
-
-    expect(plain.passwordHash).toBeUndefined();
+    expect(uniqueColumns).toContain('clerkId');
+    expect(uniqueColumns).toContain('clerkOrgId');
   });
 });

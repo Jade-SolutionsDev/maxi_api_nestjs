@@ -2,10 +2,9 @@ import { ConflictException, NotFoundException } from '@nestjs/common';
 import { Test, TestingModule } from '@nestjs/testing';
 import { getRepositoryToken } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
-import * as passwordHelper from '../common/helpers/password.helper';
 import { CreateUserDto } from './dto/create-user.dto';
 import { UpdateUserDto } from './dto/update-user.dto';
-import { User, UserStatus, UserType } from './entities/user.entity';
+import { User, UserType } from './entities/user.entity';
 import { UsersService } from './users.service';
 
 describe('UsersService', () => {
@@ -14,14 +13,19 @@ describe('UsersService', () => {
 
   const user: User = {
     id: '550e8400-e29b-41d4-a716-446655440000',
-    clerkUserId: null,
+    clerkId: 'clerk_user_1',
+    userType: UserType.ADMIN,
+    email: 'jane@example.com',
     firstName: 'Jane',
     lastName: 'Doe',
-    email: 'jane@example.com',
     phone: null,
-    userType: UserType.ADMIN,
-    status: UserStatus.ACTIVE,
-    passwordHash: 'hashed',
+    avatarUrl: null,
+    businessName: null,
+    businessDescription: null,
+    businessLogoUrl: null,
+    clerkOrgId: null,
+    isActive: true,
+    createdBy: null,
     createdAt: new Date(),
     updatedAt: new Date(),
     deletedAt: null,
@@ -79,41 +83,39 @@ describe('UsersService', () => {
     });
   });
 
-  describe('findByEmail', () => {
-    it('should return a user by email', async () => {
+  describe('findByClerkId', () => {
+    it('should return a user by clerkId', async () => {
       repository.findOne.mockResolvedValue(user);
-      const result = await service.findByEmail(user.email);
+      const result = await service.findByClerkId(user.clerkId);
       expect(result).toEqual(user);
       expect(repository.findOne).toHaveBeenCalledWith({
-        where: { email: user.email },
+        where: { clerkId: user.clerkId },
       });
     });
   });
 
   describe('create', () => {
     const createDto: CreateUserDto = {
+      clerkId: 'clerk_user_2',
+      email: 'JANE@EXAMPLE.COM',
       firstName: 'Jane',
       lastName: 'Doe',
-      email: 'JANE@EXAMPLE.COM',
       phone: '+1234567890',
       userType: UserType.ADMIN,
-      status: UserStatus.ACTIVE,
-      password: 'SecurePass1',
     };
 
-    it('should create a user with a hashed password and lowercased email', async () => {
+    it('should create a user with lowercased email', async () => {
       repository.findOne.mockResolvedValue(null);
       repository.create.mockReturnValue(user);
       repository.save.mockResolvedValue(user);
-      jest.spyOn(passwordHelper, 'hashPassword').mockResolvedValue('hashed');
 
       const result = await service.create(createDto);
 
       expect(result).toEqual(user);
       expect(repository.create).toHaveBeenCalledWith(
         expect.objectContaining({
+          clerkId: createDto.clerkId,
           email: 'jane@example.com',
-          passwordHash: 'hashed',
         }),
       );
     });
@@ -124,23 +126,27 @@ describe('UsersService', () => {
         ConflictException,
       );
     });
+
+    it('should throw ConflictException for duplicate clerkId', async () => {
+      repository.findOne
+        .mockResolvedValueOnce(null)
+        .mockResolvedValueOnce({ ...user, clerkId: createDto.clerkId });
+      await expect(service.create(createDto)).rejects.toBeInstanceOf(
+        ConflictException,
+      );
+    });
   });
 
   describe('update', () => {
-    it('should update a user and hash a new password', async () => {
+    it('should update a user', async () => {
       repository.findOne.mockResolvedValue({ ...user });
       repository.save.mockImplementation((u) => Promise.resolve(u as User));
-      jest.spyOn(passwordHelper, 'hashPassword').mockResolvedValue('new-hash');
 
-      const updateDto: UpdateUserDto = {
-        firstName: 'Janet',
-        password: 'NewSecure1',
-      };
+      const updateDto: UpdateUserDto = { firstName: 'Janet' };
 
       const result = await service.update(user.id, updateDto);
 
       expect(result.firstName).toBe('Janet');
-      expect(result.passwordHash).toBe('new-hash');
     });
 
     it('should throw ConflictException when changing email to an existing one', async () => {

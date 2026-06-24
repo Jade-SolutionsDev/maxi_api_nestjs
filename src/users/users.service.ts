@@ -5,7 +5,6 @@ import {
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
-import { hashPassword } from '../common/helpers/password.helper';
 import { CreateUserDto } from './dto/create-user.dto';
 import { UpdateUserDto } from './dto/update-user.dto';
 import { User } from './entities/user.entity';
@@ -35,14 +34,22 @@ export class UsersService {
     });
   }
 
+  async findByClerkId(clerkId: string): Promise<User | null> {
+    return this.usersRepository.findOne({ where: { clerkId } });
+  }
+
   async create(createUserDto: CreateUserDto): Promise<User> {
-    const email = createUserDto.email.toLowerCase();
-    await this.guardDuplicateEmail(email);
+    if (createUserDto.clerkId) {
+      await this.guardDuplicateClerkId(createUserDto.clerkId);
+    }
+    if (createUserDto.email) {
+      await this.guardDuplicateEmail(createUserDto.email.toLowerCase());
+    }
 
     const user = this.usersRepository.create({
       ...createUserDto,
-      email,
-      passwordHash: await hashPassword(createUserDto.password),
+      clerkId: createUserDto.clerkId ?? null,
+      email: createUserDto.email?.toLowerCase() ?? null,
     });
 
     return this.usersRepository.save(user);
@@ -58,11 +65,6 @@ export class UsersService {
     }
 
     Object.assign(user, updateUserDto);
-
-    if (updateUserDto.password) {
-      user.passwordHash = await hashPassword(updateUserDto.password);
-    }
-
     return this.usersRepository.save(user);
   }
 
@@ -85,6 +87,22 @@ export class UsersService {
     if (existing && existing.id !== excludeId) {
       throw new ConflictException(
         `A user with email "${email}" already exists`,
+      );
+    }
+  }
+
+  private async guardDuplicateClerkId(
+    clerkId: string,
+    excludeId?: string,
+  ): Promise<void> {
+    const existing = await this.usersRepository.findOne({
+      where: { clerkId },
+      withDeleted: true,
+    });
+
+    if (existing && existing.id !== excludeId) {
+      throw new ConflictException(
+        `A user with clerkId "${clerkId}" already exists`,
       );
     }
   }

@@ -1,44 +1,69 @@
 import {
+  IsBoolean,
   IsEmail,
   IsEnum,
-  IsNotEmpty,
   IsOptional,
   IsString,
+  IsUUID,
   Length,
-  Matches,
 } from 'class-validator';
-import { UserStatus, UserType } from '../entities/user.entity';
+import { UserType } from '../entities/user.entity';
 
 export class CreateUserDto {
-  @IsString()
-  @IsNotEmpty()
-  @Length(1, 100)
-  firstName: string;
-
-  @IsString()
-  @IsNotEmpty()
-  @Length(1, 100)
-  lastName: string;
-
-  @IsEmail()
-  @IsNotEmpty()
-  email: string;
-
   @IsOptional()
   @IsString()
-  @Length(1, 50)
-  phone?: string;
+  @Length(1, 255)
+  clerkId?: string;
 
   @IsEnum(UserType)
   userType: UserType;
 
-  @IsEnum(UserStatus)
-  status: UserStatus;
+  @IsOptional()
+  @IsEmail()
+  email?: string;
 
+  @IsOptional()
   @IsString()
-  @Length(8, 255)
-  @Matches(/^(?=.*[A-Za-z])(?=.*\d).+$/, {
-    message: 'password must contain at least one letter and one number',
-  })
-  password: string;
+  @Length(1, 100)
+  firstName?: string;
+
+  @IsOptional()
+  @IsString()
+  @Length(1, 100)
+  lastName?: string;
+
+  @IsOptional()
+  @IsString()
+  @Length(1, 20)
+  phone?: string;
+
+  @IsOptional()
+  @IsString()
+  avatarUrl?: string;
+
+  @IsOptional()
+  @IsString()
+  @Length(1, 200)
+  businessName?: string;
+
+  @IsOptional()
+  @IsString()
+  businessDescription?: string;
+
+  @IsOptional()
+  @IsString()
+  businessLogoUrl?: string;
+
+  @IsOptional()
+  @IsString()
+  @Length(1, 255)
+  clerkOrgId?: string;
+
+  @IsOptional()
+  @IsBoolean()
+  isActive?: boolean;
+
+  @IsOptional()
+  @IsUUID()
+  createdBy?: string;
 }
