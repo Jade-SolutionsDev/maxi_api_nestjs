@@ -1,4 +1,4 @@
-import configuration, { databaseConfig, jwtConfig } from './configuration';
+import configuration, { clerkConfig, databaseConfig } from './configuration';
 
 describe('configuration', () => {
   const originalEnv = process.env;
@@ -8,8 +8,8 @@ describe('configuration', () => {
     delete process.env.PORT;
     delete process.env.DATABASE_URL;
     delete process.env.TEST_DATABASE_URL;
-    delete process.env.JWT_SECRET;
-    delete process.env.JWT_EXPIRES_IN;
+    delete process.env.CLERK_SECRET_KEY;
+    delete process.env.CLERK_JWT_SECRET;
     delete process.env.NODE_ENV;
   });
 
@@ -24,8 +24,8 @@ describe('configuration', () => {
     expect(config.database.url).toBe(
       'postgres://maxihabana:maxihabana@localhost:5432/maxihabana',
     );
-    expect(config.jwt.secret).toBe('dev-secret');
-    expect(config.jwt.expiresIn).toBe('1d');
+    expect(config.clerk.secretKey).toBeUndefined();
+    expect(config.clerk.jwtSecret).toBe('dev-secret');
     expect(config.nodeEnv).toBe('development');
   });
 
@@ -52,10 +52,10 @@ describe('configuration', () => {
     expect(databaseConfig().url).toBe('postgres://user:pass@db:5432/app');
   });
 
-  it('should read JWT configuration from environment', () => {
-    process.env.JWT_SECRET = 'super-secret';
-    process.env.JWT_EXPIRES_IN = '7d';
-    expect(jwtConfig().secret).toBe('super-secret');
-    expect(jwtConfig().expiresIn).toBe('7d');
+  it('should read Clerk configuration from environment', () => {
+    process.env.CLERK_SECRET_KEY = 'sk_test_clerk';
+    process.env.CLERK_JWT_SECRET = 'super-secret';
+    expect(clerkConfig().secretKey).toBe('sk_test_clerk');
+    expect(clerkConfig().jwtSecret).toBe('super-secret');
   });
 });

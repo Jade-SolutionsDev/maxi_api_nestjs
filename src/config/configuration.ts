@@ -2,15 +2,17 @@ export interface DatabaseConfig {
   url: string;
 }
 
-export interface JwtConfig {
-  secret: string;
-  expiresIn: string;
+export interface ClerkConfig {
+  secretKey: string | undefined;
+  backofficeSecretKey: string | undefined;
+  jwtSecret: string;
+  webhookSecret: string | undefined;
 }
 
 export interface AppConfig {
   port: number;
   database: DatabaseConfig;
-  jwt: JwtConfig;
+  clerk: ClerkConfig;
   nodeEnv: string;
 }
 
@@ -26,14 +28,16 @@ export const databaseConfig = (): DatabaseConfig => {
   return { url };
 };
 
-export const jwtConfig = (): JwtConfig => ({
-  secret: process.env.JWT_SECRET ?? 'dev-secret',
-  expiresIn: process.env.JWT_EXPIRES_IN ?? '1d',
+export const clerkConfig = (): ClerkConfig => ({
+  secretKey: process.env.CLERK_SECRET_KEY,
+  backofficeSecretKey: process.env.CLERK_BACKOFFICE_SECRET_KEY,
+  jwtSecret: process.env.CLERK_JWT_SECRET ?? 'dev-secret',
+  webhookSecret: process.env.CLERK_WEBHOOK_SECRET,
 });
 
 export default (): AppConfig => ({
   port: parseInt(process.env.PORT ?? '3000', 10),
   database: databaseConfig(),
-  jwt: jwtConfig(),
+  clerk: clerkConfig(),
   nodeEnv: process.env.NODE_ENV ?? 'development',
 });
