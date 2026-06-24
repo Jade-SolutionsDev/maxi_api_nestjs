@@ -9,10 +9,16 @@ export interface ClerkConfig {
   webhookSecret: string | undefined;
 }
 
+export interface CorsConfig {
+  origins: string[];
+  credentials: boolean;
+}
+
 export interface AppConfig {
   port: number;
   database: DatabaseConfig;
   clerk: ClerkConfig;
+  cors: CorsConfig;
   nodeEnv: string;
 }
 
@@ -35,9 +41,26 @@ export const clerkConfig = (): ClerkConfig => ({
   webhookSecret: process.env.CLERK_WEBHOOK_SECRET,
 });
 
+export const corsConfig = (): CorsConfig => {
+  const raw = process.env.CORS_ORIGINS ?? '';
+  const defaultOrigins =
+    process.env.NODE_ENV === 'development' ? ['http://localhost:5173'] : [];
+
+  return {
+    origins: raw
+      ? raw
+          .split(',')
+          .map((o) => o.trim())
+          .filter(Boolean)
+      : defaultOrigins,
+    credentials: process.env.CORS_CREDENTIALS === 'true',
+  };
+};
+
 export default (): AppConfig => ({
   port: parseInt(process.env.PORT ?? '3000', 10),
   database: databaseConfig(),
   clerk: clerkConfig(),
+  cors: corsConfig(),
   nodeEnv: process.env.NODE_ENV ?? 'development',
 });

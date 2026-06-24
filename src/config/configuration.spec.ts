@@ -1,4 +1,8 @@
-import configuration, { clerkConfig, databaseConfig } from './configuration';
+import configuration, {
+  clerkConfig,
+  corsConfig,
+  databaseConfig,
+} from './configuration';
 
 describe('configuration', () => {
   const originalEnv = process.env;
@@ -10,6 +14,8 @@ describe('configuration', () => {
     delete process.env.TEST_DATABASE_URL;
     delete process.env.CLERK_SECRET_KEY;
     delete process.env.CLERK_JWT_SECRET;
+    delete process.env.CORS_ORIGINS;
+    delete process.env.CORS_CREDENTIALS;
     delete process.env.NODE_ENV;
   });
 
@@ -18,6 +24,7 @@ describe('configuration', () => {
   });
 
   it('should provide default values', () => {
+    process.env.NODE_ENV = 'development';
     const config = configuration();
 
     expect(config.port).toBe(3000);
@@ -26,6 +33,8 @@ describe('configuration', () => {
     );
     expect(config.clerk.secretKey).toBeUndefined();
     expect(config.clerk.jwtSecret).toBe('dev-secret');
+    expect(config.cors.origins).toEqual(['http://localhost:5173']);
+    expect(config.cors.credentials).toBe(false);
     expect(config.nodeEnv).toBe('development');
   });
 
@@ -57,5 +66,22 @@ describe('configuration', () => {
     process.env.CLERK_JWT_SECRET = 'super-secret';
     expect(clerkConfig().secretKey).toBe('sk_test_clerk');
     expect(clerkConfig().jwtSecret).toBe('super-secret');
+  });
+
+  it('should read CORS origins from environment', () => {
+    process.env.CORS_ORIGINS =
+      'https://admin.example.com, https://store.example.com';
+    process.env.CORS_CREDENTIALS = 'true';
+    const config = corsConfig();
+    expect(config.origins).toEqual([
+      'https://admin.example.com',
+      'https://store.example.com',
+    ]);
+    expect(config.credentials).toBe(true);
+  });
+
+  it('should default CORS origins to empty in non-development', () => {
+    process.env.NODE_ENV = 'production';
+    expect(corsConfig().origins).toEqual([]);
   });
 });

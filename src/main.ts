@@ -6,6 +6,7 @@ import { AppModule } from './app.module';
 import { AllExceptionsFilter } from './common/filters/all-exceptions.filter';
 import { ResponseInterceptor } from './common/interceptors/response.interceptor';
 import { ConfigService } from '@nestjs/config';
+import { CorsConfig } from './config/configuration';
 
 interface RequestWithRawBody extends IncomingMessage {
   rawBody?: string;
@@ -38,6 +39,26 @@ async function bootstrap() {
       forbidNonWhitelisted: true,
     }),
   );
+
+  const cors = configService.get<CorsConfig>('cors') ?? {
+    origins: [],
+    credentials: false,
+  };
+  app.enableCors({
+    origin: (
+      origin: string | undefined,
+      callback: (err: Error | null, allow?: boolean) => void,
+    ) => {
+      if (!origin || cors.origins.includes(origin)) {
+        callback(null, true);
+      } else {
+        callback(new Error(`Origin ${origin} not allowed by CORS`), false);
+      }
+    },
+    credentials: cors.credentials,
+    methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+    allowedHeaders: ['Content-Type', 'Authorization'],
+  });
 
   const port = configService.get<number>('port') || 3000;
   await app.listen(port);
