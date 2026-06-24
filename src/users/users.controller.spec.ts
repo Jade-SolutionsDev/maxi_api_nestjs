@@ -1,4 +1,6 @@
 import { Test, TestingModule } from '@nestjs/testing';
+import { ClerkUserAuthGuard } from '../auth/guards/clerk-user-auth.guard';
+import { AdminGuard } from '../permissions/guards/admin.guard';
 import { CreateUserDto } from './dto/create-user.dto';
 import { UpdateUserDto } from './dto/update-user.dto';
 import { UserResponseDto } from './dto/user-response.dto';
@@ -45,7 +47,12 @@ describe('UsersController', () => {
           },
         },
       ],
-    }).compile();
+    })
+      .overrideGuard(ClerkUserAuthGuard)
+      .useValue({ canActivate: () => true })
+      .overrideGuard(AdminGuard)
+      .useValue({ canActivate: () => true })
+      .compile();
 
     controller = module.get<UsersController>(UsersController);
     service = module.get(UsersService);

@@ -6,7 +6,10 @@ import {
   Param,
   Patch,
   Post,
+  UseGuards,
 } from '@nestjs/common';
+import { ClerkUserAuthGuard } from '../auth/guards/clerk-user-auth.guard';
+import { AdminGuard } from './guards/admin.guard';
 import { AssignRoleDto } from './dto/assign-role.dto';
 import { CreateRoleDto } from './dto/create-role.dto';
 import { UpdateRoleDto } from './dto/update-role.dto';
@@ -18,6 +21,7 @@ import {
 } from './permissions.service';
 
 @Controller('permissions')
+@UseGuards(ClerkUserAuthGuard, AdminGuard)
 export class PermissionsController {
   constructor(private readonly permissionsService: PermissionsService) {}
 
@@ -98,7 +102,6 @@ export class PermissionsController {
   async getUserPermissions(
     @Param('userId') userId: string,
   ): Promise<UserPermissionsPayload> {
-    // ponytail: userType looked up from roles; admin assumed for demo endpoint
     return this.permissionsService.getUserPermissions(userId, 'admin');
   }
 }

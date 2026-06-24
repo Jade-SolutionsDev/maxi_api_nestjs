@@ -40,6 +40,8 @@ async function bootstrap() {
     }),
   );
 
+  app.setGlobalPrefix('api');
+
   const cors = configService.get<CorsConfig>('cors') ?? {
     origins: [],
     credentials: false,

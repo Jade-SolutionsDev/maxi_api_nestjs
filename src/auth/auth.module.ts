@@ -1,4 +1,4 @@
-import { Module } from '@nestjs/common';
+import { forwardRef, Module } from '@nestjs/common';
 import { ClientsModule } from '../clients/clients.module';
 import { UsersModule } from '../users/users.module';
 import { AuthController } from './auth.controller';
@@ -8,7 +8,7 @@ import { ClerkClientAuthGuard } from './guards/clerk-client-auth.guard';
 import { ClerkUserAuthGuard } from './guards/clerk-user-auth.guard';
 
 @Module({
-  imports: [UsersModule, ClientsModule],
+  imports: [forwardRef(() => UsersModule), forwardRef(() => ClientsModule)],
   controllers: [AuthController],
   providers: [
     AuthService,

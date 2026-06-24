@@ -7,13 +7,17 @@ import {
   Patch,
   Post,
   Query,
+  UseGuards,
 } from '@nestjs/common';
+import { ClerkUserAuthGuard } from '../auth/guards/clerk-user-auth.guard';
+import { AdminGuard } from '../permissions/guards/admin.guard';
 import { CreateUserDto } from './dto/create-user.dto';
 import { UpdateUserDto } from './dto/update-user.dto';
 import { UserResponseDto } from './dto/user-response.dto';
 import { UsersService } from './users.service';
 
 @Controller('users')
+@UseGuards(ClerkUserAuthGuard, AdminGuard)
 export class UsersController {
   constructor(private readonly usersService: UsersService) {}
 

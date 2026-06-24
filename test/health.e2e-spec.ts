@@ -29,9 +29,9 @@ describe('HealthController (e2e)', () => {
     await app.init();
   });
 
-  it('/health (GET) returns a wrapped ok payload', () => {
+  it('/api/health (GET) returns a wrapped ok payload', () => {
     return request(app.getHttpServer())
-      .get('/health')
+      .get('/api/health')
       .expect(200)
       .expect((response: { body: HealthResponseBody }) => {
         const { body } = response;
@@ -40,9 +40,9 @@ describe('HealthController (e2e)', () => {
       });
   });
 
-  it('/health/ready (GET) returns a wrapped ready payload', () => {
+  it('/api/health/ready (GET) returns a wrapped ready payload', () => {
     return request(app.getHttpServer())
-      .get('/health/ready')
+      .get('/api/health/ready')
       .expect(200)
       .expect((response: { body: HealthResponseBody }) => {
         const { body } = response;

@@ -53,7 +53,7 @@ describe('AuthController (e2e)', () => {
     const token = sign({ sub: clerkId }, 'dev-secret');
 
     const response = await request(app.getHttpServer())
-      .get('/auth/me')
+      .get('/api/auth/me')
       .set('Authorization', `Bearer ${token}`)
       .expect(200);
 
@@ -63,7 +63,7 @@ describe('AuthController (e2e)', () => {
 
   it('should reject an invalid token', async () => {
     await request(app.getHttpServer())
-      .get('/auth/me')
+      .get('/api/auth/me')
       .set('Authorization', 'Bearer invalid-token')
       .expect(401);
   });
