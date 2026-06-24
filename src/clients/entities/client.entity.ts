@@ -1,0 +1,57 @@
+import {
+  Column,
+  CreateDateColumn,
+  DeleteDateColumn,
+  Entity,
+  PrimaryGeneratedColumn,
+  Unique,
+  UpdateDateColumn,
+} from 'typeorm';
+
+@Entity('clients')
+@Unique(['email'])
+@Unique(['clerkId'])
+export class Client {
+  @PrimaryGeneratedColumn('uuid')
+  id: string;
+
+  @Column({ name: 'clerk_id', type: 'varchar', length: 255, unique: true })
+  clerkId: string;
+
+  @Column({ type: 'varchar', length: 255, nullable: true, unique: true })
+  email: string | null;
+
+  @Column({ type: 'varchar', length: 100, nullable: true })
+  firstName: string | null;
+
+  @Column({ type: 'varchar', length: 100, nullable: true })
+  lastName: string | null;
+
+  @Column({ type: 'varchar', length: 20, nullable: true })
+  phone: string | null;
+
+  @Column({ name: 'avatar_url', type: 'text', nullable: true })
+  avatarUrl: string | null;
+
+  @Column({
+    name: 'default_municipality_id',
+    type: 'uuid',
+    nullable: true,
+  })
+  defaultMunicipalityId: string | null;
+
+  @Column({ name: 'is_active', type: 'boolean', default: true })
+  isActive: boolean;
+
+  @Column({ name: 'onboarding_completed', type: 'boolean', default: false })
+  onboardingCompleted: boolean;
+
+  @CreateDateColumn({ name: 'created_at' })
+  createdAt: Date;
+
+  @UpdateDateColumn({ name: 'updated_at' })
+  updatedAt: Date;
+
+  @DeleteDateColumn({ name: 'deleted_at' })
+  deletedAt: Date | null;
+}
