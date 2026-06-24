@@ -4,9 +4,12 @@ import { TypeOrmModule } from '@nestjs/typeorm';
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
 import configuration, { databaseConfig } from './config/configuration';
-import { HealthModule } from './health/health.module';
-import { UsersModule } from './users/users.module';
 import { AuthModule } from './auth/auth.module';
+import { ClientsModule } from './clients/clients.module';
+import { HealthModule } from './health/health.module';
+import { PermissionsModule } from './permissions/permissions.module';
+import { UsersModule } from './users/users.module';
+import { WebhooksModule } from './webhooks/webhooks.module';
 
 @Module({
   imports: [
@@ -28,7 +31,10 @@ import { AuthModule } from './auth/auth.module';
     }),
     HealthModule,
     UsersModule,
+    ClientsModule,
     AuthModule,
+    PermissionsModule,
+    WebhooksModule,
   ],
   controllers: [AppController],
   providers: [AppService],
