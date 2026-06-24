@@ -1,4 +1,4 @@
-import { Injectable, UnauthorizedException } from '@nestjs/common';
+import { Injectable, Logger, UnauthorizedException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { verifyToken } from '@clerk/backend';
 import { verify } from 'jsonwebtoken';
@@ -49,24 +49,36 @@ export class AuthService {
 
     // Providers/staff live in the storefront Clerk instance; admins live in a
     // separate backoffice Clerk instance. Try both before falling back.
-    if (secretKey) {
-      const payload = await verifyToken(token, { secretKey });
-      if (payload.sub) {
-        return payload.sub;
+    try {
+      if (secretKey) {
+        const payload = await verifyToken(token, { secretKey });
+        if (payload.sub) {
+          return payload.sub;
+        }
       }
+    } catch (error) {
+      Logger.warn(
+        `Failed to verify token against storefront Clerk instance: ${error}`,
+      );
     }
 
-    if (backofficeSecretKey) {
-      const payload = await verifyToken(token, {
-        secretKey: backofficeSecretKey,
-      });
-      if (payload.sub) {
-        return payload.sub;
+    try {
+      if (backofficeSecretKey) {
+        const payload = await verifyToken(token, {
+          secretKey: backofficeSecretKey,
+        });
+        if (payload.sub) {
+          return payload.sub;
+        }
       }
-    }
 
-    if (secretKey || backofficeSecretKey) {
-      throw new Error('Unable to verify Clerk token against known instances');
+      if (secretKey || backofficeSecretKey) {
+        throw new Error('Unable to verify Clerk token against known instances');
+      }
+    } catch (error) {
+      Logger.warn(
+        `Failed to verify token against backoffice Clerk instance: ${error}`,
+      );
     }
 
     // ponytail: dev fallback when no Clerk secrets are configured
