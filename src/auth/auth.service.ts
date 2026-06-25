@@ -23,6 +23,7 @@ export class AuthService {
     }
 
     const user = await this.usersService.findByClerkId(clerkId);
+    Logger.log(`Authenticated user with Clerk ID: ${clerkId}`);
     if (!user) {
       throw new UnauthorizedException('User not registered in backoffice');
     }
@@ -53,6 +54,9 @@ export class AuthService {
       if (secretKey) {
         const payload = await verifyToken(token, { secretKey });
         if (payload.sub) {
+          Logger.log(
+            `Successfully verified token against storefront Clerk instance for user ${payload.sub}`,
+          );
           return payload.sub;
         }
       }
@@ -68,17 +72,20 @@ export class AuthService {
           secretKey: backofficeSecretKey,
         });
         if (payload.sub) {
+          Logger.log(
+            `Successfully verified token against backoffice Clerk instance for user ${payload.sub}`,
+          );
           return payload.sub;
         }
-      }
-
-      if (secretKey || backofficeSecretKey) {
-        throw new Error('Unable to verify Clerk token against known instances');
       }
     } catch (error) {
       Logger.warn(
         `Failed to verify token against backoffice Clerk instance: ${error}`,
       );
+    }
+
+    if (secretKey || backofficeSecretKey) {
+      throw new Error('Unable to verify Clerk token against known instances');
     }
 
     // ponytail: dev fallback when no Clerk secrets are configured
