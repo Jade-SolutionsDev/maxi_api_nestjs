@@ -2,15 +2,19 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { ClerkUserAuthGuard } from '../auth/guards/clerk-user-auth.guard';
 import { AdminGuard } from '../permissions/guards/admin.guard';
 import { CreateUserDto } from './dto/create-user.dto';
+import { InviteUserDto } from './dto/invite-user.dto';
 import { UpdateUserDto } from './dto/update-user.dto';
 import { UserResponseDto } from './dto/user-response.dto';
-import { UserType } from './entities/user.entity';
+import { Invitation, InvitationStatus } from './entities/invitation.entity';
+import { User, UserType } from './entities/user.entity';
+import { InvitationsService } from './invitations.service';
 import { UsersController } from './users.controller';
 import { UsersService } from './users.service';
 
 describe('UsersController', () => {
   let controller: UsersController;
   let service: jest.Mocked<UsersService>;
+  let invitationsService: jest.Mocked<InvitationsService>;
 
   const user: UserResponseDto = {
     id: '550e8400-e29b-41d4-a716-446655440000',
@@ -31,6 +35,11 @@ describe('UsersController', () => {
     updatedAt: new Date(),
   };
 
+  const inviter = {
+    ...user,
+    deletedAt: null,
+  } as User;
+
   beforeEach(async () => {
     const module: TestingModule = await Test.createTestingModule({
       controllers: [UsersController],
@@ -46,6 +55,12 @@ describe('UsersController', () => {
             remove: jest.fn(),
           },
         },
+        {
+          provide: InvitationsService,
+          useValue: {
+            createAndSendInvitation: jest.fn(),
+          },
+        },
       ],
     })
       .overrideGuard(ClerkUserAuthGuard)
@@ -56,6 +71,7 @@ describe('UsersController', () => {
 
     controller = module.get<UsersController>(UsersController);
     service = module.get(UsersService);
+    invitationsService = module.get(InvitationsService);
   });
 
   it('should list users', async () => {
@@ -102,5 +118,37 @@ describe('UsersController', () => {
     service.remove.mockResolvedValue(undefined);
     await controller.remove(user.id);
     expect(service.remove).toHaveBeenCalledWith(user.id);
+  });
+
+  it('should invite a user', async () => {
+    const dto: InviteUserDto = {
+      email: 'invite@example.com',
+      userType: UserType.STAFF,
+    };
+    const invitation: Invitation = {
+      id: 'invite-id',
+      email: dto.email,
+      userType: dto.userType,
+      invitedById: inviter.id,
+      invitedBy: inviter,
+      organizationId: null,
+      clerkInvitationId: 'clerk_inv_1',
+      status: InvitationStatus.PENDING,
+      acceptedAt: null,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    };
+    invitationsService.createAndSendInvitation.mockResolvedValue(invitation);
+
+    const request = { user: inviter } as unknown as Parameters<
+      typeof controller.invite
+    >[1];
+    const result = await controller.invite(dto, request);
+
+    expect(result.email).toBe(dto.email);
+    expect(invitationsService.createAndSendInvitation).toHaveBeenCalledWith(
+      dto,
+      inviter,
+    );
   });
 });

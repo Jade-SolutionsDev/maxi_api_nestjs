@@ -182,4 +182,76 @@ describe('UsersService', () => {
       );
     });
   });
+
+  describe('createOrUpdateFromClerk', () => {
+    it('should create a new user from Clerk data', async () => {
+      repository.findOne.mockResolvedValue(null);
+      repository.create.mockReturnValue(user);
+      repository.save.mockResolvedValue(user);
+
+      const result = await service.createOrUpdateFromClerk('clerk_new', {
+        email: 'NEW@EXAMPLE.COM',
+        firstName: 'New',
+        lastName: 'User',
+        userType: UserType.ADMIN,
+      });
+
+      expect(result).toEqual(user);
+      expect(repository.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          clerkId: 'clerk_new',
+          email: 'new@example.com',
+          firstName: 'New',
+          lastName: 'User',
+          userType: UserType.ADMIN,
+          isActive: true,
+        }),
+      );
+    });
+
+    it('should update an existing user and reactivate them', async () => {
+      const existing = { ...user, isActive: false };
+      repository.findOne.mockResolvedValue(existing);
+      repository.save.mockImplementation((u) => Promise.resolve(u as User));
+
+      const result = await service.createOrUpdateFromClerk(user.clerkId, {
+        email: 'updated@example.com',
+      });
+
+      expect(result.email).toBe('updated@example.com');
+      expect(result.isActive).toBe(true);
+    });
+
+    it('should throw ConflictException for duplicate email', async () => {
+      repository.findOne
+        .mockResolvedValueOnce(null)
+        .mockResolvedValueOnce({ ...user, id: 'other-id' });
+      await expect(
+        service.createOrUpdateFromClerk('clerk_new', {
+          email: user.email,
+        }),
+      ).rejects.toBeInstanceOf(ConflictException);
+    });
+  });
+
+  describe('deactivateByClerkId', () => {
+    it('should deactivate a user', async () => {
+      repository.findOne.mockResolvedValue({ ...user });
+      repository.save.mockImplementation((u) => Promise.resolve(u as User));
+
+      await service.deactivateByClerkId(user.clerkId);
+
+      expect(repository.save).toHaveBeenCalledWith(
+        expect.objectContaining({ isActive: false }),
+      );
+    });
+
+    it('should do nothing when user is not found', async () => {
+      repository.findOne.mockResolvedValue(null);
+      await expect(
+        service.deactivateByClerkId('missing'),
+      ).resolves.toBeUndefined();
+      expect(repository.save).not.toHaveBeenCalled();
+    });
+  });
 });

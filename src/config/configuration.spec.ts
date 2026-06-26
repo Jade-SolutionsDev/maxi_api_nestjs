@@ -63,8 +63,14 @@ describe('configuration', () => {
 
   it('should read Clerk configuration from environment', () => {
     process.env.CLERK_SECRET_KEY = 'sk_test_clerk';
+    process.env.CLERK_BACKOFFICE_SECRET_KEY = 'sk_test_backoffice';
+    process.env.CLERK_WEBHOOK_SECRET = 'whsec_store';
+    process.env.CLERK_BACKOFFICE_WEBHOOK_SECRET = 'whsec_admin';
     process.env.CLERK_JWT_SECRET = 'super-secret';
     expect(clerkConfig().secretKey).toBe('sk_test_clerk');
+    expect(clerkConfig().backofficeSecretKey).toBe('sk_test_backoffice');
+    expect(clerkConfig().webhookSecret).toBe('whsec_store');
+    expect(clerkConfig().backofficeWebhookSecret).toBe('whsec_admin');
     expect(clerkConfig().jwtSecret).toBe('super-secret');
   });
 

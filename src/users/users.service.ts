@@ -7,7 +7,7 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { CreateUserDto } from './dto/create-user.dto';
 import { UpdateUserDto } from './dto/update-user.dto';
-import { User } from './entities/user.entity';
+import { User, UserType } from './entities/user.entity';
 
 @Injectable()
 export class UsersService {
@@ -73,6 +73,55 @@ export class UsersService {
     if (result.affected === 0) {
       throw new NotFoundException(`User with id "${id}" not found`);
     }
+  }
+
+  async createOrUpdateFromClerk(
+    clerkId: string,
+    data: {
+      email?: string;
+      firstName?: string;
+      lastName?: string;
+      userType?: UserType;
+    },
+  ): Promise<User> {
+    let user = await this.usersRepository.findOne({
+      where: { clerkId },
+      withDeleted: true,
+    });
+
+    if (!user) {
+      if (data.email) {
+        await this.guardDuplicateEmail(data.email.toLowerCase());
+      }
+      user = this.usersRepository.create({
+        clerkId,
+        email: data.email?.toLowerCase() ?? null,
+        firstName: data.firstName ?? null,
+        lastName: data.lastName ?? null,
+        userType: data.userType ?? UserType.STAFF,
+        isActive: true,
+      });
+    } else {
+      if (data.email) {
+        await this.guardDuplicateEmail(data.email.toLowerCase(), user.id);
+      }
+      user.email = data.email?.toLowerCase() ?? user.email;
+      user.firstName = data.firstName ?? user.firstName;
+      user.lastName = data.lastName ?? user.lastName;
+      user.userType = data.userType ?? user.userType;
+      user.isActive = true;
+    }
+
+    return this.usersRepository.save(user);
+  }
+
+  async deactivateByClerkId(clerkId: string): Promise<void> {
+    const user = await this.usersRepository.findOne({ where: { clerkId } });
+    if (!user) {
+      return;
+    }
+    user.isActive = false;
+    await this.usersRepository.save(user);
   }
 
   private async guardDuplicateEmail(

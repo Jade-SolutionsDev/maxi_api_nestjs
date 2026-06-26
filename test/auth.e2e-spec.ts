@@ -21,7 +21,7 @@ describe('AuthController (e2e)', () => {
       imports: [AppModule],
     }).compile();
 
-    app = moduleRef.createNestApplication();
+    app = moduleRef.createNestApplication({ bodyParser: false });
     configureApp(app);
     await app.init();
 
@@ -29,11 +29,11 @@ describe('AuthController (e2e)', () => {
   });
 
   beforeEach(async () => {
-    await repository.clear();
+    await repository.query('TRUNCATE TABLE invitations, users CASCADE');
   });
 
   afterAll(async () => {
-    await repository.clear();
+    await repository.query('TRUNCATE TABLE invitations, users CASCADE');
     await app.close();
   });
 

@@ -7,6 +7,8 @@ import {
 import { ConfigService } from '@nestjs/config';
 import { verifyWebhook } from '@clerk/backend/webhooks';
 import { ClientsService } from '../clients/clients.service';
+import { InvitationsService } from '../users/invitations.service';
+import { UsersService } from '../users/users.service';
 
 interface ClerkWebhookPayload {
   type: string;
@@ -25,15 +27,18 @@ export class WebhooksService {
   constructor(
     private readonly configService: ConfigService,
     private readonly clientsService: ClientsService,
+    private readonly usersService: UsersService,
+    private readonly invitationsService: InvitationsService,
   ) {}
 
-  async handleClerkWebhook(
+  async handleStoreWebhook(
     rawBody: string,
     headers: Record<string, string | string[] | undefined>,
   ): Promise<{ processed: boolean }> {
-    const payload = await this.verifyClerkWebhook(rawBody, headers);
+    const secret = this.configService.get<string>('clerk.webhookSecret');
+    const payload = await this.verifyWebhook(rawBody, headers, secret);
 
-    this.logger.log(`Received Clerk webhook: ${payload.type}`);
+    this.logger.log(`Received storefront Clerk webhook: ${payload.type}`);
 
     switch (payload.type) {
       case 'user.created':
@@ -48,21 +53,61 @@ export class WebhooksService {
       case 'session.removed':
       case 'session.revoked':
         this.logger.log(
-          `Clerk session event ${payload.type} for user ${payload.data.user_id as string}`,
+          `Storefront session event ${payload.type} for user ${payload.data.user_id as string}`,
         );
         break;
       default:
-        this.logger.debug(`Unhandled Clerk webhook type: ${payload.type}`);
+        this.logger.debug(
+          `Unhandled storefront Clerk webhook type: ${payload.type}`,
+        );
     }
 
     return { processed: true };
   }
 
-  private async verifyClerkWebhook(
+  async handleAdminWebhook(
     rawBody: string,
     headers: Record<string, string | string[] | undefined>,
+  ): Promise<{ processed: boolean }> {
+    const secret = this.configService.get<string>(
+      'clerk.backofficeWebhookSecret',
+    );
+    const payload = await this.verifyWebhook(rawBody, headers, secret);
+
+    this.logger.log(`Received admin Clerk webhook: ${payload.type}`);
+
+    switch (payload.type) {
+      case 'user.created':
+        await this.createAdminUserFromInvitation(payload.data);
+        break;
+      case 'user.updated':
+        await this.updateAdminUser(payload.data);
+        break;
+      case 'user.deleted':
+        await this.usersService.deactivateByClerkId(payload.data.id as string);
+        break;
+      case 'session.created':
+      case 'session.ended':
+      case 'session.removed':
+      case 'session.revoked':
+        this.logger.log(
+          `Admin session event ${payload.type} for user ${payload.data.user_id as string}`,
+        );
+        break;
+      default:
+        this.logger.debug(
+          `Unhandled admin Clerk webhook type: ${payload.type}`,
+        );
+    }
+
+    return { processed: true };
+  }
+
+  private async verifyWebhook(
+    rawBody: string,
+    headers: Record<string, string | string[] | undefined>,
+    secret: string | undefined,
   ): Promise<ClerkWebhookPayload> {
-    const secret = this.configService.get<string>('clerk.webhookSecret');
     const nodeEnv = this.configService.get<string>('nodeEnv');
 
     if (!secret) {
@@ -119,6 +164,54 @@ export class WebhooksService {
       email: email ?? undefined,
       firstName,
       lastName,
+    });
+  }
+
+  private async createAdminUserFromInvitation(
+    data: Record<string, unknown>,
+  ): Promise<void> {
+    const clerkId = data.id as string;
+    const email = this.extractPrimaryEmail(data);
+    if (!email) {
+      this.logger.warn(
+        `Skipping admin user creation for ${clerkId}: no primary email`,
+      );
+      return;
+    }
+
+    const invitation = await this.invitationsService.findPendingByEmail(email);
+    if (!invitation) {
+      this.logger.warn(
+        `No pending invitation found for ${email}; skipping unauthorized admin user creation`,
+      );
+      return;
+    }
+
+    const firstName = (data.first_name as string | null) ?? undefined;
+    const lastName = (data.last_name as string | null) ?? undefined;
+
+    await this.usersService.createOrUpdateFromClerk(clerkId, {
+      email,
+      firstName,
+      lastName,
+      userType: invitation.userType,
+    });
+
+    await this.invitationsService.markAccepted(invitation);
+    this.logger.log(`Created admin user from invitation: ${email}`);
+  }
+
+  private async updateAdminUser(data: Record<string, unknown>): Promise<void> {
+    const clerkId = data.id as string;
+    const email = this.extractPrimaryEmail(data);
+    const firstName = (data.first_name as string | null) ?? undefined;
+    const lastName = (data.last_name as string | null) ?? undefined;
+
+    await this.usersService.createOrUpdateFromClerk(clerkId, {
+      email: email ?? undefined,
+      firstName,
+      lastName,
+      userType: undefined,
     });
   }
 
