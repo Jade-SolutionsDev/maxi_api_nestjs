@@ -50,6 +50,11 @@ export class InvitationsService {
 
     const clerkInvitation = await this.sendClerkInvitation(dto, inviter);
 
+    if (!clerkInvitation)
+      throw new Error(
+        `Failed to send invitation to ${normalizedEmail} via Clerk.`,
+      );
+
     const invitation = this.invitationRepository.create({
       email: normalizedEmail,
       userType: dto.userType,
@@ -65,7 +70,7 @@ export class InvitationsService {
   private async sendClerkInvitation(
     dto: InviteUserDto,
     inviter: User,
-  ): Promise<{ id: string }> {
+  ): Promise<{ id: string } | undefined> {
     const secretKey = this.configService.get<string>(
       'clerk.backofficeSecretKey',
     );
@@ -93,12 +98,20 @@ export class InvitationsService {
     }
 
     this.logger.log(`Sending app invitation to ${dto.email}`);
-    const invitation = await clerkClient.invitations.createInvitation({
-      emailAddress: dto.email,
-      publicMetadata,
-      notify: true,
-    });
-    return { id: invitation.id };
+    try {
+      const invitation = await clerkClient.invitations.createInvitation({
+        emailAddress: dto.email,
+        publicMetadata,
+        notify: true,
+      });
+      this.logger.log(
+        `Invitation sent to ${dto.email} with ID ${invitation.id}`,
+      );
+
+      return { id: invitation.id };
+    } catch (e) {
+      this.logger.error(`Failed to send invitation to ${dto.email}: ${e}`);
+    }
   }
 
   async findPendingByEmail(email: string): Promise<Invitation | null> {
