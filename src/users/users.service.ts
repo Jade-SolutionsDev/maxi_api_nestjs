@@ -82,6 +82,8 @@ export class UsersService {
       firstName?: string;
       lastName?: string;
       userType?: UserType;
+      phone?: string;
+      businessName?: string;
     },
   ): Promise<User> {
     let user = await this.usersRepository.findOne({
@@ -98,6 +100,8 @@ export class UsersService {
         email: data.email?.toLowerCase() ?? null,
         firstName: data.firstName ?? null,
         lastName: data.lastName ?? null,
+        phone: data.phone ?? null,
+        businessName: data.businessName ?? null,
         userType: data.userType ?? UserType.STAFF,
         isActive: true,
       });
@@ -108,6 +112,8 @@ export class UsersService {
       user.email = data.email?.toLowerCase() ?? user.email;
       user.firstName = data.firstName ?? user.firstName;
       user.lastName = data.lastName ?? user.lastName;
+      user.phone = data.phone ?? user.phone;
+      user.businessName = data.businessName ?? user.businessName;
       user.userType = data.userType ?? user.userType;
       user.isActive = true;
     }

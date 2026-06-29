@@ -189,12 +189,15 @@ export class WebhooksService {
 
     const firstName = (data.first_name as string | null) ?? undefined;
     const lastName = (data.last_name as string | null) ?? undefined;
+    const { phone, businessName } = this.extractProfileMetadata(data);
 
     await this.usersService.createOrUpdateFromClerk(clerkId, {
       email,
       firstName,
       lastName,
       userType: invitation.userType,
+      phone,
+      businessName,
     });
 
     await this.invitationsService.markAccepted(invitation);
@@ -206,12 +209,15 @@ export class WebhooksService {
     const email = this.extractPrimaryEmail(data);
     const firstName = (data.first_name as string | null) ?? undefined;
     const lastName = (data.last_name as string | null) ?? undefined;
+    const { phone, businessName } = this.extractProfileMetadata(data);
 
     await this.usersService.createOrUpdateFromClerk(clerkId, {
       email: email ?? undefined,
       firstName,
       lastName,
       userType: undefined,
+      phone,
+      businessName,
     });
   }
 
@@ -227,5 +233,29 @@ export class WebhooksService {
       ? emails.find((e) => e.id === primaryId)
       : undefined;
     return (primary ?? emails[0]).email_address;
+  }
+
+  /**
+   * Profile fields collected during invitation acceptance are stored in the
+   * Clerk sign-up's `unsafeMetadata`, which Clerk copies onto the user and
+   * echoes back here as `unsafe_metadata`. Empty strings are treated as absent.
+   */
+  private extractProfileMetadata(data: Record<string, unknown>): {
+    phone?: string;
+    businessName?: string;
+  } {
+    const meta = data.unsafe_metadata as Record<string, unknown> | undefined;
+    if (!meta) {
+      return {};
+    }
+    const phone =
+      typeof meta.phone === 'string' && meta.phone.length > 0
+        ? meta.phone
+        : undefined;
+    const businessName =
+      typeof meta.businessName === 'string' && meta.businessName.length > 0
+        ? meta.businessName
+        : undefined;
+    return { phone, businessName };
   }
 }
