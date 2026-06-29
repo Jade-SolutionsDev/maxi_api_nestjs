@@ -8,6 +8,7 @@ export interface ClerkConfig {
   jwtSecret: string;
   webhookSecret: string | undefined;
   backofficeWebhookSecret: string | undefined;
+  invitationRedirectUrl: string | undefined;
 }
 
 export interface CorsConfig {
@@ -41,6 +42,7 @@ export const clerkConfig = (): ClerkConfig => ({
   jwtSecret: process.env.CLERK_JWT_SECRET ?? 'dev-secret',
   webhookSecret: process.env.CLERK_WEBHOOK_SECRET,
   backofficeWebhookSecret: process.env.CLERK_BACKOFFICE_WEBHOOK_SECRET,
+  invitationRedirectUrl: process.env.CLERK_INVITATION_REDIRECT_URL,
 });
 
 export const corsConfig = (): CorsConfig => {

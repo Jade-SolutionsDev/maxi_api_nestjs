@@ -14,6 +14,7 @@ describe('configuration', () => {
     delete process.env.TEST_DATABASE_URL;
     delete process.env.CLERK_SECRET_KEY;
     delete process.env.CLERK_JWT_SECRET;
+    delete process.env.CLERK_INVITATION_REDIRECT_URL;
     delete process.env.CORS_ORIGINS;
     delete process.env.CORS_CREDENTIALS;
     delete process.env.NODE_ENV;
@@ -33,6 +34,7 @@ describe('configuration', () => {
     );
     expect(config.clerk.secretKey).toBeUndefined();
     expect(config.clerk.jwtSecret).toBe('dev-secret');
+    expect(config.clerk.invitationRedirectUrl).toBeUndefined();
     expect(config.cors.origins).toEqual(['http://localhost:5173']);
     expect(config.cors.credentials).toBe(false);
     expect(config.nodeEnv).toBe('development');
@@ -67,11 +69,15 @@ describe('configuration', () => {
     process.env.CLERK_WEBHOOK_SECRET = 'whsec_store';
     process.env.CLERK_BACKOFFICE_WEBHOOK_SECRET = 'whsec_admin';
     process.env.CLERK_JWT_SECRET = 'super-secret';
+    process.env.CLERK_INVITATION_REDIRECT_URL = 'https://example.com/invite';
     expect(clerkConfig().secretKey).toBe('sk_test_clerk');
     expect(clerkConfig().backofficeSecretKey).toBe('sk_test_backoffice');
     expect(clerkConfig().webhookSecret).toBe('whsec_store');
     expect(clerkConfig().backofficeWebhookSecret).toBe('whsec_admin');
     expect(clerkConfig().jwtSecret).toBe('super-secret');
+    expect(clerkConfig().invitationRedirectUrl).toBe(
+      'https://example.com/invite',
+    );
   });
 
   it('should read CORS origins from environment', () => {

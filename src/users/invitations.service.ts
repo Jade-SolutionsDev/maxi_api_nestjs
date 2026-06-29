@@ -102,6 +102,9 @@ export class InvitationsService {
       const invitation = await clerkClient.invitations.createInvitation({
         emailAddress: dto.email,
         publicMetadata,
+        redirectUrl: this.configService.get<string>(
+          'clerk.invitationRedirectUrl',
+        ),
         notify: true,
       });
       this.logger.log(
