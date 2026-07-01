@@ -1,11 +1,36 @@
+import { ConflictException, NotFoundException } from '@nestjs/common';
 import { Test, TestingModule } from '@nestjs/testing';
 import { getRepositoryToken } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
+import { User, UserType } from '../users/entities/user.entity';
 import { Permission } from './entities/permission.entity';
 import { RolePermission } from './entities/role-permission.entity';
 import { Role } from './entities/role.entity';
 import { UserRole } from './entities/user-role.entity';
 import { PermissionsService } from './permissions.service';
+
+function makeUser(overrides: Partial<User> = {}): User {
+  return {
+    id: 'user-1',
+    clerkId: 'clerk_1',
+    userType: UserType.PROVIDER,
+    email: 'user@example.com',
+    firstName: null,
+    lastName: null,
+    phone: null,
+    avatarUrl: null,
+    businessName: null,
+    businessDescription: null,
+    businessLogoUrl: null,
+    clerkOrgId: null,
+    isActive: true,
+    createdBy: null,
+    createdAt: new Date(),
+    updatedAt: new Date(),
+    deletedAt: null,
+    ...overrides,
+  };
+}
 
 describe('PermissionsService', () => {
   let service: PermissionsService;
@@ -13,6 +38,7 @@ describe('PermissionsService', () => {
   let roleRepository: jest.Mocked<Repository<Role>>;
   let rolePermissionRepository: jest.Mocked<Repository<RolePermission>>;
   let userRoleRepository: jest.Mocked<Repository<UserRole>>;
+  let userRepository: jest.Mocked<Repository<User>>;
 
   const role: Role = {
     id: 'role-1',
@@ -54,6 +80,7 @@ describe('PermissionsService', () => {
             findOne: jest.fn(),
             save: jest.fn(),
             softDelete: jest.fn(),
+            count: jest.fn(),
           },
         },
         {
@@ -75,6 +102,13 @@ describe('PermissionsService', () => {
             delete: jest.fn(),
           },
         },
+        {
+          provide: getRepositoryToken(User),
+          useValue: {
+            find: jest.fn(),
+            findOne: jest.fn(),
+          },
+        },
       ],
     }).compile();
 
@@ -83,6 +117,7 @@ describe('PermissionsService', () => {
     roleRepository = module.get(getRepositoryToken(Role));
     rolePermissionRepository = module.get(getRepositoryToken(RolePermission));
     userRoleRepository = module.get(getRepositoryToken(UserRole));
+    userRepository = module.get(getRepositoryToken(User));
   });
 
   it('should be defined', () => {
@@ -138,10 +173,102 @@ describe('PermissionsService', () => {
   });
 
   describe('getUserPermissions', () => {
-    it('should return all permissions for admin', async () => {
-      const result = await service.getUserPermissions('user-1', 'admin');
+    it('should return all permissions for an admin user', async () => {
+      userRepository.findOne.mockResolvedValue(
+        makeUser({ userType: UserType.ADMIN }),
+      );
+      const result = await service.getUserPermissions('user-1');
+      expect(result.user.userType).toBe('admin');
       expect(result.permissions.products).toContain('read');
       expect(result.permissions.orders).toContain('create');
+    });
+
+    it('should return only role-granted permissions for a non-admin', async () => {
+      userRepository.findOne.mockResolvedValue(
+        makeUser({ userType: UserType.PROVIDER }),
+      );
+      userRoleRepository.find.mockResolvedValue([
+        {
+          userId: 'user-1',
+          roleId: 'role-1',
+          assignedBy: null,
+          assignedAt: new Date(),
+          role,
+        },
+      ]);
+      rolePermissionRepository.find.mockResolvedValue([
+        { roleId: 'role-1', permissionId: 'perm-1', permission } as never,
+      ]);
+
+      const result = await service.getUserPermissions('user-1');
+
+      expect(result.user.userType).toBe('provider');
+      expect(result.permissions.products).toEqual(['read']);
+      expect(result.permissions.orders).toBeUndefined();
+    });
+
+    it('should return no permissions for an unknown user', async () => {
+      userRepository.findOne.mockResolvedValue(null);
+      userRoleRepository.find.mockResolvedValue([]);
+
+      const result = await service.getUserPermissions('ghost');
+
+      expect(result.user.userType).toBeNull();
+      expect(result.permissions).toEqual({});
+    });
+  });
+
+  describe('updateRole', () => {
+    it('should reject modifying a system role', async () => {
+      roleRepository.findOne.mockResolvedValue({ ...role, isSystem: true });
+      await expect(
+        service.updateRole('role-1', { name: 'x' }),
+      ).rejects.toBeInstanceOf(ConflictException);
+    });
+  });
+
+  describe('getRolePermissionIds', () => {
+    it('should return the permission ids assigned to a role', async () => {
+      rolePermissionRepository.find.mockResolvedValue([
+        { roleId: 'role-1', permissionId: 'perm-1' } as RolePermission,
+        { roleId: 'role-1', permissionId: 'perm-2' } as RolePermission,
+      ]);
+      const result = await service.getRolePermissionIds('role-1');
+      expect(result).toEqual(['perm-1', 'perm-2']);
+    });
+  });
+
+  describe('setUserRoles', () => {
+    it('should replace a user roles with the provided set', async () => {
+      roleRepository.count.mockResolvedValue(2);
+      userRoleRepository.delete.mockResolvedValue({ affected: 1, raw: [] });
+
+      await service.setUserRoles('user-1', ['role-1', 'role-2'], 'admin-1');
+
+      expect(userRoleRepository.delete).toHaveBeenCalledWith({
+        userId: 'user-1',
+      });
+      expect(userRoleRepository.save).toHaveBeenCalledWith([
+        { userId: 'user-1', roleId: 'role-1', assignedBy: 'admin-1' },
+        { userId: 'user-1', roleId: 'role-2', assignedBy: 'admin-1' },
+      ]);
+    });
+
+    it('should throw when a role does not exist', async () => {
+      roleRepository.count.mockResolvedValue(1);
+      await expect(
+        service.setUserRoles('user-1', ['role-1', 'missing'], 'admin-1'),
+      ).rejects.toBeInstanceOf(NotFoundException);
+      expect(userRoleRepository.delete).not.toHaveBeenCalled();
+    });
+
+    it('should clear all roles when given an empty list', async () => {
+      userRoleRepository.delete.mockResolvedValue({ affected: 2, raw: [] });
+      await service.setUserRoles('user-1', [], 'admin-1');
+      expect(userRoleRepository.delete).toHaveBeenCalledWith({
+        userId: 'user-1',
+      });
+      expect(userRoleRepository.save).not.toHaveBeenCalled();
     });
   });
 

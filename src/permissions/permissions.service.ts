@@ -6,6 +6,7 @@ import {
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { In, Repository } from 'typeorm';
+import { User, UserType } from '../users/entities/user.entity';
 import { UpdateRoleDto } from './dto/update-role.dto';
 import { Permission } from './entities/permission.entity';
 import { Role } from './entities/role.entity';
@@ -20,7 +21,7 @@ export interface PermissionRef {
 export interface UserPermissionsPayload {
   user: {
     id: string;
-    userType: string;
+    userType: string | null;
     roles: string[];
   };
   permissions: Record<string, string[]>;
@@ -54,6 +55,8 @@ export class PermissionsService implements OnModuleInit {
     private readonly rolePermissionRepository: Repository<RolePermission>,
     @InjectRepository(UserRole)
     private readonly userRoleRepository: Repository<UserRole>,
+    @InjectRepository(User)
+    private readonly userRepository: Repository<User>,
   ) {}
 
   async onModuleInit(): Promise<void> {
@@ -230,13 +233,13 @@ export class PermissionsService implements OnModuleInit {
       .filter((role) => role.isActive && role.deletedAt === null);
   }
 
-  async getUserPermissions(
-    userId: string,
-    userType: string,
-  ): Promise<UserPermissionsPayload> {
+  async getUserPermissions(userId: string): Promise<UserPermissionsPayload> {
     const permissions: Record<string, string[]> = {};
 
-    if (userType === 'admin') {
+    const user = await this.userRepository.findOne({ where: { id: userId } });
+    const userType = user?.userType ?? null;
+
+    if (userType === UserType.ADMIN) {
       for (const module of SYSTEM_MODULES) {
         permissions[module] = [...ACTIONS];
       }
@@ -310,6 +313,9 @@ export class PermissionsService implements OnModuleInit {
 
   async updateRole(roleId: string, data: UpdateRoleDto): Promise<Role> {
     const role = await this.getRole(roleId);
+    if (role.isSystem) {
+      throw new ConflictException('System roles cannot be modified');
+    }
     Object.assign(role, data);
     return this.roleRepository.save(role);
   }
@@ -382,5 +388,60 @@ export class PermissionsService implements OnModuleInit {
 
   async listPermissions(): Promise<Permission[]> {
     return this.permissionRepository.find({ where: { isActive: true } });
+  }
+
+  async getRolePermissionIds(roleId: string): Promise<string[]> {
+    const rows = await this.rolePermissionRepository.find({
+      where: { roleId },
+    });
+    return rows.map((rp) => rp.permissionId);
+  }
+
+  async getPermissionIdsByRoleIds(
+    roleIds: string[],
+  ): Promise<Record<string, string[]>> {
+    const result: Record<string, string[]> = {};
+    if (roleIds.length === 0) return result;
+
+    const rows = await this.rolePermissionRepository.find({
+      where: { roleId: In(roleIds) },
+    });
+    for (const rp of rows) {
+      (result[rp.roleId] ??= []).push(rp.permissionId);
+    }
+    return result;
+  }
+
+  async getUserRoleIds(userId: string): Promise<string[]> {
+    const roles = await this.getUserRoles(userId);
+    return roles.map((role) => role.id);
+  }
+
+  async setUserRoles(
+    userId: string,
+    roleIds: string[],
+    assignedBy: string | null,
+  ): Promise<void> {
+    const uniqueRoleIds = [...new Set(roleIds)];
+
+    if (uniqueRoleIds.length > 0) {
+      const found = await this.roleRepository.count({
+        where: { id: In(uniqueRoleIds) },
+      });
+      if (found !== uniqueRoleIds.length) {
+        throw new NotFoundException('One or more roles were not found');
+      }
+    }
+
+    await this.userRoleRepository.delete({ userId });
+
+    if (uniqueRoleIds.length > 0) {
+      const entities = uniqueRoleIds.map((roleId) => ({
+        userId,
+        roleId,
+        assignedBy,
+      }));
+      await this.userRoleRepository.save(entities);
+    }
   }
 }
