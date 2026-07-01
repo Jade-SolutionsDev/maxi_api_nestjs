@@ -4,10 +4,16 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { FindOptionsWhere, Repository } from 'typeorm';
 import { CreateUserDto } from './dto/create-user.dto';
 import { UpdateUserDto } from './dto/update-user.dto';
 import { User, UserType } from './entities/user.entity';
+
+export interface FindUsersFilter {
+  q?: string;
+  isActive?: boolean;
+  userType?: UserType;
+}
 
 @Injectable()
 export class UsersService {
@@ -16,8 +22,37 @@ export class UsersService {
     private readonly usersRepository: Repository<User>,
   ) {}
 
-  async findAll(): Promise<User[]> {
-    return this.usersRepository.find();
+  async findAll(filter?: FindUsersFilter): Promise<User[]> {
+    const query = filter?.q ? `%${filter.q}%` : undefined;
+
+    if (query) {
+      const qb = this.usersRepository
+        .createQueryBuilder('user')
+        .where(
+          '(user.firstName ILIKE :q OR user.lastName ILIKE :q OR user.email ILIKE :q OR user.phone ILIKE :q OR user.businessName ILIKE :q)',
+          { q: query },
+        );
+
+      if (filter?.userType) {
+        qb.andWhere('user.userType = :userType', { userType: filter.userType });
+      }
+
+      if (filter?.isActive !== undefined) {
+        qb.andWhere('user.isActive = :isActive', { isActive: filter.isActive });
+      }
+
+      return qb.getMany();
+    }
+
+    const where: FindOptionsWhere<User> = {};
+    if (filter?.userType) {
+      where.userType = filter.userType;
+    }
+    if (filter?.isActive !== undefined) {
+      where.isActive = filter.isActive;
+    }
+
+    return this.usersRepository.find({ where });
   }
 
   async findOne(id: string): Promise<User> {

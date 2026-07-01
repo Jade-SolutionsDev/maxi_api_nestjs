@@ -20,6 +20,7 @@ import { UserResponseDto } from './dto/user-response.dto';
 import { Invitation } from './entities/invitation.entity';
 import { InvitationsService } from './invitations.service';
 import { UsersService } from './users.service';
+import { UserType } from './entities/user.entity';
 
 @Controller('users')
 @UseGuards(ClerkUserAuthGuard, AdminGuard)
@@ -30,8 +31,17 @@ export class UsersController {
   ) {}
 
   @Get()
-  async findAll(): Promise<UserResponseDto[]> {
-    const users = await this.usersService.findAll();
+  async findAll(
+    @Query('q') q?: string,
+    @Query('isActive') isActive?: string,
+    @Query('userType') userType?: string,
+  ): Promise<UserResponseDto[]> {
+    const filter = {
+      q,
+      isActive: isActive !== undefined ? isActive === 'true' : undefined,
+      userType: userType as UserType | undefined,
+    };
+    const users = await this.usersService.findAll(filter);
     return users.map(UserResponseDto.fromEntity);
   }
 
