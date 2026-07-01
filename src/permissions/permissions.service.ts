@@ -93,12 +93,18 @@ export class PermissionsService implements OnModuleInit {
       {
         name: 'Proveedor — Dueno',
         description: 'Full control over own business',
-        scopes: ['products:crud', 'orders:crud', 'coverage:crud', 'team:read'],
+        scopes: [
+          'products:crud',
+          'categories:crud',
+          'orders:crud',
+          'coverage:crud',
+          'team:read',
+        ],
       },
       {
         name: 'Proveedor — Gestor',
         description: 'Manage products and orders',
-        scopes: ['products:crud', 'orders:crud'],
+        scopes: ['products:crud', 'categories:crud', 'orders:crud'],
       },
       {
         name: 'Proveedor — Solo Lectura',
@@ -106,6 +112,8 @@ export class PermissionsService implements OnModuleInit {
         scopes: [
           'products:read',
           'products:list',
+          'categories:read',
+          'categories:list',
           'orders:read',
           'orders:list',
         ],

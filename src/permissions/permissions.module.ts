@@ -6,6 +6,7 @@ import { RolePermission } from './entities/role-permission.entity';
 import { Role } from './entities/role.entity';
 import { UserRole } from './entities/user-role.entity';
 import { AdminGuard } from './guards/admin.guard';
+import { PermissionGuard } from './guards/permission.guard';
 import { PermissionsController } from './permissions.controller';
 import { PermissionsService } from './permissions.service';
 
@@ -15,7 +16,7 @@ import { PermissionsService } from './permissions.service';
     forwardRef(() => AuthModule),
   ],
   controllers: [PermissionsController],
-  providers: [PermissionsService, AdminGuard],
-  exports: [PermissionsService, AdminGuard],
+  providers: [PermissionsService, AdminGuard, PermissionGuard],
+  exports: [PermissionsService, AdminGuard, PermissionGuard],
 })
 export class PermissionsModule {}
