@@ -8,11 +8,13 @@ import { FindOptionsWhere, Repository } from 'typeorm';
 import { CreateUserDto } from './dto/create-user.dto';
 import { UpdateUserDto } from './dto/update-user.dto';
 import { User, UserType } from './entities/user.entity';
+import { Invitation, InvitationStatus } from './entities/invitation.entity';
 
 export interface FindUsersFilter {
   q?: string;
   isActive?: boolean;
   userType?: UserType;
+  includeInvitations?: boolean;
 }
 
 @Injectable()
@@ -20,6 +22,8 @@ export class UsersService {
   constructor(
     @InjectRepository(User)
     private readonly usersRepository: Repository<User>,
+    @InjectRepository(Invitation)
+    private readonly invitationRepository: Repository<Invitation>,
   ) {}
 
   async findAll(filter?: FindUsersFilter): Promise<User[]> {
@@ -52,7 +56,38 @@ export class UsersService {
       where.isActive = filter.isActive;
     }
 
-    return this.usersRepository.find({ where });
+    const users = await this.usersRepository.find({ where });
+
+    if (!filter?.includeInvitations) {
+      return users;
+    }
+
+    const invitations = await this.invitationRepository.find({
+      where: { status: InvitationStatus.PENDING },
+    });
+
+    const pendingUsers = invitations.map((invitation) => {
+      const user = new User();
+      user.id = invitation.id;
+      user.clerkId = null;
+      user.userType = invitation.userType;
+      user.email = invitation.email;
+      user.firstName = null;
+      user.lastName = null;
+      user.phone = null;
+      user.avatarUrl = null;
+      user.businessName = null;
+      user.businessDescription = null;
+      user.businessLogoUrl = null;
+      user.clerkOrgId = invitation.organizationId;
+      user.isActive = false;
+      user.createdBy = invitation.invitedById;
+      user.createdAt = invitation.createdAt;
+      user.updatedAt = invitation.updatedAt;
+      return user;
+    });
+
+    return [...users, ...pendingUsers];
   }
 
   async findOne(id: string): Promise<User> {

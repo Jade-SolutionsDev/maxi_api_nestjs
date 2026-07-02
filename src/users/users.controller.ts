@@ -35,14 +35,16 @@ export class UsersController {
     @Query('q') q?: string,
     @Query('isActive') isActive?: string,
     @Query('userType') userType?: string,
+    @Query('includeInvitations') includeInvitations?: string,
   ): Promise<UserResponseDto[]> {
     const filter = {
       q,
       isActive: isActive !== undefined ? isActive === 'true' : undefined,
       userType: userType as UserType | undefined,
+      includeInvitations: includeInvitations === 'true',
     };
     const users = await this.usersService.findAll(filter);
-    return users.map(UserResponseDto.fromEntity);
+    return users.map((user) => UserResponseDto.fromEntity(user, user.clerkId === null));
   }
 
   @Get('lookup')

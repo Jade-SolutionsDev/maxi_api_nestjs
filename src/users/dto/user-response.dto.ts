@@ -14,11 +14,13 @@ export class UserResponseDto {
   businessLogoUrl: string | null;
   clerkOrgId: string | null;
   isActive: boolean;
+  status?: 'active' | 'pending';
+  isPending?: boolean;
   createdBy: string | null;
   createdAt: Date;
   updatedAt: Date;
 
-  static fromEntity(user: User): UserResponseDto {
+  static fromEntity(user: User, isPending = false): UserResponseDto {
     const dto = new UserResponseDto();
     dto.id = user.id;
     dto.clerkId = user.clerkId;
@@ -33,6 +35,8 @@ export class UserResponseDto {
     dto.businessLogoUrl = user.businessLogoUrl;
     dto.clerkOrgId = user.clerkOrgId;
     dto.isActive = user.isActive;
+    dto.status = isPending ? 'pending' : 'active';
+    dto.isPending = isPending;
     dto.createdBy = user.createdBy;
     dto.createdAt = user.createdAt;
     dto.updatedAt = user.updatedAt;
