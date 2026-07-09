@@ -14,8 +14,10 @@ export class UserResponseDto {
   businessLogoUrl: string | null;
   clerkOrgId: string | null;
   isActive: boolean;
-  status?: 'active' | 'pending';
+  status?: 'active' | 'inactive' | 'pending' | 'deleted';
   isPending?: boolean;
+  isDeleted?: boolean;
+  deletedAt: Date | null;
   createdBy: string | null;
   createdAt: Date;
   updatedAt: Date;
@@ -35,8 +37,16 @@ export class UserResponseDto {
     dto.businessLogoUrl = user.businessLogoUrl;
     dto.clerkOrgId = user.clerkOrgId;
     dto.isActive = user.isActive;
-    dto.status = isPending ? 'pending' : 'active';
+    dto.deletedAt = user.deletedAt ?? null;
+    dto.isDeleted = !isPending && !!user.deletedAt;
     dto.isPending = isPending;
+    dto.status = isPending
+      ? 'pending'
+      : dto.isDeleted
+        ? 'deleted'
+        : user.isActive
+          ? 'active'
+          : 'inactive';
     dto.createdBy = user.createdBy;
     dto.createdAt = user.createdAt;
     dto.updatedAt = user.updatedAt;

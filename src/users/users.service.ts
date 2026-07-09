@@ -13,15 +13,17 @@ import {
   PaginationQueryDto,
 } from '../common/dto/pagination.dto';
 import { CreateUserDto } from './dto/create-user.dto';
+import type { UserStatusFilter } from './dto/list-users-query.dto';
 import { UpdateUserDto } from './dto/update-user.dto';
 import { Role, User } from './entities/user.entity';
 import { Invitation, InvitationStatus } from './entities/invitation.entity';
 
 export interface FindUsersFilter {
   q?: string;
-  isActive?: boolean;
   role?: Role;
+  status?: UserStatusFilter;
   includeInvitations?: boolean;
+  includeDeleted?: boolean;
 }
 
 @Injectable()
@@ -39,7 +41,22 @@ export class UsersService {
   ): Promise<PaginatedResponse<User>> {
     const { page, limit, skip } = getPaginationParams(pagination);
 
+    // "Pending" is a facet over invitations only — no real users.
+    if (filter.status === 'pending') {
+      const pending = await this.loadPendingInvitationUsers();
+      return buildPaginatedResponse(
+        pending.slice(skip, skip + limit),
+        pending.length,
+        page,
+        limit,
+      );
+    }
+
     const qb = this.usersRepository.createQueryBuilder('user');
+    // Soft-deleted users are hidden unless the caller opts in.
+    if (filter.includeDeleted) {
+      qb.withDeleted();
+    }
     if (filter.q) {
       qb.andWhere(
         '(user.firstName ILIKE :q OR user.lastName ILIKE :q OR user.email ILIKE :q OR user.phone ILIKE :q OR user.businessName ILIKE :q)',
@@ -49,8 +66,10 @@ export class UsersService {
     if (filter.role) {
       qb.andWhere('user.role = :role', { role: filter.role });
     }
-    if (filter.isActive !== undefined) {
-      qb.andWhere('user.isActive = :isActive', { isActive: filter.isActive });
+    if (filter.status === 'active') {
+      qb.andWhere('user.isActive = true');
+    } else if (filter.status === 'inactive') {
+      qb.andWhere('user.isActive = false');
     }
     qb.orderBy('user.createdAt', 'DESC').skip(skip).take(limit);
 
@@ -59,9 +78,9 @@ export class UsersService {
     let items = users;
     let total = usersTotal;
 
-    if (filter.includeInvitations) {
-      // Pending invitations are surfaced as synthetic (not-yet-registered)
-      // users. They are counted in `total` and pinned to the first page.
+    // Only the unfiltered ("all") view mixes in pending invitations, pinned to
+    // the first page. Status facets are exclusive.
+    if (!filter.status && filter.includeInvitations) {
       const pendingUsers = await this.loadPendingInvitationUsers();
       total += pendingUsers.length;
       if (page === 1) {
@@ -92,6 +111,7 @@ export class UsersService {
       user.businessLogoUrl = null;
       user.clerkOrgId = invitation.organizationId;
       user.isActive = false;
+      user.deletedAt = null;
       user.createdBy = invitation.invitedById;
       user.createdAt = invitation.createdAt;
       user.updatedAt = invitation.updatedAt;

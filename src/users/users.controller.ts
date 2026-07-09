@@ -37,8 +37,9 @@ export class UsersController {
       {
         q: query.q,
         role: query.role,
-        isActive: query.isActive,
+        status: query.status,
         includeInvitations: query.includeInvitations,
+        includeDeleted: query.includeDeleted,
       },
       query,
     );

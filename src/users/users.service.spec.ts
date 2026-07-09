@@ -17,6 +17,7 @@ describe('UsersService', () => {
   let repository: jest.Mocked<Repository<User>>;
   let invitationRepository: jest.Mocked<Repository<Invitation>>;
   let qb: {
+    withDeleted: jest.Mock;
     andWhere: jest.Mock;
     orderBy: jest.Mock;
     skip: jest.Mock;
@@ -46,6 +47,7 @@ describe('UsersService', () => {
 
   beforeEach(async () => {
     qb = {
+      withDeleted: jest.fn().mockReturnThis(),
       andWhere: jest.fn().mockReturnThis(),
       orderBy: jest.fn().mockReturnThis(),
       skip: jest.fn().mockReturnThis(),
@@ -127,6 +129,37 @@ describe('UsersService', () => {
       expect(result.data).toHaveLength(2);
       expect(result.data[0].email).toBe('pending@example.com');
       expect(result.data[0].isActive).toBe(false);
+    });
+
+    it('should NOT append pending invitations when a status facet is set', async () => {
+      qb.getManyAndCount.mockResolvedValue([[user], 1]);
+      const result = await service.findAll({
+        status: 'active',
+        includeInvitations: true,
+      });
+      expect(invitationRepository.find).not.toHaveBeenCalled();
+      expect(result.data).toEqual([user]);
+      expect(qb.andWhere).toHaveBeenCalledWith('user.isActive = true');
+    });
+
+    it('should return only pending invitations for status=pending', async () => {
+      invitationRepository.find.mockResolvedValue([
+        {
+          id: 'inv-1',
+          email: 'p@example.com',
+          role: Role.GROCER,
+        } as Invitation,
+      ]);
+      const result = await service.findAll({ status: 'pending' });
+      expect(qb.getManyAndCount).not.toHaveBeenCalled();
+      expect(result.data).toHaveLength(1);
+      expect(result.meta.total).toBe(1);
+    });
+
+    it('should include soft-deleted users when includeDeleted is set', async () => {
+      qb.getManyAndCount.mockResolvedValue([[user], 1]);
+      await service.findAll({ includeDeleted: true });
+      expect(qb.withDeleted).toHaveBeenCalled();
     });
   });
 
