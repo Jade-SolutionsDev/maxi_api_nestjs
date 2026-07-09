@@ -8,7 +8,7 @@ import {
   Invitation,
   InvitationStatus,
 } from '../src/users/entities/invitation.entity';
-import { User, UserType } from '../src/users/entities/user.entity';
+import { Role, User } from '../src/users/entities/user.entity';
 import { configureApp } from './test-setup';
 
 process.env.CLERK_WEBHOOK_SECRET = '';
@@ -79,7 +79,7 @@ describe('WebhooksController (e2e)', () => {
     await invitationRepository.save(
       invitationRepository.create({
         email: 'admin@example.com',
-        userType: UserType.ADMIN,
+        role: Role.ADMIN,
         status: InvitationStatus.PENDING,
       }),
     );
@@ -108,7 +108,7 @@ describe('WebhooksController (e2e)', () => {
     });
     expect(user).toBeDefined();
     expect(user?.email).toBe('admin@example.com');
-    expect(user?.userType).toBe(UserType.ADMIN);
+    expect(user?.role).toBe(Role.ADMIN);
 
     const invitation = await invitationRepository.findOne({
       where: { email: 'admin@example.com' },

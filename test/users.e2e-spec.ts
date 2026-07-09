@@ -5,7 +5,7 @@ import { sign } from 'jsonwebtoken';
 import request from 'supertest';
 import { Repository } from 'typeorm';
 import { AppModule } from '../src/app.module';
-import { User, UserType } from '../src/users/entities/user.entity';
+import { Role, User } from '../src/users/entities/user.entity';
 import { configureApp } from './test-setup';
 
 process.env.CLERK_SECRET_KEY = '';
@@ -43,7 +43,7 @@ describe('UsersController (e2e)', () => {
         firstName: 'Admin',
         lastName: 'User',
         email: 'admin@example.com',
-        userType: UserType.ADMIN,
+        role: Role.ADMIN,
         isActive: true,
         clerkId: 'clerk_admin_1',
       }),
@@ -60,8 +60,8 @@ describe('UsersController (e2e)', () => {
       repository.create({
         firstName: 'Provider',
         lastName: 'User',
-        email: 'provider@example.com',
-        userType: UserType.PROVIDER,
+        email: 'grocer@example.com',
+        role: Role.GROCER,
         isActive: true,
         clerkId: 'clerk_provider_1',
       }),
@@ -84,7 +84,7 @@ describe('UsersController (e2e)', () => {
         firstName: 'Jane',
         lastName: 'Doe',
         email: 'jane@example.com',
-        userType: 'admin',
+        role: 'ADMIN',
       })
       .expect(201);
 
@@ -97,7 +97,9 @@ describe('UsersController (e2e)', () => {
       .get('/api/users')
       .set('Authorization', `Bearer ${token}`)
       .expect(200);
-    expect(listResponse.body.data).toHaveLength(2);
+    // Paginated envelope: { data: { data: [...], meta } } after the { data } wrap.
+    expect(listResponse.body.data.data).toHaveLength(2);
+    expect(listResponse.body.data.meta.total).toBe(2);
 
     const getResponse = await request(app.getHttpServer())
       .get(`/api/users/${userId}`)

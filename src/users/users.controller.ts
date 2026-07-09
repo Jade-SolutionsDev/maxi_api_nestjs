@@ -7,23 +7,22 @@ import {
   Patch,
   Post,
   Query,
-  Req,
-  UseGuards,
 } from '@nestjs/common';
-import type { AuthenticatedUserRequest } from '../auth/types/authenticated-request';
-import { ClerkUserAuthGuard } from '../auth/guards/clerk-user-auth.guard';
-import { AdminGuard } from '../permissions/guards/admin.guard';
+import { CurrentUser } from '../common/decorators/current-user.decorator';
+import { Roles } from '../common/decorators/roles.decorator';
+import { PaginatedResponse } from '../common/dto/pagination.dto';
 import { CreateUserDto } from './dto/create-user.dto';
+import { InvitationResponseDto } from './dto/invitation-response.dto';
 import { InviteUserDto } from './dto/invite-user.dto';
+import { ListUsersQueryDto } from './dto/list-users-query.dto';
 import { UpdateUserDto } from './dto/update-user.dto';
 import { UserResponseDto } from './dto/user-response.dto';
-import { Invitation } from './entities/invitation.entity';
+import { Role, User } from './entities/user.entity';
 import { InvitationsService } from './invitations.service';
 import { UsersService } from './users.service';
-import { UserType } from './entities/user.entity';
 
 @Controller('users')
-@UseGuards(ClerkUserAuthGuard, AdminGuard)
+@Roles(Role.SUPER_ADMIN, Role.ADMIN)
 export class UsersController {
   constructor(
     private readonly usersService: UsersService,
@@ -32,19 +31,23 @@ export class UsersController {
 
   @Get()
   async findAll(
-    @Query('q') q?: string,
-    @Query('isActive') isActive?: string,
-    @Query('userType') userType?: string,
-    @Query('includeInvitations') includeInvitations?: string,
-  ): Promise<UserResponseDto[]> {
-    const filter = {
-      q,
-      isActive: isActive !== undefined ? isActive === 'true' : undefined,
-      userType: userType as UserType | undefined,
-      includeInvitations: includeInvitations === 'true',
+    @Query() query: ListUsersQueryDto,
+  ): Promise<PaginatedResponse<UserResponseDto>> {
+    const result = await this.usersService.findAll(
+      {
+        q: query.q,
+        role: query.role,
+        isActive: query.isActive,
+        includeInvitations: query.includeInvitations,
+      },
+      query,
+    );
+    return {
+      data: result.data.map((user) =>
+        UserResponseDto.fromEntity(user, user.clerkId === null),
+      ),
+      meta: result.meta,
     };
-    const users = await this.usersService.findAll(filter);
-    return users.map((user) => UserResponseDto.fromEntity(user, user.clerkId === null));
   }
 
   @Get('lookup')
@@ -71,22 +74,53 @@ export class UsersController {
   async update(
     @Param('id') id: string,
     @Body() updateUserDto: UpdateUserDto,
+    @CurrentUser() actor: User,
   ): Promise<UserResponseDto> {
     return UserResponseDto.fromEntity(
-      await this.usersService.update(id, updateUserDto),
+      await this.usersService.update(id, updateUserDto, actor),
     );
   }
 
   @Delete(':id')
-  async remove(@Param('id') id: string): Promise<void> {
-    await this.usersService.remove(id);
+  async remove(
+    @Param('id') id: string,
+    @CurrentUser() actor: User,
+  ): Promise<void> {
+    await this.usersService.remove(id, actor);
+  }
+
+  @Post(':id/restore')
+  @Roles(Role.SUPER_ADMIN)
+  async restore(@Param('id') id: string): Promise<UserResponseDto> {
+    return UserResponseDto.fromEntity(await this.usersService.restore(id));
   }
 
   @Post('invite')
   async invite(
     @Body() dto: InviteUserDto,
-    @Req() request: AuthenticatedUserRequest,
-  ): Promise<Invitation> {
-    return this.invitationsService.createAndSendInvitation(dto, request.user);
+    @CurrentUser() actor: User,
+  ): Promise<InvitationResponseDto> {
+    return InvitationResponseDto.fromEntity(
+      await this.invitationsService.createAndSendInvitation(dto, actor),
+    );
+  }
+
+  @Post('invitations/:id/revoke')
+  async revokeInvitation(
+    @Param('id') id: string,
+  ): Promise<InvitationResponseDto> {
+    return InvitationResponseDto.fromEntity(
+      await this.invitationsService.revoke(id),
+    );
+  }
+
+  @Post('invitations/:id/resend')
+  async resendInvitation(
+    @Param('id') id: string,
+    @CurrentUser() actor: User,
+  ): Promise<InvitationResponseDto> {
+    return InvitationResponseDto.fromEntity(
+      await this.invitationsService.resend(id, actor),
+    );
   }
 }
