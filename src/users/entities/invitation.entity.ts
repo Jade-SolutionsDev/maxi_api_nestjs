@@ -45,6 +45,12 @@ export class Invitation {
   })
   organizationId: string | null;
 
+  @Column({ type: 'varchar', length: 100, nullable: true })
+  firstName: string | null;
+
+  @Column({ type: 'varchar', length: 100, nullable: true })
+  lastName: string | null;
+
   @Column({
     name: 'clerk_invitation_id',
     type: 'varchar',

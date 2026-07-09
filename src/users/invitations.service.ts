@@ -58,6 +58,8 @@ export class InvitationsService {
     const invitation = this.invitationRepository.create({
       email: normalizedEmail,
       userType: dto.userType,
+      firstName: dto.firstName ?? null,
+      lastName: dto.lastName ?? null,
       invitedById: inviter.id,
       organizationId: dto.organizationId ?? null,
       clerkInvitationId: clerkInvitation?.id ?? null,
@@ -79,7 +81,21 @@ export class InvitationsService {
     }
 
     const clerkClient = createClerkClient({ secretKey });
-    const publicMetadata = { userType: dto.userType };
+    const publicMetadata: Record<string, unknown> = { userType: dto.userType };
+
+    // Prefill firstName/lastName on the invitation redirect so the acceptance
+    // form can show them to the user while still allowing edits. We keep them
+    // in the URL rather than publicMetadata because Clerk doesn't expose custom
+    // invitation metadata on the ticket URL, but the redirect URL is under our
+    // control and these fields are not sensitive.
+    const baseRedirectUrl = this.configService.get<string>(
+      'clerk.invitationRedirectUrl',
+    );
+    const redirectUrl = this.buildInvitationRedirectUrl(
+      baseRedirectUrl,
+      dto.firstName,
+      dto.lastName,
+    );
 
     if (dto.organizationId) {
       const role = dto.userType === UserType.ADMIN ? 'org:admin' : 'org:member';
@@ -102,9 +118,7 @@ export class InvitationsService {
       const invitation = await clerkClient.invitations.createInvitation({
         emailAddress: dto.email,
         publicMetadata,
-        redirectUrl: this.configService.get<string>(
-          'clerk.invitationRedirectUrl',
-        ),
+        redirectUrl,
         notify: true,
       });
       this.logger.log(
@@ -115,6 +129,24 @@ export class InvitationsService {
     } catch (e) {
       this.logger.error(`Failed to send invitation to ${dto.email}: ${e}`);
     }
+  }
+
+  private buildInvitationRedirectUrl(
+    baseUrl: string | undefined,
+    firstName?: string,
+    lastName?: string,
+  ): string | undefined {
+    if (!baseUrl) {
+      return undefined;
+    }
+    const url = new URL(baseUrl);
+    if (firstName?.trim()) {
+      url.searchParams.set('firstName', firstName.trim());
+    }
+    if (lastName?.trim()) {
+      url.searchParams.set('lastName', lastName.trim());
+    }
+    return url.toString();
   }
 
   async findPendingByEmail(email: string): Promise<Invitation | null> {
