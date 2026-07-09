@@ -1,10 +1,12 @@
 import { Controller, Get } from '@nestjs/common';
+import { Public } from '../common/decorators/public.decorator';
 
 export interface HealthStatus {
   status: string;
   timestamp: string;
 }
 
+@Public()
 @Controller('health')
 export class HealthController {
   @Get()
