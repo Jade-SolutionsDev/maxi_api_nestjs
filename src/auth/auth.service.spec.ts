@@ -1,19 +1,22 @@
 import { UnauthorizedException } from '@nestjs/common';
-import { ConfigService } from '@nestjs/config';
 import { Test, TestingModule } from '@nestjs/testing';
-import { sign } from 'jsonwebtoken';
-import { User, UserType } from '../users/entities/user.entity';
+import { Role, User } from '../users/entities/user.entity';
 import { UsersService } from '../users/users.service';
 import { AuthService } from './auth.service';
+import {
+  AUTH_PROVIDER,
+  AuthProvider,
+} from './interfaces/auth-provider.interface';
 
 describe('AuthService', () => {
   let service: AuthService;
   let usersService: jest.Mocked<UsersService>;
+  let authProvider: jest.Mocked<AuthProvider>;
 
   const user: User = {
     id: '550e8400-e29b-41d4-a716-446655440000',
     clerkId: 'clerk_user_1',
-    userType: UserType.ADMIN,
+    role: Role.ADMIN,
     email: 'jane@example.com',
     firstName: 'Jane',
     lastName: 'Doe',
@@ -41,13 +44,9 @@ describe('AuthService', () => {
           },
         },
         {
-          provide: ConfigService,
+          provide: AUTH_PROVIDER,
           useValue: {
-            get: jest.fn((key: string) => {
-              if (key === 'clerk.secretKey') return undefined;
-              if (key === 'clerk.jwtSecret') return 'dev-secret';
-              return undefined;
-            }),
+            verifyToken: jest.fn(),
           },
         },
       ],
@@ -55,46 +54,50 @@ describe('AuthService', () => {
 
     service = module.get<AuthService>(AuthService);
     usersService = module.get(UsersService);
+    authProvider = module.get(AUTH_PROVIDER);
   });
 
-  it('should authenticate a user with a valid dev token', async () => {
+  it('should authenticate a user with a valid token', async () => {
+    authProvider.verifyToken.mockResolvedValue({ sub: user.clerkId! });
     usersService.findByClerkId.mockResolvedValue(user);
 
-    const token = sign({ sub: user.clerkId }, 'dev-secret');
-    const result = await service.authenticateByBearerToken(token);
+    const result = await service.authenticateByBearerToken('good-token');
 
     expect(result.id).toBe(user.id);
+    expect(authProvider.verifyToken).toHaveBeenCalledWith('good-token');
     expect(usersService.findByClerkId).toHaveBeenCalledWith(user.clerkId);
   });
 
   it('should reject an invalid token', async () => {
+    authProvider.verifyToken.mockRejectedValue(new Error('bad token'));
+
     await expect(
       service.authenticateByBearerToken('invalid-token'),
     ).rejects.toBeInstanceOf(UnauthorizedException);
   });
 
   it('should reject when user is not found', async () => {
+    authProvider.verifyToken.mockResolvedValue({ sub: 'unknown' });
     usersService.findByClerkId.mockResolvedValue(null);
 
-    const token = sign({ sub: 'unknown' }, 'dev-secret');
     await expect(
-      service.authenticateByBearerToken(token),
+      service.authenticateByBearerToken('good-token'),
     ).rejects.toBeInstanceOf(UnauthorizedException);
   });
 
   it('should reject when user is inactive', async () => {
+    authProvider.verifyToken.mockResolvedValue({ sub: user.clerkId! });
     usersService.findByClerkId.mockResolvedValue({ ...user, isActive: false });
 
-    const token = sign({ sub: user.clerkId }, 'dev-secret');
     await expect(
-      service.authenticateByBearerToken(token),
+      service.authenticateByBearerToken('good-token'),
     ).rejects.toBeInstanceOf(UnauthorizedException);
   });
 
   it('should return current user via me', async () => {
     usersService.findByClerkId.mockResolvedValue(user);
 
-    const result = await service.me(user.clerkId);
+    const result = await service.me(user.clerkId!);
 
     expect(result.id).toBe(user.id);
   });
