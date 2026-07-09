@@ -3,7 +3,7 @@ import { User } from '../entities/user.entity';
 export class UserResponseDto {
   id: string;
   clerkId: string | null;
-  userType: string;
+  role: string;
   email: string | null;
   firstName: string | null;
   lastName: string | null;
@@ -14,8 +14,10 @@ export class UserResponseDto {
   businessLogoUrl: string | null;
   clerkOrgId: string | null;
   isActive: boolean;
-  status?: 'active' | 'pending';
+  status?: 'active' | 'inactive' | 'pending' | 'deleted';
   isPending?: boolean;
+  isDeleted?: boolean;
+  deletedAt: Date | null;
   createdBy: string | null;
   createdAt: Date;
   updatedAt: Date;
@@ -24,7 +26,7 @@ export class UserResponseDto {
     const dto = new UserResponseDto();
     dto.id = user.id;
     dto.clerkId = user.clerkId;
-    dto.userType = user.userType;
+    dto.role = user.role;
     dto.email = user.email;
     dto.firstName = user.firstName;
     dto.lastName = user.lastName;
@@ -35,8 +37,16 @@ export class UserResponseDto {
     dto.businessLogoUrl = user.businessLogoUrl;
     dto.clerkOrgId = user.clerkOrgId;
     dto.isActive = user.isActive;
-    dto.status = isPending ? 'pending' : 'active';
+    dto.deletedAt = user.deletedAt ?? null;
+    dto.isDeleted = !isPending && !!user.deletedAt;
     dto.isPending = isPending;
+    dto.status = isPending
+      ? 'pending'
+      : dto.isDeleted
+        ? 'deleted'
+        : user.isActive
+          ? 'active'
+          : 'inactive';
     dto.createdBy = user.createdBy;
     dto.createdAt = user.createdAt;
     dto.updatedAt = user.updatedAt;

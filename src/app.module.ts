@@ -1,5 +1,6 @@
 import { Module } from '@nestjs/common';
 import { ConfigModule, ConfigService } from '@nestjs/config';
+import { APP_GUARD } from '@nestjs/core';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
@@ -7,8 +8,9 @@ import configuration, { databaseConfig } from './config/configuration';
 import { AuthModule } from './auth/auth.module';
 import { CategoriesModule } from './categories/categories.module';
 import { ClientsModule } from './clients/clients.module';
+import { AuthGuard } from './common/guards/auth.guard';
+import { RolesGuard } from './common/guards/roles.guard';
 import { HealthModule } from './health/health.module';
-import { PermissionsModule } from './permissions/permissions.module';
 import { ProductsModule } from './products/products.module';
 import { UsersModule } from './users/users.module';
 import { WebhooksModule } from './webhooks/webhooks.module';
@@ -35,12 +37,16 @@ import { WebhooksModule } from './webhooks/webhooks.module';
     UsersModule,
     ClientsModule,
     AuthModule,
-    PermissionsModule,
     CategoriesModule,
     ProductsModule,
     WebhooksModule,
   ],
   controllers: [AppController],
-  providers: [AppService],
+  providers: [
+    AppService,
+    // Order matters: AuthGuard populates request.user before RolesGuard reads it.
+    { provide: APP_GUARD, useClass: AuthGuard },
+    { provide: APP_GUARD, useClass: RolesGuard },
+  ],
 })
 export class AppModule {}

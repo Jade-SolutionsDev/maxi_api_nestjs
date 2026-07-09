@@ -1,5 +1,5 @@
 import { BadRequestException } from '@nestjs/common';
-import { User, UserType } from '../../users/entities/user.entity';
+import { Role, User } from '../../users/entities/user.entity';
 
 const SLUG_SEPARATOR = /[^\da-z]+/gi;
 
@@ -20,7 +20,7 @@ export function resolveProviderId(
   user: User,
   requestedProviderId?: string,
 ): string {
-  if (user.userType === UserType.PROVIDER) {
+  if (user.role === Role.GROCER) {
     return user.id;
   }
 
@@ -34,5 +34,6 @@ export function resolveProviderId(
 }
 
 export function buildOwnerScope(user: User): Record<string, string> {
-  return user.userType === UserType.ADMIN ? {} : { providerId: user.id };
+  const isAdmin = user.role === Role.ADMIN || user.role === Role.SUPER_ADMIN;
+  return isAdmin ? {} : { providerId: user.id };
 }

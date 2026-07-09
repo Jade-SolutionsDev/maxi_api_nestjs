@@ -16,11 +16,21 @@ export interface CorsConfig {
   credentials: boolean;
 }
 
+export interface AuthConfig {
+  mockEnabled: boolean;
+}
+
+export interface NotificationsConfig {
+  enabled: boolean;
+}
+
 export interface AppConfig {
   port: number;
   database: DatabaseConfig;
   clerk: ClerkConfig;
   cors: CorsConfig;
+  auth: AuthConfig;
+  notifications: NotificationsConfig;
   nodeEnv: string;
 }
 
@@ -45,6 +55,16 @@ export const clerkConfig = (): ClerkConfig => ({
   invitationRedirectUrl: process.env.CLERK_INVITATION_REDIRECT_URL,
 });
 
+export const authConfig = (): AuthConfig => ({
+  mockEnabled: process.env.MOCK_AUTH_ENABLED === 'true',
+});
+
+export const notificationsConfig = (): NotificationsConfig => ({
+  // Notifications (Clerk invitation emails) are on by default; disable to
+  // silence outbound notifications in local/e2e runs.
+  enabled: process.env.NOTIFICATIONS_ENABLED !== 'false',
+});
+
 export const corsConfig = (): CorsConfig => {
   const raw = process.env.CORS_ORIGINS ?? '';
   const defaultOrigins =
@@ -66,5 +86,7 @@ export default (): AppConfig => ({
   database: databaseConfig(),
   clerk: clerkConfig(),
   cors: corsConfig(),
+  auth: authConfig(),
+  notifications: notificationsConfig(),
   nodeEnv: process.env.NODE_ENV ?? 'development',
 });

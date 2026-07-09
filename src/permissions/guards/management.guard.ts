@@ -5,7 +5,7 @@ import {
   Injectable,
 } from '@nestjs/common';
 import { AuthenticatedUserRequest } from '../../auth/types/authenticated-request';
-import { UserType } from '../../users/entities/user.entity';
+import { Role } from '../../users/entities/user.entity';
 
 @Injectable()
 export class ManagementGuard implements CanActivate {
@@ -14,8 +14,8 @@ export class ManagementGuard implements CanActivate {
       .switchToHttp()
       .getRequest<AuthenticatedUserRequest>();
 
-    const allowed = [UserType.ADMIN, UserType.PROVIDER, UserType.STAFF];
-    if (!request.user || !allowed.includes(request.user.userType)) {
+    const allowed = [Role.SUPER_ADMIN, Role.ADMIN, Role.GROCER, Role.KARDIST];
+    if (!request.user || !allowed.includes(request.user.role)) {
       throw new ForbiddenException('Management access required');
     }
 

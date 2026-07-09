@@ -1,29 +1,29 @@
-import { Injectable, Logger, UnauthorizedException } from '@nestjs/common';
-import { ConfigService } from '@nestjs/config';
-import { verifyToken } from '@clerk/backend';
-import { verify } from 'jsonwebtoken';
+import { Inject, Injectable, UnauthorizedException } from '@nestjs/common';
 import { UserResponseDto } from '../users/dto/user-response.dto';
 import { User } from '../users/entities/user.entity';
 import { UsersService } from '../users/users.service';
+import {
+  AUTH_PROVIDER,
+  AuthProvider,
+} from './interfaces/auth-provider.interface';
 
 @Injectable()
 export class AuthService {
   constructor(
     private readonly usersService: UsersService,
-    private readonly configService: ConfigService,
+    @Inject(AUTH_PROVIDER) private readonly authProvider: AuthProvider,
   ) {}
 
   async authenticateByBearerToken(token: string): Promise<User> {
     let clerkId: string;
 
     try {
-      clerkId = await this.verifyClerkToken(token);
+      clerkId = (await this.authProvider.verifyToken(token)).sub;
     } catch {
       throw new UnauthorizedException('Invalid access token');
     }
 
     const user = await this.usersService.findByClerkId(clerkId);
-    Logger.log(`Authenticated user with Clerk ID: ${clerkId}`);
     if (!user) {
       throw new UnauthorizedException('User not registered in backoffice');
     }
@@ -40,58 +40,5 @@ export class AuthService {
       throw new UnauthorizedException('User not found');
     }
     return UserResponseDto.fromEntity(user);
-  }
-
-  private async verifyClerkToken(token: string): Promise<string> {
-    const secretKey = this.configService.get<string>('clerk.secretKey');
-    const backofficeSecretKey = this.configService.get<string>(
-      'clerk.backofficeSecretKey',
-    );
-
-    // Providers/staff live in the storefront Clerk instance; admins live in a
-    // separate backoffice Clerk instance. Try both before falling back.
-    try {
-      if (secretKey) {
-        const payload = await verifyToken(token, { secretKey });
-        if (payload.sub) {
-          Logger.log(
-            `Successfully verified token against storefront Clerk instance for user ${payload.sub}`,
-          );
-          return payload.sub;
-        }
-      }
-    } catch (error) {
-      Logger.warn(
-        `Failed to verify token against storefront Clerk instance: ${error}`,
-      );
-    }
-
-    try {
-      if (backofficeSecretKey) {
-        const payload = await verifyToken(token, {
-          secretKey: backofficeSecretKey,
-        });
-        if (payload.sub) {
-          Logger.log(
-            `Successfully verified token against backoffice Clerk instance for user ${payload.sub}`,
-          );
-          return payload.sub;
-        }
-      }
-    } catch (error) {
-      Logger.warn(
-        `Failed to verify token against backoffice Clerk instance: ${error}`,
-      );
-    }
-
-    if (secretKey || backofficeSecretKey) {
-      throw new Error('Unable to verify Clerk token against known instances');
-    }
-
-    // ponytail: dev fallback when no Clerk secrets are configured
-    const devSecret =
-      this.configService.get<string>('clerk.jwtSecret') ?? 'dev-secret';
-    const payload = verify(token, devSecret) as { sub: string };
-    return payload.sub;
   }
 }

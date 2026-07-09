@@ -8,10 +8,11 @@ import {
   UpdateDateColumn,
 } from 'typeorm';
 
-export enum UserType {
-  ADMIN = 'admin',
-  PROVIDER = 'provider',
-  STAFF = 'staff',
+export enum Role {
+  SUPER_ADMIN = 'SUPER_ADMIN',
+  ADMIN = 'ADMIN',
+  GROCER = 'GROCER',
+  KARDIST = 'KARDIST',
 }
 
 @Entity('users')
@@ -32,11 +33,11 @@ export class User {
   clerkId: string | null;
 
   @Column({
-    name: 'user_type',
+    name: 'role',
     type: 'enum',
-    enum: UserType,
+    enum: Role,
   })
-  userType: UserType;
+  role: Role;
 
   @Column({ type: 'varchar', length: 255, nullable: true, unique: true })
   email: string | null;

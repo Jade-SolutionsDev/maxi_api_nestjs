@@ -1,7 +1,7 @@
 import { forwardRef, Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { AuthModule } from '../auth/auth.module';
-import { PermissionsModule } from '../permissions/permissions.module';
+import { NotificationsModule } from '../notifications/notifications.module';
 import { Invitation } from './entities/invitation.entity';
 import { User } from './entities/user.entity';
 import { InvitationsService } from './invitations.service';
@@ -12,7 +12,7 @@ import { UsersService } from './users.service';
   imports: [
     TypeOrmModule.forFeature([User, Invitation]),
     forwardRef(() => AuthModule),
-    PermissionsModule,
+    NotificationsModule,
   ],
   controllers: [UsersController],
   providers: [UsersService, InvitationsService],

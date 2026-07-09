@@ -7,7 +7,7 @@ import {
   Invitation,
   InvitationStatus,
 } from '../users/entities/invitation.entity';
-import { User, UserType } from '../users/entities/user.entity';
+import { Role, User } from '../users/entities/user.entity';
 import { InvitationsService } from '../users/invitations.service';
 import { UsersService } from '../users/users.service';
 import { WebhooksService } from './webhooks.service';
@@ -151,7 +151,7 @@ describe('WebhooksService', () => {
     const invitation: Invitation = {
       id: 'invite-id',
       email: 'admin@example.com',
-      userType: UserType.ADMIN,
+      role: Role.ADMIN,
       invitedById: null,
       invitedBy: null,
       organizationId: null,
@@ -194,7 +194,7 @@ describe('WebhooksService', () => {
           email: 'admin@example.com',
           firstName: 'Admin',
           lastName: 'User',
-          userType: UserType.ADMIN,
+          role: Role.ADMIN,
         },
       );
       expect(invitationsService.markAccepted).toHaveBeenCalledWith(invitation);
@@ -248,7 +248,7 @@ describe('WebhooksService', () => {
           email: 'updated@example.com',
           firstName: 'Updated',
           lastName: 'Name',
-          userType: undefined,
+          role: undefined,
         },
       );
     });

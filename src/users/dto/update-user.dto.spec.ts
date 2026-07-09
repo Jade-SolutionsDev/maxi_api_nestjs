@@ -24,9 +24,9 @@ describe('UpdateUserDto', () => {
     expect(errors.some((error) => error.property === 'email')).toBe(true);
   });
 
-  it('should reject unknown userType when provided', async () => {
-    const dto = plainToInstance(UpdateUserDto, { userType: 'customer' });
+  it('should reject unknown role when provided', async () => {
+    const dto = plainToInstance(UpdateUserDto, { role: 'customer' });
     const errors = await validate(dto);
-    expect(errors.some((error) => error.property === 'userType')).toBe(true);
+    expect(errors.some((error) => error.property === 'role')).toBe(true);
   });
 });

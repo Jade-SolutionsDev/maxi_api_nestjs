@@ -6,7 +6,7 @@ import request from 'supertest';
 import { Repository } from 'typeorm';
 import { AppModule } from '../src/app.module';
 import { configureApp } from './test-setup';
-import { User, UserType } from '../src/users/entities/user.entity';
+import { Role, User } from '../src/users/entities/user.entity';
 
 process.env.CLERK_SECRET_KEY = '';
 process.env.CLERK_BACKOFFICE_SECRET_KEY = '';
@@ -44,7 +44,7 @@ describe('AuthController (e2e)', () => {
         firstName: 'Jane',
         lastName: 'Doe',
         email: 'jane@example.com',
-        userType: UserType.ADMIN,
+        role: Role.ADMIN,
         isActive: true,
         clerkId,
       }),

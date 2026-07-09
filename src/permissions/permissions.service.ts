@@ -6,7 +6,7 @@ import {
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { In, Repository } from 'typeorm';
-import { User, UserType } from '../users/entities/user.entity';
+import { User } from '../users/entities/user.entity';
 import { UpdateRoleDto } from './dto/update-role.dto';
 import { Permission } from './entities/permission.entity';
 import { Role } from './entities/role.entity';
@@ -185,7 +185,7 @@ export class PermissionsService implements OnModuleInit {
     module: string,
     action: string,
   ): Promise<boolean> {
-    if (userType === 'admin') return true;
+    if (userType === 'ADMIN' || userType === 'SUPER_ADMIN') return true;
 
     const perm = await this.permissionRepository.findOne({
       where: { module, action, isActive: true },
@@ -237,9 +237,9 @@ export class PermissionsService implements OnModuleInit {
     const permissions: Record<string, string[]> = {};
 
     const user = await this.userRepository.findOne({ where: { id: userId } });
-    const userType = user?.userType ?? null;
+    const userType: string | null = user?.role ?? null;
 
-    if (userType === UserType.ADMIN) {
+    if (userType === 'ADMIN' || userType === 'SUPER_ADMIN') {
       for (const module of SYSTEM_MODULES) {
         permissions[module] = [...ACTIONS];
       }

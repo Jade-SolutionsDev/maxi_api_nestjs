@@ -5,7 +5,7 @@ import { CreateUserDto } from './create-user.dto';
 describe('CreateUserDto', () => {
   const validInput = {
     clerkId: 'clerk_user_1',
-    userType: 'admin',
+    role: 'ADMIN',
     email: 'jane@example.com',
     firstName: 'Jane',
     lastName: 'Doe',
@@ -36,12 +36,12 @@ describe('CreateUserDto', () => {
     expect(errors.some((error) => error.property === 'email')).toBe(true);
   });
 
-  it('should reject unknown userType', async () => {
+  it('should reject unknown role', async () => {
     const dto = plainToInstance(CreateUserDto, {
       ...validInput,
-      userType: 'customer',
+      role: 'customer',
     });
     const errors = await validate(dto);
-    expect(errors.some((error) => error.property === 'userType')).toBe(true);
+    expect(errors.some((error) => error.property === 'role')).toBe(true);
   });
 });

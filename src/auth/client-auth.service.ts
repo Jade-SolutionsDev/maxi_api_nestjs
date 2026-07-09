@@ -1,22 +1,23 @@
-import { Injectable, UnauthorizedException } from '@nestjs/common';
-import { ConfigService } from '@nestjs/config';
-import { verifyToken } from '@clerk/backend';
-import { verify } from 'jsonwebtoken';
+import { Inject, Injectable, UnauthorizedException } from '@nestjs/common';
 import { Client } from '../clients/entities/client.entity';
 import { ClientsService } from '../clients/clients.service';
+import {
+  AUTH_PROVIDER,
+  AuthProvider,
+} from './interfaces/auth-provider.interface';
 
 @Injectable()
 export class ClientAuthService {
   constructor(
     private readonly clientsService: ClientsService,
-    private readonly configService: ConfigService,
+    @Inject(AUTH_PROVIDER) private readonly authProvider: AuthProvider,
   ) {}
 
   async authenticateByBearerToken(token: string): Promise<Client> {
     let clerkId: string;
 
     try {
-      clerkId = await this.verifyClerkToken(token);
+      clerkId = (await this.authProvider.verifyToken(token)).sub;
     } catch {
       throw new UnauthorizedException('Invalid access token');
     }
@@ -30,23 +31,5 @@ export class ClientAuthService {
     }
 
     return client;
-  }
-
-  private async verifyClerkToken(token: string): Promise<string> {
-    const secretKey = this.configService.get<string>('clerk.secretKey');
-
-    if (secretKey) {
-      const payload = await verifyToken(token, { secretKey });
-      if (!payload.sub) {
-        throw new Error('Missing subject claim');
-      }
-      return payload.sub;
-    }
-
-    // ponytail: dev fallback when Clerk secret is not configured
-    const devSecret =
-      this.configService.get<string>('clerk.jwtSecret') ?? 'dev-secret';
-    const payload = verify(token, devSecret) as { sub: string };
-    return payload.sub;
   }
 }

@@ -1,5 +1,6 @@
 import {
   ConflictException,
+  Inject,
   Injectable,
   Logger,
   NotFoundException,
@@ -8,9 +9,13 @@ import { ConfigService } from '@nestjs/config';
 import { InjectRepository } from '@nestjs/typeorm';
 import { createClerkClient } from '@clerk/backend';
 import { Repository } from 'typeorm';
+import {
+  NOTIFICATION_PROVIDER,
+  NotificationProvider,
+} from '../notifications/interfaces/notification-provider.interface';
 import { InviteUserDto } from './dto/invite-user.dto';
 import { Invitation, InvitationStatus } from './entities/invitation.entity';
-import { User, UserType } from './entities/user.entity';
+import { Role, User } from './entities/user.entity';
 
 @Injectable()
 export class InvitationsService {
@@ -22,6 +27,8 @@ export class InvitationsService {
     @InjectRepository(User)
     private readonly userRepository: Repository<User>,
     private readonly configService: ConfigService,
+    @Inject(NOTIFICATION_PROVIDER)
+    private readonly notificationProvider: NotificationProvider,
   ) {}
 
   async createAndSendInvitation(
@@ -57,7 +64,7 @@ export class InvitationsService {
 
     const invitation = this.invitationRepository.create({
       email: normalizedEmail,
-      userType: dto.userType,
+      role: dto.role,
       firstName: dto.firstName ?? null,
       lastName: dto.lastName ?? null,
       invitedById: inviter.id,
@@ -81,7 +88,7 @@ export class InvitationsService {
     }
 
     const clerkClient = createClerkClient({ secretKey });
-    const publicMetadata: Record<string, unknown> = { userType: dto.userType };
+    const publicMetadata: Record<string, unknown> = { role: dto.role };
 
     // Prefill firstName/lastName on the invitation redirect so the acceptance
     // form can show them to the user while still allowing edits. We keep them
@@ -98,7 +105,8 @@ export class InvitationsService {
     );
 
     if (dto.organizationId) {
-      const role = dto.userType === UserType.ADMIN ? 'org:admin' : 'org:member';
+      const isAdmin = dto.role === Role.ADMIN || dto.role === Role.SUPER_ADMIN;
+      const role = isAdmin ? 'org:admin' : 'org:member';
       this.logger.log(
         `Sending organization invitation to ${dto.email} for org ${dto.organizationId} with role ${role}`,
       );
@@ -113,13 +121,24 @@ export class InvitationsService {
       return { id: invitation.id };
     }
 
+    // The notification provider owns delivery policy; for the default Clerk
+    // provider this delegates the email to Clerk's own `notify`, and the no-op
+    // provider suppresses it (tests/local).
+    const notification = await this.notificationProvider.sendInvitation({
+      email: dto.email,
+      role: dto.role,
+      firstName: dto.firstName,
+      lastName: dto.lastName,
+      invitationUrl: redirectUrl,
+    });
+
     this.logger.log(`Sending app invitation to ${dto.email}`);
     try {
       const invitation = await clerkClient.invitations.createInvitation({
         emailAddress: dto.email,
         publicMetadata,
         redirectUrl,
-        notify: true,
+        notify: notification.sent,
       });
       this.logger.log(
         `Invitation sent to ${dto.email} with ID ${invitation.id}`,
@@ -174,5 +193,87 @@ export class InvitationsService {
       throw new NotFoundException(`Invitation ${id} not found.`);
     }
     return invitation;
+  }
+
+  /**
+   * Revoke a pending invitation. Idempotent for already-revoked invitations;
+   * rejects revoking an accepted one. Best-effort revoke on Clerk's side.
+   */
+  async revoke(id: string): Promise<Invitation> {
+    const invitation = await this.findOne(id);
+
+    if (invitation.status === InvitationStatus.REVOKED) {
+      return invitation;
+    }
+    if (invitation.status === InvitationStatus.ACCEPTED) {
+      throw new ConflictException('Cannot revoke an accepted invitation.');
+    }
+
+    if (invitation.clerkInvitationId) {
+      await this.revokeClerkInvitation(invitation.clerkInvitationId);
+    }
+
+    invitation.status = InvitationStatus.REVOKED;
+    return this.invitationRepository.save(invitation);
+  }
+
+  /**
+   * Re-issue a pending or revoked invitation: revoke the stale Clerk invitation
+   * (if any), send a fresh one, and reset the local record to PENDING.
+   */
+  async resend(id: string, inviter: User): Promise<Invitation> {
+    const invitation = await this.findOne(id);
+
+    if (invitation.status === InvitationStatus.ACCEPTED) {
+      throw new ConflictException('Cannot resend an accepted invitation.');
+    }
+
+    if (
+      invitation.clerkInvitationId &&
+      invitation.status === InvitationStatus.PENDING
+    ) {
+      await this.revokeClerkInvitation(invitation.clerkInvitationId);
+    }
+
+    const clerkInvitation = await this.sendClerkInvitation(
+      {
+        email: invitation.email,
+        role: invitation.role,
+        firstName: invitation.firstName ?? undefined,
+        lastName: invitation.lastName ?? undefined,
+        organizationId: invitation.organizationId ?? undefined,
+      },
+      inviter,
+    );
+
+    if (!clerkInvitation) {
+      throw new Error(`Failed to resend invitation to ${invitation.email}.`);
+    }
+
+    invitation.clerkInvitationId = clerkInvitation.id;
+    invitation.status = InvitationStatus.PENDING;
+    return this.invitationRepository.save(invitation);
+  }
+
+  private async revokeClerkInvitation(
+    clerkInvitationId: string,
+  ): Promise<void> {
+    const secretKey = this.configService.get<string>(
+      'clerk.backofficeSecretKey',
+    );
+    if (!secretKey) {
+      this.logger.warn(
+        `No backoffice Clerk secret configured; skipping remote revoke of ${clerkInvitationId}`,
+      );
+      return;
+    }
+    try {
+      const clerkClient = createClerkClient({ secretKey });
+      await clerkClient.invitations.revokeInvitation(clerkInvitationId);
+    } catch (e) {
+      this.logger.error(
+        `Failed to revoke Clerk invitation ${clerkInvitationId}: ${e}`,
+      );
+    }
   }
 }

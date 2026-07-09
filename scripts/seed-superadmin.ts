@@ -1,6 +1,6 @@
 import * as readline from 'readline';
 import { DataSource } from 'typeorm';
-import { User, UserType } from '../src/users/entities/user.entity';
+import { Role, User } from '../src/users/entities/user.entity';
 
 const DATABASE_URL =
   process.env.DATABASE_URL ??
@@ -13,23 +13,21 @@ const dataSource = new DataSource({
   synchronize: true,
 });
 
-function ask(question: string): Promise<string> {
-  const rl = readline.createInterface({
-    input: process.stdin,
-    output: process.stdout,
-  });
+const rl = readline.createInterface({
+  input: process.stdin,
+  output: process.stdout,
+});
 
+function ask(question: string): Promise<string> {
   return new Promise((resolve) => {
-    rl.question(question, (answer) => {
-      rl.close();
-      resolve(answer.trim());
-    });
+    rl.question(question, (answer) => resolve(answer.trim()));
   });
 }
 
 async function main() {
   const clerkId = await ask('Superadmin clerkId: ');
   const email = await ask('Superadmin email: ');
+  rl.close();
 
   if (!clerkId || !email) {
     console.error('clerkId and email are required.');
@@ -52,7 +50,7 @@ async function main() {
       firstName: 'Super',
       lastName: 'Admin',
       email: email.toLowerCase(),
-      userType: UserType.ADMIN,
+      role: Role.SUPER_ADMIN,
       isActive: true,
     });
 

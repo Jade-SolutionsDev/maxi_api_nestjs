@@ -39,7 +39,7 @@ export class PermissionGuard implements CanActivate {
 
     const hasPermission = await this.permissionsService.hasPermission(
       request.user.id,
-      request.user.userType,
+      request.user.role,
       requirement.module,
       requirement.action,
     );

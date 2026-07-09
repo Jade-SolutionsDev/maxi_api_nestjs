@@ -1,13 +1,13 @@
-import { Controller, Get, Request, UseGuards } from '@nestjs/common';
+import { Controller, Get } from '@nestjs/common';
+import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { UserResponseDto } from '../users/dto/user-response.dto';
-import type { AuthenticatedUserRequest } from './types/authenticated-request';
-import { ClerkUserAuthGuard } from './guards/clerk-user-auth.guard';
+import { User } from '../users/entities/user.entity';
 
 @Controller('auth')
 export class AuthController {
+  // Authentication is enforced by the global AuthGuard; no @Public() here.
   @Get('me')
-  @UseGuards(ClerkUserAuthGuard)
-  me(@Request() req: AuthenticatedUserRequest) {
-    return UserResponseDto.fromEntity(req.user);
+  me(@CurrentUser() user: User): UserResponseDto {
+    return UserResponseDto.fromEntity(user);
   }
 }

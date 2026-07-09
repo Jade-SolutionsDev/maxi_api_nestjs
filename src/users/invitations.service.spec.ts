@@ -4,9 +4,10 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { getRepositoryToken } from '@nestjs/typeorm';
 import { createClerkClient } from '@clerk/backend';
 import { Repository } from 'typeorm';
+import { NOTIFICATION_PROVIDER } from '../notifications/interfaces/notification-provider.interface';
 import { InviteUserDto } from './dto/invite-user.dto';
 import { Invitation, InvitationStatus } from './entities/invitation.entity';
-import { User, UserType } from './entities/user.entity';
+import { Role, User } from './entities/user.entity';
 import { InvitationsService } from './invitations.service';
 
 jest.mock('@clerk/backend', () => ({
@@ -18,6 +19,7 @@ describe('InvitationsService', () => {
   let invitationRepository: jest.Mocked<Repository<Invitation>>;
   let userRepository: jest.Mocked<Repository<User>>;
   let configService: jest.Mocked<ConfigService>;
+  let revokeInvitation: jest.Mock;
   const createClerkClientMock = createClerkClient as jest.MockedFunction<
     typeof createClerkClient
   >;
@@ -25,7 +27,7 @@ describe('InvitationsService', () => {
   const inviter: User = {
     id: 'inviter-id',
     clerkId: 'clerk_inviter',
-    userType: UserType.ADMIN,
+    role: Role.ADMIN,
     email: 'admin@example.com',
     firstName: 'Admin',
     lastName: 'User',
@@ -66,6 +68,12 @@ describe('InvitationsService', () => {
             get: jest.fn(),
           },
         },
+        {
+          provide: NOTIFICATION_PROVIDER,
+          useValue: {
+            sendInvitation: jest.fn().mockResolvedValue({ sent: true }),
+          },
+        },
       ],
     }).compile();
 
@@ -81,11 +89,13 @@ describe('InvitationsService', () => {
       return undefined;
     });
 
+    revokeInvitation = jest.fn().mockResolvedValue({ id: 'revoked' });
     createClerkClientMock.mockReturnValue({
       invitations: {
         createInvitation: jest
           .fn()
           .mockResolvedValue({ id: 'clerk_app_invite_id' }),
+        revokeInvitation,
       },
       organizations: {
         createOrganizationInvitation: jest
@@ -112,7 +122,7 @@ describe('InvitationsService', () => {
 
       const dto: InviteUserDto = {
         email: 'new@example.com',
-        userType: UserType.STAFF,
+        role: Role.KARDIST,
       };
 
       const result = await service.createAndSendInvitation(dto, inviter);
@@ -121,7 +131,7 @@ describe('InvitationsService', () => {
       expect(invitationRepository.create).toHaveBeenCalledWith(
         expect.objectContaining({
           email: 'new@example.com',
-          userType: UserType.STAFF,
+          role: Role.KARDIST,
           invitedById: inviter.id,
           clerkInvitationId: 'clerk_app_invite_id',
           status: InvitationStatus.PENDING,
@@ -141,7 +151,7 @@ describe('InvitationsService', () => {
 
       const dto: InviteUserDto = {
         email: 'new@example.com',
-        userType: UserType.ADMIN,
+        role: Role.ADMIN,
         organizationId: 'org_123',
       };
 
@@ -151,7 +161,7 @@ describe('InvitationsService', () => {
       expect(invitationRepository.create).toHaveBeenCalledWith(
         expect.objectContaining({
           email: 'new@example.com',
-          userType: UserType.ADMIN,
+          role: Role.ADMIN,
           organizationId: 'org_123',
           clerkInvitationId: 'clerk_org_invite_id',
         }),
@@ -162,8 +172,8 @@ describe('InvitationsService', () => {
       userRepository.findOne.mockResolvedValue(inviter);
 
       const dto: InviteUserDto = {
-        email: inviter.email,
-        userType: UserType.STAFF,
+        email: inviter.email!,
+        role: Role.KARDIST,
       };
 
       await expect(
@@ -179,7 +189,7 @@ describe('InvitationsService', () => {
 
       const dto: InviteUserDto = {
         email: 'new@example.com',
-        userType: UserType.STAFF,
+        role: Role.KARDIST,
       };
 
       await expect(
@@ -192,7 +202,7 @@ describe('InvitationsService', () => {
 
       const dto: InviteUserDto = {
         email: 'new@example.com',
-        userType: UserType.STAFF,
+        role: Role.KARDIST,
       };
 
       await expect(
@@ -201,26 +211,47 @@ describe('InvitationsService', () => {
     });
   });
 
-  describe('findPendingByEmail', () => {
-    it('should return a pending invitation', async () => {
+  describe('revoke', () => {
+    it('should revoke a pending invitation and mark it REVOKED', async () => {
       const invitation = {
         id: 'invite-id',
-        email: 'new@example.com',
         status: InvitationStatus.PENDING,
+        clerkInvitationId: 'clerk_app_invite_id',
+      } as Invitation;
+      invitationRepository.findOne.mockResolvedValue(invitation);
+      invitationRepository.save.mockImplementation((i) =>
+        Promise.resolve(i as Invitation),
+      );
+
+      const result = await service.revoke('invite-id');
+
+      expect(result.status).toBe(InvitationStatus.REVOKED);
+      expect(revokeInvitation).toHaveBeenCalledWith('clerk_app_invite_id');
+    });
+
+    it('should be idempotent for an already-revoked invitation', async () => {
+      const invitation = {
+        id: 'invite-id',
+        status: InvitationStatus.REVOKED,
+        clerkInvitationId: 'clerk_app_invite_id',
       } as Invitation;
       invitationRepository.findOne.mockResolvedValue(invitation);
 
-      const result = await service.findPendingByEmail('NEW@example.com');
+      const result = await service.revoke('invite-id');
 
-      expect(result?.email).toBe('new@example.com');
-      expect(invitationRepository.findOne).toHaveBeenCalledWith(
-        expect.objectContaining({
-          where: {
-            email: 'new@example.com',
-            status: InvitationStatus.PENDING,
-          },
-          relations: { invitedBy: true },
-        }),
+      expect(result.status).toBe(InvitationStatus.REVOKED);
+      expect(revokeInvitation).not.toHaveBeenCalled();
+    });
+
+    it('should reject revoking an accepted invitation', async () => {
+      const invitation = {
+        id: 'invite-id',
+        status: InvitationStatus.ACCEPTED,
+      } as Invitation;
+      invitationRepository.findOne.mockResolvedValue(invitation);
+
+      await expect(service.revoke('invite-id')).rejects.toBeInstanceOf(
+        ConflictException,
       );
     });
   });

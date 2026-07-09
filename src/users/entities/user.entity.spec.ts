@@ -12,7 +12,7 @@ describe('User entity', () => {
       expect.arrayContaining([
         'id',
         'clerkId',
-        'userType',
+        'role',
         'email',
         'firstName',
         'lastName',

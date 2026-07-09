@@ -195,7 +195,7 @@ export class WebhooksService {
       email,
       firstName,
       lastName,
-      userType: invitation.userType,
+      role: invitation.role,
       phone,
       businessName,
     });
@@ -215,7 +215,7 @@ export class WebhooksService {
       email: email ?? undefined,
       firstName,
       lastName,
-      userType: undefined,
+      role: undefined,
       phone,
       businessName,
     });
