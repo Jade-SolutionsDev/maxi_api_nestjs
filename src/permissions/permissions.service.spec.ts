@@ -2,7 +2,7 @@ import { ConflictException, NotFoundException } from '@nestjs/common';
 import { Test, TestingModule } from '@nestjs/testing';
 import { getRepositoryToken } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
-import { User, UserType } from '../users/entities/user.entity';
+import { Role as UserRoleEnum, User } from '../users/entities/user.entity';
 import { Permission } from './entities/permission.entity';
 import { RolePermission } from './entities/role-permission.entity';
 import { Role } from './entities/role.entity';
@@ -13,7 +13,7 @@ function makeUser(overrides: Partial<User> = {}): User {
   return {
     id: 'user-1',
     clerkId: 'clerk_1',
-    userType: UserType.PROVIDER,
+    role: UserRoleEnum.GROCER,
     email: 'user@example.com',
     firstName: null,
     lastName: null,
@@ -128,7 +128,7 @@ describe('PermissionsService', () => {
     it('should allow admins regardless of roles', async () => {
       const result = await service.hasPermission(
         'user-1',
-        'admin',
+        'ADMIN',
         'products',
         'delete',
       );
@@ -175,17 +175,17 @@ describe('PermissionsService', () => {
   describe('getUserPermissions', () => {
     it('should return all permissions for an admin user', async () => {
       userRepository.findOne.mockResolvedValue(
-        makeUser({ userType: UserType.ADMIN }),
+        makeUser({ role: UserRoleEnum.ADMIN }),
       );
       const result = await service.getUserPermissions('user-1');
-      expect(result.user.userType).toBe('admin');
+      expect(result.user.userType).toBe('ADMIN');
       expect(result.permissions.products).toContain('read');
       expect(result.permissions.orders).toContain('create');
     });
 
     it('should return only role-granted permissions for a non-admin', async () => {
       userRepository.findOne.mockResolvedValue(
-        makeUser({ userType: UserType.PROVIDER }),
+        makeUser({ role: UserRoleEnum.GROCER }),
       );
       userRoleRepository.find.mockResolvedValue([
         {
@@ -202,7 +202,7 @@ describe('PermissionsService', () => {
 
       const result = await service.getUserPermissions('user-1');
 
-      expect(result.user.userType).toBe('provider');
+      expect(result.user.userType).toBe('GROCER');
       expect(result.permissions.products).toEqual(['read']);
       expect(result.permissions.orders).toBeUndefined();
     });

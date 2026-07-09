@@ -5,7 +5,7 @@ import {
   Injectable,
 } from '@nestjs/common';
 import { AuthenticatedUserRequest } from '../../auth/types/authenticated-request';
-import { UserType } from '../../users/entities/user.entity';
+import { Role } from '../../users/entities/user.entity';
 
 @Injectable()
 export class AdminGuard implements CanActivate {
@@ -14,7 +14,11 @@ export class AdminGuard implements CanActivate {
       .switchToHttp()
       .getRequest<AuthenticatedUserRequest>();
 
-    if (!request.user || request.user.userType !== UserType.ADMIN) {
+    const isAdmin =
+      request.user &&
+      (request.user.role === Role.ADMIN ||
+        request.user.role === Role.SUPER_ADMIN);
+    if (!isAdmin) {
       throw new ForbiddenException('Admin access required');
     }
 

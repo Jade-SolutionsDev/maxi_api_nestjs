@@ -7,7 +7,7 @@ import {
   PrimaryGeneratedColumn,
   UpdateDateColumn,
 } from 'typeorm';
-import { User, UserType } from './user.entity';
+import { Role, User } from './user.entity';
 
 export enum InvitationStatus {
   PENDING = 'pending',
@@ -24,11 +24,11 @@ export class Invitation {
   email: string;
 
   @Column({
-    name: 'user_type',
+    name: 'role',
     type: 'enum',
-    enum: UserType,
+    enum: Role,
   })
-  userType: UserType;
+  role: Role;
 
   @Column({ name: 'invited_by', type: 'uuid', nullable: true })
   invitedById: string | null;

@@ -5,7 +5,7 @@ import {
   Injectable,
 } from '@nestjs/common';
 import { AuthenticatedUserRequest } from '../../auth/types/authenticated-request';
-import { UserType } from '../../users/entities/user.entity';
+import { Role } from '../../users/entities/user.entity';
 
 @Injectable()
 export class ProviderGuard implements CanActivate {
@@ -14,7 +14,7 @@ export class ProviderGuard implements CanActivate {
       .switchToHttp()
       .getRequest<AuthenticatedUserRequest>();
 
-    if (!request.user || request.user.userType !== UserType.PROVIDER) {
+    if (!request.user || request.user.role !== Role.GROCER) {
       throw new ForbiddenException('Provider access required');
     }
 

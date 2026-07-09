@@ -7,7 +7,7 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { getRepositoryToken } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { Product } from '../products/entities/product.entity';
-import { User, UserType } from '../users/entities/user.entity';
+import { Role, User } from '../users/entities/user.entity';
 import { CategoriesService } from './categories.service';
 import { Category } from './entities/category.entity';
 
@@ -15,7 +15,7 @@ function makeUser(overrides: Partial<User> = {}): User {
   return {
     id: '11111111-1111-1111-1111-111111111111',
     clerkId: 'clerk_provider',
-    userType: UserType.PROVIDER,
+    role: Role.GROCER,
     email: 'provider@example.com',
     firstName: 'Prov',
     lastName: 'Ider',

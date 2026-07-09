@@ -7,7 +7,7 @@ import {
   IsUUID,
   Length,
 } from 'class-validator';
-import { UserType } from '../entities/user.entity';
+import { Role } from '../entities/user.entity';
 
 export class CreateUserDto {
   @IsOptional()
@@ -15,8 +15,8 @@ export class CreateUserDto {
   @Length(1, 255)
   clerkId?: string;
 
-  @IsEnum(UserType)
-  userType: UserType;
+  @IsEnum(Role)
+  role: Role;
 
   @IsOptional()
   @IsEmail()

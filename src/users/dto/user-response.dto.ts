@@ -3,7 +3,7 @@ import { User } from '../entities/user.entity';
 export class UserResponseDto {
   id: string;
   clerkId: string | null;
-  userType: string;
+  role: string;
   email: string | null;
   firstName: string | null;
   lastName: string | null;
@@ -24,7 +24,7 @@ export class UserResponseDto {
     const dto = new UserResponseDto();
     dto.id = user.id;
     dto.clerkId = user.clerkId;
-    dto.userType = user.userType;
+    dto.role = user.role;
     dto.email = user.email;
     dto.firstName = user.firstName;
     dto.lastName = user.lastName;

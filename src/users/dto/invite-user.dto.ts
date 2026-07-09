@@ -5,14 +5,14 @@ import {
   IsString,
   MaxLength,
 } from 'class-validator';
-import { UserType } from '../entities/user.entity';
+import { Role } from '../entities/user.entity';
 
 export class InviteUserDto {
   @IsEmail()
   email: string;
 
-  @IsEnum(UserType)
-  userType: UserType;
+  @IsEnum(Role)
+  role: Role;
 
   @IsOptional()
   @IsString()
