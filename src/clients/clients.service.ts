@@ -5,6 +5,7 @@ import {
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
+import { assignDefined } from '../common/utils/assign-defined.util';
 import { CreateClientDto } from './dto/create-client.dto';
 import { UpdateClientDto } from './dto/update-client.dto';
 import { Client } from './entities/client.entity';
@@ -80,13 +81,13 @@ export class ClientsService {
   async update(id: string, updateClientDto: UpdateClientDto): Promise<Client> {
     const client = await this.findOne(id);
 
+    assignDefined(client, updateClientDto);
     if (updateClientDto.email) {
       const email = updateClientDto.email.toLowerCase();
       await this.guardDuplicateEmail(email, id);
       client.email = email;
     }
 
-    Object.assign(client, updateClientDto);
     return this.clientsRepository.save(client);
   }
 

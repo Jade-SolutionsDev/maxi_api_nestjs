@@ -20,6 +20,7 @@ describe('UsersService', () => {
     withDeleted: jest.Mock;
     andWhere: jest.Mock;
     orderBy: jest.Mock;
+    addOrderBy: jest.Mock;
     skip: jest.Mock;
     take: jest.Mock;
     getManyAndCount: jest.Mock;
@@ -50,6 +51,7 @@ describe('UsersService', () => {
       withDeleted: jest.fn().mockReturnThis(),
       andWhere: jest.fn().mockReturnThis(),
       orderBy: jest.fn().mockReturnThis(),
+      addOrderBy: jest.fn().mockReturnThis(),
       skip: jest.fn().mockReturnThis(),
       take: jest.fn().mockReturnThis(),
       getManyAndCount: jest.fn(),
@@ -221,6 +223,23 @@ describe('UsersService', () => {
       const result = await service.update(user.id, updateDto);
 
       expect(result.firstName).toBe('Janet');
+    });
+
+    it('should preserve unset fields on a partial update (no name clobber)', async () => {
+      repository.findOne.mockResolvedValue({ ...user });
+      repository.save.mockImplementation((u) => Promise.resolve(u as User));
+
+      // Validated PATCH DTOs carry unset optional fields as own `undefined`.
+      const updateDto = {
+        isActive: false,
+        firstName: undefined,
+        lastName: undefined,
+      } as UpdateUserDto;
+      const result = await service.update(user.id, updateDto);
+
+      expect(result.isActive).toBe(false);
+      expect(result.firstName).toBe(user.firstName);
+      expect(result.lastName).toBe(user.lastName);
     });
 
     it('should throw ConflictException when changing email to an existing one', async () => {

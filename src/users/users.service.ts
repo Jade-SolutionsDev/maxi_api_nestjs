@@ -12,6 +12,7 @@ import {
   PaginatedResponse,
   PaginationQueryDto,
 } from '../common/dto/pagination.dto';
+import { assignDefined } from '../common/utils/assign-defined.util';
 import { CreateUserDto } from './dto/create-user.dto';
 import type { UserStatusFilter } from './dto/list-users-query.dto';
 import { UpdateUserDto } from './dto/update-user.dto';
@@ -71,7 +72,12 @@ export class UsersService {
     } else if (filter.status === 'inactive') {
       qb.andWhere('user.isActive = false');
     }
-    qb.orderBy('user.createdAt', 'DESC').skip(skip).take(limit);
+    // id is a unique PK — a deterministic tiebreaker so rows keep a stable
+    // total order across refetches (createdAt alone ties on same-instant seeds).
+    qb.orderBy('user.createdAt', 'DESC')
+      .addOrderBy('user.id', 'DESC')
+      .skip(skip)
+      .take(limit);
 
     const [users, usersTotal] = await qb.getManyAndCount();
 
@@ -94,6 +100,7 @@ export class UsersService {
   private async loadPendingInvitationUsers(): Promise<User[]> {
     const invitations = await this.invitationRepository.find({
       where: { status: InvitationStatus.PENDING },
+      order: { createdAt: 'DESC', id: 'DESC' },
     });
 
     return invitations.map((invitation) => {
@@ -181,7 +188,7 @@ export class UsersService {
       await this.assertNotLastSuperAdmin();
     }
 
-    Object.assign(user, updateUserDto);
+    assignDefined(user, updateUserDto);
     if (updateUserDto.email) {
       const email = updateUserDto.email.toLowerCase();
       await this.guardDuplicateEmail(email, id);
