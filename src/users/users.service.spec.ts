@@ -1,11 +1,18 @@
 import {
+  BadRequestException,
   ConflictException,
   ForbiddenException,
   NotFoundException,
 } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { Test, TestingModule } from '@nestjs/testing';
 import { getRepositoryToken } from '@nestjs/typeorm';
+import { createClerkClient } from '@clerk/backend';
 import { Repository } from 'typeorm';
+
+jest.mock('@clerk/backend', () => ({
+  createClerkClient: jest.fn(),
+}));
 import { CreateUserDto } from './dto/create-user.dto';
 import { UpdateUserDto } from './dto/update-user.dto';
 import { Invitation } from './entities/invitation.entity';
@@ -16,6 +23,7 @@ describe('UsersService', () => {
   let service: UsersService;
   let repository: jest.Mocked<Repository<User>>;
   let invitationRepository: jest.Mocked<Repository<Invitation>>;
+  let configService: jest.Mocked<ConfigService>;
   let qb: {
     withDeleted: jest.Mock;
     andWhere: jest.Mock;
@@ -80,12 +88,17 @@ describe('UsersService', () => {
             find: jest.fn(),
           },
         },
+        {
+          provide: ConfigService,
+          useValue: { get: jest.fn() },
+        },
       ],
     }).compile();
 
     service = module.get<UsersService>(UsersService);
     repository = module.get(getRepositoryToken(User));
     invitationRepository = module.get(getRepositoryToken(Invitation));
+    configService = module.get(ConfigService);
   });
 
   afterEach(() => {
@@ -284,6 +297,45 @@ describe('UsersService', () => {
       repository.save.mockImplementation((u) => Promise.resolve(u as User));
       const result = await service.update('sa-1', { role: Role.ADMIN });
       expect(result.role).toBe(Role.ADMIN);
+    });
+  });
+
+  describe('setPassword', () => {
+    const createClerkClientMock = createClerkClient as jest.MockedFunction<
+      typeof createClerkClient
+    >;
+
+    it('should reject changing your own password', async () => {
+      const self = { ...user };
+      repository.findOne.mockResolvedValue({ ...self });
+      await expect(
+        service.setPassword(self.id, 'longenough123', self),
+      ).rejects.toBeInstanceOf(ForbiddenException);
+      expect(createClerkClientMock).not.toHaveBeenCalled();
+    });
+
+    it('should reject users without a Clerk account', async () => {
+      repository.findOne.mockResolvedValue({ ...user, clerkId: null });
+      await expect(
+        service.setPassword(user.id, 'longenough123'),
+      ).rejects.toBeInstanceOf(BadRequestException);
+      expect(createClerkClientMock).not.toHaveBeenCalled();
+    });
+
+    it('should push the new password to Clerk and sign out other sessions', async () => {
+      repository.findOne.mockResolvedValue({ ...user });
+      configService.get.mockReturnValue('sk_test_backoffice');
+      const updateUser = jest.fn().mockResolvedValue({});
+      createClerkClientMock.mockReturnValue({
+        users: { updateUser },
+      } as unknown as ReturnType<typeof createClerkClient>);
+
+      await service.setPassword(user.id, 'longenough123');
+
+      expect(updateUser).toHaveBeenCalledWith(user.clerkId, {
+        password: 'longenough123',
+        signOutOfOtherSessions: true,
+      });
     });
   });
 

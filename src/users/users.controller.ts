@@ -15,6 +15,7 @@ import { CreateUserDto } from './dto/create-user.dto';
 import { InvitationResponseDto } from './dto/invitation-response.dto';
 import { InviteUserDto } from './dto/invite-user.dto';
 import { ListUsersQueryDto } from './dto/list-users-query.dto';
+import { SetPasswordDto } from './dto/set-password.dto';
 import { UpdateUserDto } from './dto/update-user.dto';
 import { UserResponseDto } from './dto/user-response.dto';
 import { Role, User } from './entities/user.entity';
@@ -80,6 +81,15 @@ export class UsersController {
     return UserResponseDto.fromEntity(
       await this.usersService.update(id, updateUserDto, actor),
     );
+  }
+
+  @Patch(':id/password')
+  async setPassword(
+    @Param('id') id: string,
+    @Body() dto: SetPasswordDto,
+    @CurrentUser() actor: User,
+  ): Promise<void> {
+    await this.usersService.setPassword(id, dto.password, actor);
   }
 
   @Delete(':id')

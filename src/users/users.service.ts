@@ -1,10 +1,13 @@
 import {
+  BadRequestException,
   ConflictException,
   ForbiddenException,
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { InjectRepository } from '@nestjs/typeorm';
+import { createClerkClient } from '@clerk/backend';
 import { Repository } from 'typeorm';
 import {
   buildPaginatedResponse,
@@ -34,6 +37,7 @@ export class UsersService {
     private readonly usersRepository: Repository<User>,
     @InjectRepository(Invitation)
     private readonly invitationRepository: Repository<Invitation>,
+    private readonly configService: ConfigService,
   ) {}
 
   async findAll(
@@ -196,6 +200,39 @@ export class UsersService {
     }
 
     return this.usersRepository.save(user);
+  }
+
+  /**
+   * Admin-set a user's Clerk password. Own password is intentionally rejected —
+   * a user changes their own password through the profile/Clerk flow, not here.
+   */
+  async setPassword(id: string, password: string, actor?: User): Promise<void> {
+    if (actor?.id === id) {
+      throw new ForbiddenException(
+        'Change your own password from your profile, not the user list',
+      );
+    }
+
+    const user = await this.findOne(id);
+    if (!user.clerkId) {
+      throw new BadRequestException(
+        'User has no Clerk account yet (pending invitation)',
+      );
+    }
+
+    const secretKey = this.configService.get<string>(
+      'clerk.backofficeSecretKey',
+    );
+    if (!secretKey) {
+      throw new Error('CLERK_BACKOFFICE_SECRET_KEY is not configured');
+    }
+
+    const clerkClient = createClerkClient({ secretKey });
+    await clerkClient.users.updateUser(user.clerkId, {
+      password,
+      // Force other devices to re-authenticate with the new password.
+      signOutOfOtherSessions: true,
+    });
   }
 
   async remove(id: string, actor?: User): Promise<void> {
