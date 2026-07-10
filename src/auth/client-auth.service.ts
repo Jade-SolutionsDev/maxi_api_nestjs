@@ -22,7 +22,11 @@ export class ClientAuthService {
       throw new UnauthorizedException('Invalid access token');
     }
 
-    const client = await this.clientsService.findByClerkId(clerkId);
+    // withDeleted: soft-deleted clients must resolve so they get the
+    // "inactive" error instead of the misleading "not registered" one.
+    const client = await this.clientsService.findByClerkId(clerkId, {
+      withDeleted: true,
+    });
     if (!client) {
       throw new UnauthorizedException('Client not registered');
     }

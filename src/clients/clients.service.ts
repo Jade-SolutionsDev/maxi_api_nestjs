@@ -5,7 +5,6 @@ import {
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
-import { assignDefined } from '../common/utils/assign-defined.util';
 import { CreateClientDto } from './dto/create-client.dto';
 import { UpdateClientDto } from './dto/update-client.dto';
 import { Client } from './entities/client.entity';
@@ -29,8 +28,11 @@ export class ClientsService {
     return client;
   }
 
-  async findByClerkId(clerkId: string): Promise<Client | null> {
-    return this.clientsRepository.findOne({ where: { clerkId } });
+  async findByClerkId(
+    clerkId: string,
+    { withDeleted = false }: { withDeleted?: boolean } = {},
+  ): Promise<Client | null> {
+    return this.clientsRepository.findOne({ where: { clerkId }, withDeleted });
   }
 
   async createOrUpdateFromClerk(
@@ -81,7 +83,7 @@ export class ClientsService {
   async update(id: string, updateClientDto: UpdateClientDto): Promise<Client> {
     const client = await this.findOne(id);
 
-    assignDefined(client, updateClientDto);
+    this.clientsRepository.merge(client, updateClientDto);
     if (updateClientDto.email) {
       const email = updateClientDto.email.toLowerCase();
       await this.guardDuplicateEmail(email, id);
