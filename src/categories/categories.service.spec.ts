@@ -37,7 +37,6 @@ function makeUser(overrides: Partial<User> = {}): User {
 function makeCategory(overrides: Partial<Category> = {}): Category {
   return {
     id: 'cat-1',
-    providerId: '11111111-1111-1111-1111-111111111111',
     parentId: null,
     name: 'Electrodomesticos',
     slug: 'electrodomesticos',
@@ -91,7 +90,7 @@ describe('CategoriesService', () => {
   });
 
   describe('createDepartment', () => {
-    it('creates a top-level category owned by the provider', async () => {
+    it('creates a top-level (parentless) department', async () => {
       repository.findOne.mockResolvedValue(null); // slug is unique
       repository.create.mockImplementation((data) => data as Category);
       repository.save.mockImplementation((c) => Promise.resolve(c as Category));
@@ -100,7 +99,6 @@ describe('CategoriesService', () => {
         name: 'Bebidas',
       });
 
-      expect(result.providerId).toBe(provider.id);
       expect(result.parentId).toBeNull();
       expect(result.slug).toBe('bebidas');
     });
@@ -116,7 +114,7 @@ describe('CategoriesService', () => {
   });
 
   describe('createCategory', () => {
-    it('creates a child category under a provider department', async () => {
+    it('creates a child category under a department', async () => {
       const department = makeCategory({ id: 'dep-1', parentId: null });
       repository.findOne
         .mockResolvedValueOnce(department) // getDepartment lookup
@@ -130,7 +128,6 @@ describe('CategoriesService', () => {
       });
 
       expect(result.parentId).toBe('dep-1');
-      expect(result.providerId).toBe(provider.id);
     });
 
     it('throws NotFound when the department does not exist', async () => {
@@ -206,14 +203,11 @@ describe('CategoriesService', () => {
     });
   });
 
-  describe('getOwnedChildCategoryOrThrow', () => {
+  describe('getChildCategoryOrThrow', () => {
     it('returns a child category', async () => {
       const child = makeCategory({ id: 'cat-1', parentId: 'dep-1' });
       repository.findOne.mockResolvedValue(child);
-      const result = await service.getOwnedChildCategoryOrThrow(
-        provider,
-        'cat-1',
-      );
+      const result = await service.getChildCategoryOrThrow('cat-1');
       expect(result).toBe(child);
     });
 
@@ -222,7 +216,7 @@ describe('CategoriesService', () => {
         makeCategory({ id: 'dep-1', parentId: null }),
       );
       await expect(
-        service.getOwnedChildCategoryOrThrow(provider, 'dep-1'),
+        service.getChildCategoryOrThrow('dep-1'),
       ).rejects.toBeInstanceOf(BadRequestException);
     });
   });

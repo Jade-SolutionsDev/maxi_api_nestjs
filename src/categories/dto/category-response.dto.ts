@@ -2,7 +2,6 @@ import { Category } from '../entities/category.entity';
 
 export class CategoryResponseDto {
   id: string;
-  providerId: string;
   parentId: string | null;
   name: string;
   slug: string;
@@ -15,7 +14,6 @@ export class CategoryResponseDto {
   static fromEntity(category: Category): CategoryResponseDto {
     const dto = new CategoryResponseDto();
     dto.id = category.id;
-    dto.providerId = category.providerId;
     dto.parentId = category.parentId;
     dto.name = category.name;
     dto.slug = category.slug;

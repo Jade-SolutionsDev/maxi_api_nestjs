@@ -17,21 +17,19 @@ import { CreateDepartmentDto } from './dto/create-department.dto';
 import { UpdateDepartmentDto } from './dto/update-department.dto';
 
 @Controller('departments')
-@Roles(Role.SUPER_ADMIN, Role.ADMIN, Role.GROCER)
+@Roles(Role.SUPER_ADMIN, Role.ADMIN)
 export class DepartmentsController {
   constructor(private readonly categoriesService: CategoriesService) {}
 
   @Get()
-  async findAll(
-    @Req() request: AuthenticatedUserRequest,
-  ): Promise<CategoryResponseDto[]> {
-    const departments = await this.categoriesService.listDepartments(
-      request.user,
-    );
+  @Roles(Role.SUPER_ADMIN, Role.ADMIN, Role.GROCER, Role.KARDIST)
+  async findAll(): Promise<CategoryResponseDto[]> {
+    const departments = await this.categoriesService.listDepartments();
     return departments.map(CategoryResponseDto.fromEntity);
   }
 
   @Get(':id')
+  @Roles(Role.SUPER_ADMIN, Role.ADMIN, Role.GROCER, Role.KARDIST)
   async findOne(
     @Param('id') id: string,
     @Req() request: AuthenticatedUserRequest,

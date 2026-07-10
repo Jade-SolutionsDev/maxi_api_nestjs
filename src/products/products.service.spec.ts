@@ -38,7 +38,6 @@ function makeUser(overrides: Partial<User> = {}): User {
 function makeChildCategory(overrides: Partial<Category> = {}): Category {
   return {
     id: 'cat-1',
-    providerId: '11111111-1111-1111-1111-111111111111',
     parentId: 'dep-1',
     name: 'Refrescos',
     slug: 'refrescos',
@@ -75,11 +74,11 @@ function makeProduct(overrides: Partial<Product> = {}): Product {
 describe('ProductsService', () => {
   let service: ProductsService;
   let repository: jest.Mocked<Repository<Product>>;
-  let categoriesService: { getOwnedChildCategoryOrThrow: jest.Mock };
+  let categoriesService: { getChildCategoryOrThrow: jest.Mock };
   const provider = makeUser();
 
   beforeEach(async () => {
-    categoriesService = { getOwnedChildCategoryOrThrow: jest.fn() };
+    categoriesService = { getChildCategoryOrThrow: jest.fn() };
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
@@ -109,7 +108,7 @@ describe('ProductsService', () => {
 
   describe('create', () => {
     it('creates a product inside an owned child category', async () => {
-      categoriesService.getOwnedChildCategoryOrThrow.mockResolvedValue(
+      categoriesService.getChildCategoryOrThrow.mockResolvedValue(
         makeChildCategory(),
       );
       repository.findOne.mockResolvedValue(null); // sku + slug unique
@@ -130,7 +129,7 @@ describe('ProductsService', () => {
     });
 
     it('propagates BadRequest when category is a department', async () => {
-      categoriesService.getOwnedChildCategoryOrThrow.mockRejectedValue(
+      categoriesService.getChildCategoryOrThrow.mockRejectedValue(
         new BadRequestException('is a department'),
       );
 
@@ -145,7 +144,7 @@ describe('ProductsService', () => {
     });
 
     it('throws Conflict on duplicate SKU', async () => {
-      categoriesService.getOwnedChildCategoryOrThrow.mockResolvedValue(
+      categoriesService.getChildCategoryOrThrow.mockResolvedValue(
         makeChildCategory(),
       );
       repository.findOne.mockResolvedValue(makeProduct()); // existing sku

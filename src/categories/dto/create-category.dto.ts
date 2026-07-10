@@ -31,8 +31,4 @@ export class CreateCategoryDto {
   @IsOptional()
   @IsBoolean()
   isActive?: boolean;
-
-  @IsOptional()
-  @IsUUID()
-  providerId?: string;
 }

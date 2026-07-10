@@ -18,11 +18,12 @@ import { CreateCategoryDto } from './dto/create-category.dto';
 import { UpdateCategoryDto } from './dto/update-category.dto';
 
 @Controller('categories')
-@Roles(Role.SUPER_ADMIN, Role.ADMIN, Role.GROCER)
+@Roles(Role.SUPER_ADMIN, Role.ADMIN)
 export class CategoriesController {
   constructor(private readonly categoriesService: CategoriesService) {}
 
   @Get()
+  @Roles(Role.SUPER_ADMIN, Role.ADMIN, Role.GROCER, Role.KARDIST)
   async findAll(
     @Query('departmentId') departmentId: string | undefined,
     @Req() request: AuthenticatedUserRequest,
@@ -35,6 +36,7 @@ export class CategoriesController {
   }
 
   @Get(':id')
+  @Roles(Role.SUPER_ADMIN, Role.ADMIN, Role.GROCER, Role.KARDIST)
   async findOne(
     @Param('id') id: string,
     @Req() request: AuthenticatedUserRequest,

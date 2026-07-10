@@ -6,11 +6,7 @@ import {
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { FindOptionsWhere, IsNull, Not, Repository } from 'typeorm';
-import {
-  buildOwnerScope,
-  resolveProviderId,
-  slugify,
-} from '../common/utils/catalog-ownership.utils';
+import { slugify } from '../common/utils/catalog-ownership.utils';
 import { Product } from '../products/entities/product.entity';
 import { User } from '../users/entities/user.entity';
 import { CreateCategoryDto } from './dto/create-category.dto';
@@ -19,6 +15,9 @@ import { UpdateCategoryDto } from './dto/update-category.dto';
 import { UpdateDepartmentDto } from './dto/update-department.dto';
 import { Category } from './entities/category.entity';
 
+// Departments/categories are a single GLOBAL taxonomy: no per-provider
+// ownership, every authenticated user reads the same rows (writes are gated to
+// admins by @Roles on the controllers).
 @Injectable()
 export class CategoriesService {
   constructor(
@@ -30,16 +29,16 @@ export class CategoriesService {
 
   // ---------------- Departments (parent_id = null) ----------------
 
-  async listDepartments(user: User): Promise<Category[]> {
+  async listDepartments(): Promise<Category[]> {
     return this.categoryRepository.find({
-      where: { ...this.ownerScope(user), parentId: IsNull() },
+      where: { parentId: IsNull() },
       order: { sortOrder: 'ASC', name: 'ASC' },
     });
   }
 
-  async getDepartment(user: User, id: string): Promise<Category> {
+  async getDepartment(_user: User, id: string): Promise<Category> {
     const department = await this.categoryRepository.findOne({
-      where: { id, ...this.ownerScope(user), parentId: IsNull() },
+      where: { id, parentId: IsNull() },
     });
     if (!department) {
       throw new NotFoundException(`Department with id "${id}" not found`);
@@ -48,14 +47,12 @@ export class CategoriesService {
   }
 
   async createDepartment(
-    user: User,
+    _user: User,
     dto: CreateDepartmentDto,
   ): Promise<Category> {
-    const providerId = resolveProviderId(user, dto.providerId);
-    const slug = await this.ensureUniqueSlug(providerId, dto.slug ?? dto.name);
+    const slug = await this.ensureUniqueSlug(dto.slug ?? dto.name);
 
     const department = this.categoryRepository.create({
-      providerId,
       parentId: null,
       name: dto.name,
       slug,
@@ -78,11 +75,7 @@ export class CategoriesService {
       department.name = dto.name;
     }
     if (dto.slug !== undefined) {
-      department.slug = await this.ensureUniqueSlug(
-        department.providerId,
-        dto.slug,
-        id,
-      );
+      department.slug = await this.ensureUniqueSlug(dto.slug, id);
     }
     if (dto.description !== undefined) {
       department.description = dto.description;
@@ -98,13 +91,10 @@ export class CategoriesService {
   }
 
   async removeDepartment(user: User, id: string): Promise<void> {
-    const department = await this.getDepartment(user, id);
+    await this.getDepartment(user, id);
 
     const childrenCount = await this.categoryRepository.count({
-      where: {
-        providerId: department.providerId,
-        parentId: id,
-      },
+      where: { parentId: id },
       withDeleted: false,
     });
 
@@ -119,9 +109,11 @@ export class CategoriesService {
 
   // ---------------- Categories (parent_id = department id) ----------------
 
-  async listCategories(user: User, departmentId?: string): Promise<Category[]> {
+  async listCategories(
+    _user: User,
+    departmentId?: string,
+  ): Promise<Category[]> {
     const where: FindOptionsWhere<Category> = {
-      ...this.ownerScope(user),
       parentId: departmentId ?? Not(IsNull()),
     };
 
@@ -131,9 +123,9 @@ export class CategoriesService {
     });
   }
 
-  async getCategory(user: User, id: string): Promise<Category> {
+  async getCategory(_user: User, id: string): Promise<Category> {
     const category = await this.categoryRepository.findOne({
-      where: { id, ...this.ownerScope(user) },
+      where: { id },
     });
     if (!category) {
       throw new NotFoundException(`Category with id "${id}" not found`);
@@ -142,20 +134,13 @@ export class CategoriesService {
   }
 
   async createCategory(user: User, dto: CreateCategoryDto): Promise<Category> {
-    const providerId = resolveProviderId(user, dto.providerId);
-
-    // Validate department is a top-level category of the same provider
+    // Validate the parent is a top-level department (this is what prevents
+    // grandchildren — a category can only ever hang off a department).
     const department = await this.getDepartment(user, dto.departmentId);
-    if (department.providerId !== providerId) {
-      throw new BadRequestException(
-        `Department "${dto.departmentId}" does not belong to the selected provider`,
-      );
-    }
 
-    const slug = await this.ensureUniqueSlug(providerId, dto.slug ?? dto.name);
+    const slug = await this.ensureUniqueSlug(dto.slug ?? dto.name);
 
     const category = this.categoryRepository.create({
-      providerId,
       parentId: department.id,
       name: dto.name,
       slug,
@@ -175,13 +160,8 @@ export class CategoriesService {
     const category = await this.getCategory(user, id);
 
     if (dto.departmentId !== undefined) {
-      // Ensure new parent is a department of the same provider
+      // Re-parent only onto a department, never onto another category.
       const department = await this.getDepartment(user, dto.departmentId);
-      if (department.providerId !== category.providerId) {
-        throw new BadRequestException(
-          `Department "${dto.departmentId}" does not belong to the selected provider`,
-        );
-      }
       category.parentId = department.id;
     }
 
@@ -189,11 +169,7 @@ export class CategoriesService {
       category.name = dto.name;
     }
     if (dto.slug !== undefined) {
-      category.slug = await this.ensureUniqueSlug(
-        category.providerId,
-        dto.slug,
-        id,
-      );
+      category.slug = await this.ensureUniqueSlug(dto.slug, id);
     }
     if (dto.description !== undefined) {
       category.description = dto.description;
@@ -218,7 +194,7 @@ export class CategoriesService {
     }
 
     const productsCount = await this.productRepository.count({
-      where: { categoryId: id, providerId: category.providerId },
+      where: { categoryId: id },
     });
     if (productsCount > 0) {
       throw new ConflictException(
@@ -232,15 +208,12 @@ export class CategoriesService {
   // ---------------- Shared helpers used by ProductsService ----------------
 
   /**
-   * Returns a non-deleted child category (parentId != null) owned by the same user.
-   * Used by ProductsService to validate product.categoryId.
+   * Returns a non-deleted child category (parentId != null). Used by
+   * ProductsService to validate product.categoryId.
    */
-  async getOwnedChildCategoryOrThrow(
-    user: User,
-    id: string,
-  ): Promise<Category> {
+  async getChildCategoryOrThrow(id: string): Promise<Category> {
     const category = await this.categoryRepository.findOne({
-      where: { id, ...this.ownerScope(user) },
+      where: { id },
     });
 
     if (!category) {
@@ -258,12 +231,7 @@ export class CategoriesService {
 
   // ---------------- Internal helpers ----------------
 
-  private ownerScope(user: User): FindOptionsWhere<Category> {
-    return buildOwnerScope(user);
-  }
-
   private async ensureUniqueSlug(
-    providerId: string,
     rawValue: string,
     excludeId?: string,
   ): Promise<string> {
@@ -273,7 +241,7 @@ export class CategoriesService {
 
     while (true) {
       const existing = await this.categoryRepository.findOne({
-        where: { providerId, slug: candidate },
+        where: { slug: candidate },
         withDeleted: true,
       });
 

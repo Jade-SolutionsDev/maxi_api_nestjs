@@ -1,5 +1,4 @@
 import {
-  BadRequestException,
   ConflictException,
   Injectable,
   NotFoundException,
@@ -52,15 +51,9 @@ export class ProductsService {
   async create(user: User, dto: CreateProductDto): Promise<Product> {
     const providerId = resolveProviderId(user, dto.providerId);
 
-    const category = await this.categoriesService.getOwnedChildCategoryOrThrow(
-      user,
+    const category = await this.categoriesService.getChildCategoryOrThrow(
       dto.categoryId,
     );
-    if (category.providerId !== providerId) {
-      throw new BadRequestException(
-        `Category "${dto.categoryId}" does not belong to the selected provider`,
-      );
-    }
 
     await this.guardDuplicateSku(providerId, dto.sku);
 
@@ -90,16 +83,9 @@ export class ProductsService {
     const product = await this.findOne(user, id);
 
     if (dto.categoryId !== undefined) {
-      const category =
-        await this.categoriesService.getOwnedChildCategoryOrThrow(
-          user,
-          dto.categoryId,
-        );
-      if (category.providerId !== product.providerId) {
-        throw new BadRequestException(
-          `Category "${dto.categoryId}" does not belong to the selected provider`,
-        );
-      }
+      const category = await this.categoriesService.getChildCategoryOrThrow(
+        dto.categoryId,
+      );
       product.categoryId = category.id;
     }
 

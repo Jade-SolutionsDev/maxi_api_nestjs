@@ -9,13 +9,10 @@ import {
 } from 'typeorm';
 
 @Entity('categories')
-@Index(['providerId', 'slug'], { unique: true })
+@Index(['slug'], { unique: true })
 export class Category {
   @PrimaryGeneratedColumn('uuid')
   id: string;
-
-  @Column({ name: 'provider_id', type: 'uuid' })
-  providerId: string;
 
   @Column({ name: 'parent_id', type: 'uuid', nullable: true })
   parentId: string | null;
