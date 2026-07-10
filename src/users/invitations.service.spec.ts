@@ -4,7 +4,6 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { getRepositoryToken } from '@nestjs/typeorm';
 import { createClerkClient } from '@clerk/backend';
 import { Repository } from 'typeorm';
-import { NOTIFICATION_PROVIDER } from '../notifications/interfaces/notification-provider.interface';
 import { InviteUserDto } from './dto/invite-user.dto';
 import { Invitation, InvitationStatus } from './entities/invitation.entity';
 import { Role, User } from './entities/user.entity';
@@ -66,12 +65,6 @@ describe('InvitationsService', () => {
           provide: ConfigService,
           useValue: {
             get: jest.fn(),
-          },
-        },
-        {
-          provide: NOTIFICATION_PROVIDER,
-          useValue: {
-            sendInvitation: jest.fn().mockResolvedValue({ sent: true }),
           },
         },
       ],

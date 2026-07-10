@@ -38,6 +38,9 @@ describe('ClientsService', () => {
             findOne: jest.fn(),
             create: jest.fn(),
             save: jest.fn(),
+            merge: jest.fn((entity: Client, dto: Partial<Client>) =>
+              Object.assign(entity, dto),
+            ),
             softDelete: jest.fn(),
           },
         },

@@ -15,7 +15,6 @@ import {
   PaginatedResponse,
   PaginationQueryDto,
 } from '../common/dto/pagination.dto';
-import { assignDefined } from '../common/utils/assign-defined.util';
 import { CreateUserDto } from './dto/create-user.dto';
 import type { UserStatusFilter } from './dto/list-users-query.dto';
 import { UpdateUserDto } from './dto/update-user.dto';
@@ -192,7 +191,7 @@ export class UsersService {
       await this.assertNotLastSuperAdmin();
     }
 
-    assignDefined(user, updateUserDto);
+    this.usersRepository.merge(user, updateUserDto);
     if (updateUserDto.email) {
       const email = updateUserDto.email.toLowerCase();
       await this.guardDuplicateEmail(email, id);

@@ -4,7 +4,6 @@ import {
   DeleteDateColumn,
   Entity,
   PrimaryGeneratedColumn,
-  Unique,
   UpdateDateColumn,
 } from 'typeorm';
 
@@ -16,9 +15,6 @@ export enum Role {
 }
 
 @Entity('users')
-@Unique(['email'])
-@Unique(['clerkId'])
-@Unique(['clerkOrgId'])
 export class User {
   @PrimaryGeneratedColumn('uuid')
   id: string;

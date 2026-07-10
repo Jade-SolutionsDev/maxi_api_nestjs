@@ -1,6 +1,5 @@
 import {
   ConflictException,
-  Inject,
   Injectable,
   Logger,
   NotFoundException,
@@ -9,10 +8,6 @@ import { ConfigService } from '@nestjs/config';
 import { InjectRepository } from '@nestjs/typeorm';
 import { createClerkClient } from '@clerk/backend';
 import { Repository } from 'typeorm';
-import {
-  NOTIFICATION_PROVIDER,
-  NotificationProvider,
-} from '../notifications/interfaces/notification-provider.interface';
 import { InviteUserDto } from './dto/invite-user.dto';
 import { Invitation, InvitationStatus } from './entities/invitation.entity';
 import { Role, User } from './entities/user.entity';
@@ -27,8 +22,6 @@ export class InvitationsService {
     @InjectRepository(User)
     private readonly userRepository: Repository<User>,
     private readonly configService: ConfigService,
-    @Inject(NOTIFICATION_PROVIDER)
-    private readonly notificationProvider: NotificationProvider,
   ) {}
 
   async createAndSendInvitation(
@@ -121,16 +114,10 @@ export class InvitationsService {
       return { id: invitation.id };
     }
 
-    // The notification provider owns delivery policy; for the default Clerk
-    // provider this delegates the email to Clerk's own `notify`, and the no-op
-    // provider suppresses it (tests/local).
-    const notification = await this.notificationProvider.sendInvitation({
-      email: dto.email,
-      role: dto.role,
-      firstName: dto.firstName,
-      lastName: dto.lastName,
-      invitationUrl: redirectUrl,
-    });
+    // Clerk sends the invitation email itself via `notify`; the flag is off in
+    // local/e2e runs to suppress outbound emails (NOTIFICATIONS_ENABLED=false).
+    const notify =
+      this.configService.get<boolean>('notifications.enabled') ?? true;
 
     this.logger.log(`Sending app invitation to ${dto.email}`);
     try {
@@ -138,7 +125,7 @@ export class InvitationsService {
         emailAddress: dto.email,
         publicMetadata,
         redirectUrl,
-        notify: notification.sent,
+        notify,
       });
       this.logger.log(
         `Invitation sent to ${dto.email} with ID ${invitation.id}`,

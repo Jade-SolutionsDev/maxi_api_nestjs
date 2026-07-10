@@ -6,7 +6,6 @@ import { AuthController } from './auth.controller';
 import { AuthService } from './auth.service';
 import { ClientAuthService } from './client-auth.service';
 import { ClerkClientAuthGuard } from './guards/clerk-client-auth.guard';
-import { ClerkUserAuthGuard } from './guards/clerk-user-auth.guard';
 import { AUTH_PROVIDER } from './interfaces/auth-provider.interface';
 import { ClerkAuthProvider } from './providers/clerk-auth.provider';
 import { MockAuthProvider } from './providers/mock-auth.provider';
@@ -17,7 +16,6 @@ import { MockAuthProvider } from './providers/mock-auth.provider';
   providers: [
     AuthService,
     ClientAuthService,
-    ClerkUserAuthGuard,
     ClerkClientAuthGuard,
     ClerkAuthProvider,
     MockAuthProvider,
@@ -34,7 +32,6 @@ import { MockAuthProvider } from './providers/mock-auth.provider';
   exports: [
     AuthService,
     ClientAuthService,
-    ClerkUserAuthGuard,
     ClerkClientAuthGuard,
     AUTH_PROVIDER,
   ],

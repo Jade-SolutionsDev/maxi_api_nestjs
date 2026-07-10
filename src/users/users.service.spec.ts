@@ -76,6 +76,15 @@ describe('UsersService', () => {
             create: jest.fn(),
             save: jest.fn(),
             update: jest.fn(),
+            // Like the real merge: defined values only, undefined is skipped.
+            merge: jest.fn((entity: User, dto: Partial<User>) => {
+              for (const [key, value] of Object.entries(dto)) {
+                if (value !== undefined) {
+                  (entity as Record<string, unknown>)[key] = value;
+                }
+              }
+              return entity;
+            }),
             softDelete: jest.fn(),
             restore: jest.fn(),
             count: jest.fn(),
