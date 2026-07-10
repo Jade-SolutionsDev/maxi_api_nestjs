@@ -12,6 +12,7 @@ import { AuthGuard } from './common/guards/auth.guard';
 import { RolesGuard } from './common/guards/roles.guard';
 import { HealthModule } from './health/health.module';
 import { ProductsModule } from './products/products.module';
+import { UploadsModule } from './uploads/uploads.module';
 import { UsersModule } from './users/users.module';
 import { WebhooksModule } from './webhooks/webhooks.module';
 
@@ -39,6 +40,7 @@ import { WebhooksModule } from './webhooks/webhooks.module';
     AuthModule,
     CategoriesModule,
     ProductsModule,
+    UploadsModule,
     WebhooksModule,
   ],
   controllers: [AppController],

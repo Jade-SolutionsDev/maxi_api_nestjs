@@ -4,6 +4,7 @@ import {
   IsOptional,
   IsString,
   Length,
+  MaxLength,
 } from 'class-validator';
 
 export class CreateDepartmentDto {
@@ -20,6 +21,20 @@ export class CreateDepartmentDto {
   @IsOptional()
   @IsString()
   description?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(2048)
+  imageDesktopUrl?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(2048)
+  imageMobileUrl?: string;
+
+  @IsOptional()
+  @IsBoolean()
+  isFeatured?: boolean;
 
   @IsOptional()
   sortOrder?: number;

@@ -24,6 +24,16 @@ export interface NotificationsConfig {
   enabled: boolean;
 }
 
+export interface StorageConfig {
+  endpoint: string | undefined;
+  region: string;
+  bucket: string;
+  accessKeyId: string | undefined;
+  secretAccessKey: string | undefined;
+  publicUrl: string;
+  forcePathStyle: boolean;
+}
+
 export interface AppConfig {
   port: number;
   database: DatabaseConfig;
@@ -31,6 +41,7 @@ export interface AppConfig {
   cors: CorsConfig;
   auth: AuthConfig;
   notifications: NotificationsConfig;
+  storage: StorageConfig;
   nodeEnv: string;
 }
 
@@ -65,6 +76,26 @@ export const notificationsConfig = (): NotificationsConfig => ({
   enabled: process.env.NOTIFICATIONS_ENABLED !== 'false',
 });
 
+export const storageConfig = (): StorageConfig => {
+  const endpoint = process.env.S3_ENDPOINT;
+  const bucket = process.env.S3_BUCKET ?? 'maxihabana';
+  // Default the public base URL to the (path-style) endpoint + bucket so local
+  // MinIO works with zero extra config; override with S3_PUBLIC_URL for a CDN.
+  const publicUrl =
+    process.env.S3_PUBLIC_URL ??
+    (endpoint ? `${endpoint.replace(/\/$/, '')}/${bucket}` : '');
+
+  return {
+    endpoint,
+    region: process.env.S3_REGION ?? 'us-east-1',
+    bucket,
+    accessKeyId: process.env.S3_ACCESS_KEY_ID,
+    secretAccessKey: process.env.S3_SECRET_ACCESS_KEY,
+    publicUrl,
+    forcePathStyle: process.env.S3_FORCE_PATH_STYLE === 'true',
+  };
+};
+
 export const corsConfig = (): CorsConfig => {
   const raw = process.env.CORS_ORIGINS ?? '';
   const defaultOrigins =
@@ -88,5 +119,6 @@ export default (): AppConfig => ({
   cors: corsConfig(),
   auth: authConfig(),
   notifications: notificationsConfig(),
+  storage: storageConfig(),
   nodeEnv: process.env.NODE_ENV ?? 'development',
 });

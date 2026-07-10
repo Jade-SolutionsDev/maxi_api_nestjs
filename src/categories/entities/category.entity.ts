@@ -26,6 +26,16 @@ export class Category {
   @Column({ type: 'text', nullable: true })
   description: string | null;
 
+  @Column({ name: 'image_desktop_url', type: 'text', nullable: true })
+  imageDesktopUrl: string | null;
+
+  @Column({ name: 'image_mobile_url', type: 'text', nullable: true })
+  imageMobileUrl: string | null;
+
+  // Only meaningful for departments (parentId = null); surfaced/filtered there.
+  @Column({ name: 'is_featured', type: 'boolean', default: false })
+  isFeatured: boolean;
+
   @Column({ name: 'sort_order', type: 'int', default: 0 })
   sortOrder: number;
 

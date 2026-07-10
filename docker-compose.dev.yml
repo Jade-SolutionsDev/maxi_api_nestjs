@@ -18,5 +18,41 @@ services:
       retries: 5
       start_period: 5s
 
+  # S3-compatible object storage for image uploads (dev). Console: :9001.
+  minio:
+    image: minio/minio:latest
+    container_name: maxihabana-minio-dev
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: maxihabana
+      MINIO_ROOT_PASSWORD: maxihabana
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    volumes:
+      - maxihabana-minio-data:/data
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+      start_period: 5s
+
+  # One-shot: create the bucket and make it public-read so uploaded image URLs
+  # are directly viewable.
+  minio-init:
+    image: minio/mc:latest
+    container_name: maxihabana-minio-init-dev
+    depends_on:
+      minio:
+        condition: service_healthy
+    entrypoint: >
+      /bin/sh -c "
+      mc alias set local http://minio:9000 maxihabana maxihabana &&
+      mc mb --ignore-existing local/maxihabana &&
+      mc anonymous set download local/maxihabana
+      "
+
 volumes:
   maxihabana-postgres-data:
+  maxihabana-minio-data:

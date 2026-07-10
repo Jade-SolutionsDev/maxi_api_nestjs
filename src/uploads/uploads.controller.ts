@@ -1,0 +1,57 @@
+import {
+  BadRequestException,
+  Controller,
+  Post,
+  UploadedFile,
+  UseInterceptors,
+} from '@nestjs/common';
+import { FileInterceptor } from '@nestjs/platform-express';
+import { Roles } from '../common/decorators/roles.decorator';
+import { Role } from '../users/entities/user.entity';
+import {
+  ALLOWED_IMAGE_MIME_TYPES,
+  MAX_IMAGE_SIZE_BYTES,
+  StorageService,
+} from './storage.service';
+
+// Only backoffice admins manage the taxonomy, so only they upload its images.
+@Controller('uploads')
+@Roles(Role.SUPER_ADMIN, Role.ADMIN)
+export class UploadsController {
+  constructor(private readonly storageService: StorageService) {}
+
+  @Post('image')
+  @UseInterceptors(
+    // No `storage` option → multer keeps the file in memory (file.buffer).
+    FileInterceptor('file', {
+      limits: { fileSize: MAX_IMAGE_SIZE_BYTES },
+      fileFilter: (_req, file, cb) => {
+        if (!ALLOWED_IMAGE_MIME_TYPES.includes(file.mimetype)) {
+          cb(
+            new BadRequestException(
+              `Unsupported image type "${file.mimetype}"`,
+            ),
+            false,
+          );
+          return;
+        }
+        cb(null, true);
+      },
+    }),
+  )
+  async uploadImage(
+    @UploadedFile() file: Express.Multer.File | undefined,
+  ): Promise<{ url: string }> {
+    if (!file) {
+      throw new BadRequestException('file is required');
+    }
+    if (file.size > MAX_IMAGE_SIZE_BYTES) {
+      throw new BadRequestException('Image exceeds the 2MB limit');
+    }
+    return this.storageService.uploadImage(
+      file.buffer,
+      file.mimetype,
+      'taxonomy',
+    );
+  }
+}

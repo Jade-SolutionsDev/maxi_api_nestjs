@@ -41,6 +41,9 @@ function makeCategory(overrides: Partial<Category> = {}): Category {
     name: 'Electrodomesticos',
     slug: 'electrodomesticos',
     description: null,
+    imageDesktopUrl: null,
+    imageMobileUrl: null,
+    isFeatured: false,
     sortOrder: 0,
     isActive: true,
     createdAt: new Date(),
@@ -48,6 +51,18 @@ function makeCategory(overrides: Partial<Category> = {}): Category {
     deletedAt: null,
     ...overrides,
   };
+}
+
+/** Minimal chainable QueryBuilder stub returning the given rows from getMany(). */
+function makeQueryBuilderStub(rows: Category[]) {
+  const qb = {
+    where: jest.fn().mockReturnThis(),
+    andWhere: jest.fn().mockReturnThis(),
+    orderBy: jest.fn().mockReturnThis(),
+    addOrderBy: jest.fn().mockReturnThis(),
+    getMany: jest.fn().mockResolvedValue(rows),
+  };
+  return qb;
 }
 
 describe('CategoriesService', () => {
@@ -69,6 +84,7 @@ describe('CategoriesService', () => {
             create: jest.fn(),
             save: jest.fn(),
             softDelete: jest.fn(),
+            createQueryBuilder: jest.fn(),
           },
         },
         {
@@ -97,10 +113,16 @@ describe('CategoriesService', () => {
 
       const result = await service.createDepartment(provider, {
         name: 'Bebidas',
+        imageDesktopUrl: 'https://cdn/desktop.png',
+        imageMobileUrl: 'https://cdn/mobile.png',
+        isFeatured: true,
       });
 
       expect(result.parentId).toBeNull();
       expect(result.slug).toBe('bebidas');
+      expect(result.imageDesktopUrl).toBe('https://cdn/desktop.png');
+      expect(result.imageMobileUrl).toBe('https://cdn/mobile.png');
+      expect(result.isFeatured).toBe(true);
     });
   });
 
@@ -125,9 +147,11 @@ describe('CategoriesService', () => {
       const result = await service.createCategory(provider, {
         departmentId: 'dep-1',
         name: 'Refrescos',
+        imageDesktopUrl: 'https://cdn/cat.png',
       });
 
       expect(result.parentId).toBe('dep-1');
+      expect(result.imageDesktopUrl).toBe('https://cdn/cat.png');
     });
 
     it('throws NotFound when the department does not exist', async () => {
@@ -218,6 +242,55 @@ describe('CategoriesService', () => {
       await expect(
         service.getChildCategoryOrThrow('dep-1'),
       ).rejects.toBeInstanceOf(BadRequestException);
+    });
+  });
+
+  describe('public reads', () => {
+    it('listPublicDepartments returns rows and applies the featured filter', async () => {
+      const rows = [makeCategory({ id: 'dep-1', isFeatured: true })];
+      const qb = makeQueryBuilderStub(rows);
+      repository.createQueryBuilder.mockReturnValue(qb as never);
+
+      const result = await service.listPublicDepartments({
+        featured: true,
+        hasActiveCategories: true,
+      });
+
+      expect(result).toBe(rows);
+      // base isActive filter + featured + hasActiveCategories EXISTS
+      expect(qb.andWhere).toHaveBeenCalledWith('dep.isFeatured = :featured', {
+        featured: true,
+      });
+      expect(qb.andWhere).toHaveBeenCalledTimes(3);
+    });
+
+    it('listPublicCategories filters by department and product existence', async () => {
+      const rows = [makeCategory({ id: 'cat-1', parentId: 'dep-1' })];
+      const qb = makeQueryBuilderStub(rows);
+      repository.createQueryBuilder.mockReturnValue(qb as never);
+
+      const result = await service.listPublicCategories({
+        departmentId: 'dep-1',
+        active: true,
+      });
+
+      expect(result).toBe(rows);
+      expect(qb.andWhere).toHaveBeenCalledWith('cat.parentId = :departmentId', {
+        departmentId: 'dep-1',
+      });
+    });
+
+    it('getPublicDepartment throws NotFound for a missing/inactive department', async () => {
+      repository.findOne.mockResolvedValue(null);
+      await expect(service.getPublicDepartment('nope')).rejects.toBeInstanceOf(
+        NotFoundException,
+      );
+    });
+
+    it('getPublicCategory returns an active child category', async () => {
+      const cat = makeCategory({ id: 'cat-1', parentId: 'dep-1' });
+      repository.findOne.mockResolvedValue(cat);
+      await expect(service.getPublicCategory('cat-1')).resolves.toBe(cat);
     });
   });
 });

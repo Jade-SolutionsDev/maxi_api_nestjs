@@ -1,24 +1,11 @@
-import { Transform, TransformFnParams } from 'class-transformer';
+import { Transform } from 'class-transformer';
 import { IsBoolean, IsEnum, IsIn, IsOptional, IsString } from 'class-validator';
 import { PaginationQueryDto } from '../../common/dto/pagination.dto';
+import { toOptionalBoolean } from '../../common/dto/query-transforms';
 import { Role } from '../entities/user.entity';
 
 export const USER_STATUS_FILTERS = ['active', 'inactive', 'pending'] as const;
 export type UserStatusFilter = (typeof USER_STATUS_FILTERS)[number];
-
-/** Coerce `?flag=true|false` query strings into real booleans (or leave absent). */
-const toOptionalBoolean = ({ value }: TransformFnParams): unknown => {
-  if (value === undefined || value === '') {
-    return undefined;
-  }
-  if (value === 'true' || value === true) {
-    return true;
-  }
-  if (value === 'false' || value === false) {
-    return false;
-  }
-  return value;
-};
 
 export class ListUsersQueryDto extends PaginationQueryDto {
   @IsOptional()

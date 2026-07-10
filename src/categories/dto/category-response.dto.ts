@@ -6,6 +6,9 @@ export class CategoryResponseDto {
   name: string;
   slug: string;
   description: string | null;
+  imageDesktopUrl: string | null;
+  imageMobileUrl: string | null;
+  isFeatured: boolean;
   sortOrder: number;
   isActive: boolean;
   createdAt: Date;
@@ -18,6 +21,9 @@ export class CategoryResponseDto {
     dto.name = category.name;
     dto.slug = category.slug;
     dto.description = category.description;
+    dto.imageDesktopUrl = category.imageDesktopUrl;
+    dto.imageMobileUrl = category.imageMobileUrl;
+    dto.isFeatured = category.isFeatured;
     dto.sortOrder = category.sortOrder;
     dto.isActive = category.isActive;
     dto.createdAt = category.createdAt;

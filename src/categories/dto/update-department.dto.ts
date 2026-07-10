@@ -1,4 +1,10 @@
-import { IsBoolean, IsOptional, IsString, Length } from 'class-validator';
+import {
+  IsBoolean,
+  IsOptional,
+  IsString,
+  Length,
+  MaxLength,
+} from 'class-validator';
 
 export class UpdateDepartmentDto {
   @IsOptional()
@@ -14,6 +20,20 @@ export class UpdateDepartmentDto {
   @IsOptional()
   @IsString()
   description?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(2048)
+  imageDesktopUrl?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(2048)
+  imageMobileUrl?: string;
+
+  @IsOptional()
+  @IsBoolean()
+  isFeatured?: boolean;
 
   @IsOptional()
   sortOrder?: number;

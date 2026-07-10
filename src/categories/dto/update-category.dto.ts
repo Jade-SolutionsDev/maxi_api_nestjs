@@ -4,6 +4,7 @@ import {
   IsString,
   IsUUID,
   Length,
+  MaxLength,
 } from 'class-validator';
 
 export class UpdateCategoryDto {
@@ -24,6 +25,16 @@ export class UpdateCategoryDto {
   @IsOptional()
   @IsString()
   description?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(2048)
+  imageDesktopUrl?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(2048)
+  imageMobileUrl?: string;
 
   @IsOptional()
   sortOrder?: number;

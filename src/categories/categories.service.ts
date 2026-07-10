@@ -57,6 +57,9 @@ export class CategoriesService {
       name: dto.name,
       slug,
       description: dto.description ?? null,
+      imageDesktopUrl: dto.imageDesktopUrl ?? null,
+      imageMobileUrl: dto.imageMobileUrl ?? null,
+      isFeatured: dto.isFeatured ?? false,
       sortOrder: dto.sortOrder ?? 0,
       isActive: dto.isActive ?? true,
     });
@@ -79,6 +82,15 @@ export class CategoriesService {
     }
     if (dto.description !== undefined) {
       department.description = dto.description;
+    }
+    if (dto.imageDesktopUrl !== undefined) {
+      department.imageDesktopUrl = dto.imageDesktopUrl;
+    }
+    if (dto.imageMobileUrl !== undefined) {
+      department.imageMobileUrl = dto.imageMobileUrl;
+    }
+    if (dto.isFeatured !== undefined) {
+      department.isFeatured = dto.isFeatured;
     }
     if (dto.sortOrder !== undefined) {
       department.sortOrder = dto.sortOrder;
@@ -145,6 +157,8 @@ export class CategoriesService {
       name: dto.name,
       slug,
       description: dto.description ?? null,
+      imageDesktopUrl: dto.imageDesktopUrl ?? null,
+      imageMobileUrl: dto.imageMobileUrl ?? null,
       sortOrder: dto.sortOrder ?? 0,
       isActive: dto.isActive ?? true,
     });
@@ -173,6 +187,12 @@ export class CategoriesService {
     }
     if (dto.description !== undefined) {
       category.description = dto.description;
+    }
+    if (dto.imageDesktopUrl !== undefined) {
+      category.imageDesktopUrl = dto.imageDesktopUrl;
+    }
+    if (dto.imageMobileUrl !== undefined) {
+      category.imageMobileUrl = dto.imageMobileUrl;
     }
     if (dto.sortOrder !== undefined) {
       category.sortOrder = dto.sortOrder;
@@ -203,6 +223,90 @@ export class CategoriesService {
     }
 
     await this.categoryRepository.softDelete(id);
+  }
+
+  // ---------------- Public storefront reads (active rows only) ----------------
+
+  async listPublicDepartments(filters: {
+    featured?: boolean;
+    hasActiveCategories?: boolean;
+  }): Promise<Category[]> {
+    const qb = this.categoryRepository
+      .createQueryBuilder('dep')
+      .where('dep.parentId IS NULL')
+      .andWhere('dep.isActive = :active', { active: true })
+      .orderBy('dep.sortOrder', 'ASC')
+      .addOrderBy('dep.name', 'ASC');
+
+    if (filters.featured) {
+      qb.andWhere('dep.isFeatured = :featured', { featured: true });
+    }
+    if (filters.hasActiveCategories) {
+      // Department has ≥1 active child category that has ≥1 product.
+      qb.andWhere(
+        `EXISTS (
+          SELECT 1 FROM categories c
+          WHERE c.parent_id = dep.id
+            AND c.deleted_at IS NULL
+            AND c.is_active = true
+            AND EXISTS (
+              SELECT 1 FROM products p
+              WHERE p.category_id = c.id AND p.deleted_at IS NULL
+            )
+        )`,
+      );
+    }
+
+    return qb.getMany();
+  }
+
+  async getPublicDepartment(id: string): Promise<Category> {
+    const department = await this.categoryRepository.findOne({
+      where: { id, parentId: IsNull(), isActive: true },
+    });
+    if (!department) {
+      throw new NotFoundException(`Department with id "${id}" not found`);
+    }
+    return department;
+  }
+
+  async listPublicCategories(filters: {
+    departmentId?: string;
+    active?: boolean;
+  }): Promise<Category[]> {
+    const qb = this.categoryRepository
+      .createQueryBuilder('cat')
+      .where('cat.parentId IS NOT NULL')
+      .andWhere('cat.isActive = :active', { active: true })
+      .orderBy('cat.sortOrder', 'ASC')
+      .addOrderBy('cat.name', 'ASC');
+
+    if (filters.departmentId) {
+      qb.andWhere('cat.parentId = :departmentId', {
+        departmentId: filters.departmentId,
+      });
+    }
+    if (filters.active) {
+      // "Active category" = has ≥1 (non-deleted) product associated.
+      qb.andWhere(
+        `EXISTS (
+          SELECT 1 FROM products p
+          WHERE p.category_id = cat.id AND p.deleted_at IS NULL
+        )`,
+      );
+    }
+
+    return qb.getMany();
+  }
+
+  async getPublicCategory(id: string): Promise<Category> {
+    const category = await this.categoryRepository.findOne({
+      where: { id, parentId: Not(IsNull()), isActive: true },
+    });
+    if (!category) {
+      throw new NotFoundException(`Category with id "${id}" not found`);
+    }
+    return category;
   }
 
   // ---------------- Shared helpers used by ProductsService ----------------
