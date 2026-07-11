@@ -5,7 +5,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { FindOptionsWhere, IsNull, Not, Repository } from 'typeorm';
+import { FindOptionsWhere, ILike, IsNull, Not, Repository } from 'typeorm';
 import { slugify } from '../common/utils/catalog-ownership.utils';
 import { Product } from '../products/entities/product.entity';
 import { User } from '../users/entities/user.entity';
@@ -29,9 +29,9 @@ export class CategoriesService {
 
   // ---------------- Departments (parent_id = null) ----------------
 
-  async listDepartments(): Promise<Category[]> {
+  async listDepartments(q?: string): Promise<Category[]> {
     return this.categoryRepository.find({
-      where: { parentId: IsNull() },
+      where: this.buildTaxonomyWhere({ parentId: IsNull() }, q),
       order: { sortOrder: 'ASC', name: 'ASC' },
     });
   }
@@ -112,13 +112,14 @@ export class CategoriesService {
   async listCategories(
     _user: User,
     departmentId?: string,
+    q?: string,
   ): Promise<Category[]> {
-    const where: FindOptionsWhere<Category> = {
+    const base: FindOptionsWhere<Category> = {
       parentId: departmentId ?? Not(IsNull()),
     };
 
     return this.categoryRepository.find({
-      where,
+      where: this.buildTaxonomyWhere(base, q),
       order: { sortOrder: 'ASC', name: 'ASC' },
     });
   }
@@ -230,6 +231,25 @@ export class CategoriesService {
   }
 
   // ---------------- Internal helpers ----------------
+
+  /**
+   * Optionally narrow a taxonomy list to rows whose name or slug match `%q%`
+   * (case-insensitive). TypeORM ORs an array of where-objects, so the base
+   * filter (parentId) is spread into each branch. Backs the global search.
+   */
+  private buildTaxonomyWhere(
+    base: FindOptionsWhere<Category>,
+    q?: string,
+  ): FindOptionsWhere<Category> | FindOptionsWhere<Category>[] {
+    const term = q?.trim();
+    if (!term) return base;
+
+    const like = ILike(`%${term}%`);
+    return [
+      { ...base, name: like },
+      { ...base, slug: like },
+    ];
+  }
 
   private async ensureUniqueSlug(
     rawValue: string,

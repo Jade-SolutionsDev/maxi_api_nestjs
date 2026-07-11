@@ -5,7 +5,7 @@ import {
 } from '@nestjs/common';
 import { Test, TestingModule } from '@nestjs/testing';
 import { getRepositoryToken } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { ILike, IsNull, Not, Repository } from 'typeorm';
 import { Product } from '../products/entities/product.entity';
 import { Role, User } from '../users/entities/user.entity';
 import { CategoriesService } from './categories.service';
@@ -200,6 +200,42 @@ describe('CategoriesService', () => {
 
       await service.removeCategory(provider, 'cat-1');
       expect(repository.softDelete).toHaveBeenCalledWith('cat-1');
+    });
+  });
+
+  describe('search (q filter)', () => {
+    it('lists all departments when q is absent', async () => {
+      repository.find.mockResolvedValue([]);
+      await service.listDepartments();
+      expect(repository.find).toHaveBeenCalledWith(
+        expect.objectContaining({ where: { parentId: IsNull() } }),
+      );
+    });
+
+    it('ignores a blank q', async () => {
+      repository.find.mockResolvedValue([]);
+      await service.listDepartments('   ');
+      expect(repository.find).toHaveBeenCalledWith(
+        expect.objectContaining({ where: { parentId: IsNull() } }),
+      );
+    });
+
+    it('filters departments by name OR slug (ILIKE) when q is present', async () => {
+      repository.find.mockResolvedValue([]);
+      await service.listDepartments('ques');
+      expect(repository.find.mock.calls[0][0].where).toEqual([
+        { parentId: IsNull(), name: ILike('%ques%') },
+        { parentId: IsNull(), slug: ILike('%ques%') },
+      ]);
+    });
+
+    it('filters categories by name OR slug (ILIKE) when q is present', async () => {
+      repository.find.mockResolvedValue([]);
+      await service.listCategories(provider, undefined, 'ques');
+      expect(repository.find.mock.calls[0][0].where).toEqual([
+        { parentId: Not(IsNull()), name: ILike('%ques%') },
+        { parentId: Not(IsNull()), slug: ILike('%ques%') },
+      ]);
     });
   });
 
