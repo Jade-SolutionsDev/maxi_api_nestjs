@@ -6,6 +6,7 @@ import {
   Param,
   Patch,
   Post,
+  Query,
   Req,
 } from '@nestjs/common';
 import type { AuthenticatedUserRequest } from '../auth/types/authenticated-request';
@@ -23,8 +24,8 @@ export class DepartmentsController {
 
   @Get()
   @Roles(Role.SUPER_ADMIN, Role.ADMIN, Role.GROCER, Role.KARDIST)
-  async findAll(): Promise<CategoryResponseDto[]> {
-    const departments = await this.categoriesService.listDepartments();
+  async findAll(@Query('q') q?: string): Promise<CategoryResponseDto[]> {
+    const departments = await this.categoriesService.listDepartments(q);
     return departments.map(CategoryResponseDto.fromEntity);
   }
 

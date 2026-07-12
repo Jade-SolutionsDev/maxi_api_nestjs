@@ -26,11 +26,13 @@ export class CategoriesController {
   @Roles(Role.SUPER_ADMIN, Role.ADMIN, Role.GROCER, Role.KARDIST)
   async findAll(
     @Query('departmentId') departmentId: string | undefined,
+    @Query('q') q: string | undefined,
     @Req() request: AuthenticatedUserRequest,
   ): Promise<CategoryResponseDto[]> {
     const categories = await this.categoriesService.listCategories(
       request.user,
       departmentId,
+      q,
     );
     return categories.map(CategoryResponseDto.fromEntity);
   }
