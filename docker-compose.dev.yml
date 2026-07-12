@@ -18,7 +18,9 @@ services:
       retries: 5
       start_period: 5s
 
-  # S3-compatible object storage for image uploads (dev). Console: :9001.
+  # S3-compatible object storage for image uploads (dev).
+  # Internally MinIO serves the S3 API on :9000 and the console on :9001; those
+  # are published on host ports 9002 / 9003. So S3_ENDPOINT must be :9002.
   minio:
     image: minio/minio:latest
     container_name: maxihabana-minio-dev
@@ -27,8 +29,8 @@ services:
       MINIO_ROOT_USER: maxihabana
       MINIO_ROOT_PASSWORD: maxihabana
     ports:
-      - "9000:9000"
-      - "9001:9001"
+      - "9002:9000" # host 9002 -> S3 API (container :9000)
+      - "9003:9001" # host 9003 -> console (container :9001)
     volumes:
       - maxihabana-minio-data:/data
     healthcheck:

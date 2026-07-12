@@ -1,5 +1,9 @@
 import { randomUUID } from 'node:crypto';
-import { Injectable, Logger } from '@nestjs/common';
+import {
+  Injectable,
+  Logger,
+  ServiceUnavailableException,
+} from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { PutObjectCommand, S3Client } from '@aws-sdk/client-s3';
 
@@ -38,6 +42,11 @@ export class StorageService {
       forcePathStyle:
         this.configService.get<boolean>('storage.forcePathStyle') ?? false,
       credentials: this.buildCredentials(),
+      // MinIO (and most S3-compatible stores) reject the SDK's default flexible
+      // checksums (x-amz-checksum-crc32 + aws-chunked trailer), which otherwise
+      // makes PutObject fail. Only send/validate checksums when required.
+      requestChecksumCalculation: 'WHEN_REQUIRED',
+      responseChecksumValidation: 'WHEN_REQUIRED',
     });
   }
 
@@ -61,14 +70,22 @@ export class StorageService {
     const ext = IMAGE_EXTENSIONS[mimeType] ?? 'bin';
     const key = `${prefix}/${randomUUID()}.${ext}`;
 
-    await this.client.send(
-      new PutObjectCommand({
-        Bucket: this.bucket,
-        Key: key,
-        Body: buffer,
-        ContentType: mimeType,
-      }),
-    );
+    try {
+      await this.client.send(
+        new PutObjectCommand({
+          Bucket: this.bucket,
+          Key: key,
+          Body: buffer,
+          ContentType: mimeType,
+        }),
+      );
+    } catch (error) {
+      this.logger.error(
+        `S3 upload failed for bucket "${this.bucket}" key "${key}"`,
+        error instanceof Error ? error.stack : String(error),
+      );
+      throw new ServiceUnavailableException('Image storage is unavailable');
+    }
 
     const url = `${this.publicUrl.replace(/\/$/, '')}/${key}`;
     this.logger.debug(`Uploaded ${key} -> ${url}`);
