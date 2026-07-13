@@ -11,6 +11,8 @@ import { ClientsModule } from './clients/clients.module';
 import { AuthGuard } from './common/guards/auth.guard';
 import { RolesGuard } from './common/guards/roles.guard';
 import { HealthModule } from './health/health.module';
+import { PermissionGuard } from './permissions/guards/permission.guard';
+import { PermissionsModule } from './permissions/permissions.module';
 import { ProductsModule } from './products/products.module';
 import { UploadsModule } from './uploads/uploads.module';
 import { UsersModule } from './users/users.module';
@@ -42,13 +44,16 @@ import { WebhooksModule } from './webhooks/webhooks.module';
     ProductsModule,
     UploadsModule,
     WebhooksModule,
+    PermissionsModule,
   ],
   controllers: [AppController],
   providers: [
     AppService,
-    // Order matters: AuthGuard populates request.user before RolesGuard reads it.
+    // Order matters: AuthGuard populates request.user, then RolesGuard checks the
+    // enum tier, then PermissionGuard checks @RequirePermission (managed roles).
     { provide: APP_GUARD, useClass: AuthGuard },
     { provide: APP_GUARD, useClass: RolesGuard },
+    { provide: APP_GUARD, useClass: PermissionGuard },
   ],
 })
 export class AppModule {}
