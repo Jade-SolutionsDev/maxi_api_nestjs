@@ -1,6 +1,7 @@
 import { forwardRef, Module } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { ClientsModule } from '../clients/clients.module';
+import { PermissionsModule } from '../permissions/permissions.module';
 import { UsersModule } from '../users/users.module';
 import { AuthController } from './auth.controller';
 import { AuthService } from './auth.service';
@@ -11,7 +12,11 @@ import { ClerkAuthProvider } from './providers/clerk-auth.provider';
 import { MockAuthProvider } from './providers/mock-auth.provider';
 
 @Module({
-  imports: [forwardRef(() => UsersModule), forwardRef(() => ClientsModule)],
+  imports: [
+    forwardRef(() => UsersModule),
+    forwardRef(() => ClientsModule),
+    PermissionsModule,
+  ],
   controllers: [AuthController],
   providers: [
     AuthService,
