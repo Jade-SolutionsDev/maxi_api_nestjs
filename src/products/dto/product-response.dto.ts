@@ -2,32 +2,50 @@ import { Product } from '../entities/product.entity';
 
 export class ProductResponseDto {
   id: string;
-  providerId: string;
   categoryId: string;
   sku: string;
   name: string;
   slug: string;
   description: string | null;
+  imageUrl: string | null;
+  format: string | null;
+  expiryDate: string | null;
+  measureUnit: string;
   basePrice: number;
-  unit: string;
-  images: string[];
+  discount: number;
+  finalPrice: number;
+  featured: boolean;
+  sortOrder: number;
   isActive: boolean;
+  // Calculated stock figures. ponytail: 0 until the inventory module lands; the
+  // field is exposed now so the frontend contract stays stable.
+  amount: number;
+  available: number;
   createdAt: Date;
   updatedAt: Date;
 
   static fromEntity(product: Product): ProductResponseDto {
     const dto = new ProductResponseDto();
     dto.id = product.id;
-    dto.providerId = product.providerId;
     dto.categoryId = product.categoryId;
     dto.sku = product.sku;
     dto.name = product.name;
     dto.slug = product.slug;
     dto.description = product.description;
-    dto.basePrice = Number(product.basePrice);
-    dto.unit = product.unit;
-    dto.images = product.images ?? [];
+    dto.imageUrl = product.imageUrl;
+    dto.format = product.format;
+    dto.expiryDate = product.expiryDate;
+    dto.measureUnit = product.measureUnit;
+    const basePrice = Number(product.basePrice);
+    const discount = Number(product.discount);
+    dto.basePrice = basePrice;
+    dto.discount = discount;
+    dto.finalPrice = Math.round(basePrice * (1 - discount / 100) * 100) / 100;
+    dto.featured = product.isFeatured;
+    dto.sortOrder = product.sortOrder;
     dto.isActive = product.isActive;
+    dto.amount = 0;
+    dto.available = 0;
     dto.createdAt = product.createdAt;
     dto.updatedAt = product.updatedAt;
     return dto;

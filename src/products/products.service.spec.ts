@@ -8,32 +8,9 @@ import { getRepositoryToken } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { CategoriesService } from '../categories/categories.service';
 import { Category } from '../categories/entities/category.entity';
-import { Role, User } from '../users/entities/user.entity';
+import { ProductResponseDto } from './dto/product-response.dto';
 import { Product } from './entities/product.entity';
 import { ProductsService } from './products.service';
-
-function makeUser(overrides: Partial<User> = {}): User {
-  return {
-    id: '11111111-1111-1111-1111-111111111111',
-    clerkId: 'clerk_provider',
-    role: Role.GROCER,
-    email: 'provider@example.com',
-    firstName: 'Prov',
-    lastName: 'Ider',
-    phone: null,
-    avatarUrl: null,
-    businessName: null,
-    businessDescription: null,
-    businessLogoUrl: null,
-    clerkOrgId: null,
-    isActive: true,
-    createdBy: null,
-    createdAt: new Date(),
-    updatedAt: new Date(),
-    deletedAt: null,
-    ...overrides,
-  };
-}
 
 function makeChildCategory(overrides: Partial<Category> = {}): Category {
   return {
@@ -48,21 +25,25 @@ function makeChildCategory(overrides: Partial<Category> = {}): Category {
     updatedAt: new Date(),
     deletedAt: null,
     ...overrides,
-  };
+  } as Category;
 }
 
 function makeProduct(overrides: Partial<Product> = {}): Product {
   return {
     id: 'prod-1',
-    providerId: '11111111-1111-1111-1111-111111111111',
     categoryId: 'cat-1',
     sku: 'SKU-1',
     name: 'Cola 1L',
     slug: 'cola-1l',
     description: null,
+    imageUrl: 'https://cdn.example.com/cola.png',
+    format: null,
+    expiryDate: null,
+    measureUnit: 'unidad',
     basePrice: '9.99',
-    unit: 'unidad',
-    images: [],
+    discount: '0.00',
+    isFeatured: false,
+    sortOrder: 0,
     isActive: true,
     createdAt: new Date(),
     updatedAt: new Date(),
@@ -75,7 +56,6 @@ describe('ProductsService', () => {
   let service: ProductsService;
   let repository: jest.Mocked<Repository<Product>>;
   let categoriesService: { getChildCategoryOrThrow: jest.Mock };
-  const provider = makeUser();
 
   beforeEach(async () => {
     categoriesService = { getChildCategoryOrThrow: jest.fn() };
@@ -88,7 +68,6 @@ describe('ProductsService', () => {
           useValue: {
             find: jest.fn(),
             findOne: jest.fn(),
-            count: jest.fn(),
             create: jest.fn(),
             save: jest.fn(),
             softDelete: jest.fn(),
@@ -107,53 +86,75 @@ describe('ProductsService', () => {
   });
 
   describe('create', () => {
-    it('creates a product inside an owned child category', async () => {
+    beforeEach(() => {
+      repository.create.mockImplementation((data) => data as Product);
+      repository.save.mockImplementation((p) => Promise.resolve(p as Product));
+    });
+
+    it('creates a product inside a child category', async () => {
       categoriesService.getChildCategoryOrThrow.mockResolvedValue(
         makeChildCategory(),
       );
       repository.findOne.mockResolvedValue(null); // sku + slug unique
-      repository.create.mockImplementation((data) => data as Product);
-      repository.save.mockImplementation((p) => Promise.resolve(p as Product));
 
-      const result = await service.create(provider, {
+      const result = await service.create({
         categoryId: 'cat-1',
         sku: 'SKU-1',
         name: 'Cola 1L',
+        imageUrl: 'https://cdn.example.com/cola.png',
         basePrice: 9.99,
       });
 
-      expect(result.providerId).toBe(provider.id);
       expect(result.categoryId).toBe('cat-1');
+      expect(result.sku).toBe('SKU-1');
       expect(result.basePrice).toBe('9.99');
       expect(result.slug).toBe('cola-1l');
+      expect(result.measureUnit).toBe('unidad');
     });
 
-    it('propagates BadRequest when category is a department', async () => {
+    it('auto-generates the SKU from the name when omitted', async () => {
+      categoriesService.getChildCategoryOrThrow.mockResolvedValue(
+        makeChildCategory(),
+      );
+      repository.findOne.mockResolvedValue(null);
+
+      const result = await service.create({
+        categoryId: 'cat-1',
+        name: 'Cola 1L',
+        imageUrl: 'https://cdn.example.com/cola.png',
+        basePrice: 9.99,
+      });
+
+      expect(result.sku).toBe('COLA-1L');
+    });
+
+    it('propagates BadRequest when the category is a department', async () => {
       categoriesService.getChildCategoryOrThrow.mockRejectedValue(
         new BadRequestException('is a department'),
       );
 
       await expect(
-        service.create(provider, {
+        service.create({
           categoryId: 'dep-1',
-          sku: 'SKU-2',
           name: 'Cola',
+          imageUrl: 'https://cdn.example.com/cola.png',
           basePrice: 5,
         }),
       ).rejects.toBeInstanceOf(BadRequestException);
     });
 
-    it('throws Conflict on duplicate SKU', async () => {
+    it('throws Conflict on an explicit duplicate SKU', async () => {
       categoriesService.getChildCategoryOrThrow.mockResolvedValue(
         makeChildCategory(),
       );
       repository.findOne.mockResolvedValue(makeProduct()); // existing sku
 
       await expect(
-        service.create(provider, {
+        service.create({
           categoryId: 'cat-1',
           sku: 'SKU-1',
           name: 'Cola 1L',
+          imageUrl: 'https://cdn.example.com/cola.png',
           basePrice: 9.99,
         }),
       ).rejects.toBeInstanceOf(ConflictException);
@@ -161,16 +162,16 @@ describe('ProductsService', () => {
   });
 
   describe('findOne', () => {
-    it('throws NotFound when product is missing (or not owned)', async () => {
+    it('throws NotFound when the product is missing', async () => {
       repository.findOne.mockResolvedValue(null);
-      await expect(service.findOne(provider, 'missing')).rejects.toBeInstanceOf(
+      await expect(service.findOne('missing')).rejects.toBeInstanceOf(
         NotFoundException,
       );
     });
   });
 
   describe('remove', () => {
-    it('soft-deletes an owned product', async () => {
+    it('soft-deletes a product', async () => {
       repository.findOne.mockResolvedValue(makeProduct());
       repository.softDelete.mockResolvedValue({
         affected: 1,
@@ -178,8 +179,26 @@ describe('ProductsService', () => {
         generatedMaps: [],
       });
 
-      await service.remove(provider, 'prod-1');
+      await service.remove('prod-1');
       expect(repository.softDelete).toHaveBeenCalledWith('prod-1');
     });
+  });
+});
+
+describe('ProductResponseDto', () => {
+  it('computes finalPrice from a percentage discount', () => {
+    const dto = ProductResponseDto.fromEntity(
+      makeProduct({ basePrice: '100.00', discount: '15.00' }),
+    );
+    expect(dto.finalPrice).toBe(85);
+    expect(dto.amount).toBe(0);
+    expect(dto.available).toBe(0);
+  });
+
+  it('equals basePrice with no discount', () => {
+    const dto = ProductResponseDto.fromEntity(
+      makeProduct({ basePrice: '9.99', discount: '0.00' }),
+    );
+    expect(dto.finalPrice).toBe(9.99);
   });
 });

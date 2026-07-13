@@ -14,9 +14,9 @@ import {
   StorageService,
 } from './storage.service';
 
-// Only backoffice admins manage the taxonomy, so only they upload its images.
+// Backoffice roles that manage the taxonomy and product catalog upload images.
 @Controller('uploads')
-@Roles(Role.SUPER_ADMIN, Role.ADMIN)
+@Roles(Role.SUPER_ADMIN, Role.ADMIN, Role.KARDIST)
 export class UploadsController {
   constructor(private readonly storageService: StorageService) {}
 
