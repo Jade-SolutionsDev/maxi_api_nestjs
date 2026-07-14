@@ -3,8 +3,10 @@ import { Public } from '../common/decorators/public.decorator';
 import { CategoriesService } from './categories.service';
 import { CategoryResponseDto } from './dto/category-response.dto';
 import { PublicCategoriesQueryDto } from './dto/public-taxonomy-query.dto';
+import { ApiTags } from '@nestjs/swagger';
 
 // Unauthenticated storefront catalog. See PublicDepartmentsController.
+@ApiTags('storefront')
 @Controller('public/categories')
 @Public()
 export class PublicCategoriesController {

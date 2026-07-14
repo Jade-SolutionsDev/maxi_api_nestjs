@@ -16,7 +16,10 @@ import { CategoriesService } from './categories.service';
 import { CategoryResponseDto } from './dto/category-response.dto';
 import { CreateDepartmentDto } from './dto/create-department.dto';
 import { UpdateDepartmentDto } from './dto/update-department.dto';
+import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 
+@ApiTags('departments')
+@ApiBearerAuth()
 @Controller('departments')
 @Roles(Role.SUPER_ADMIN, Role.ADMIN)
 export class DepartmentsController {

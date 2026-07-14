@@ -6,6 +6,7 @@ import { AppModule } from './app.module';
 import { AllExceptionsFilter } from './common/filters/all-exceptions.filter';
 import { ResponseInterceptor } from './common/interceptors/response.interceptor';
 import { ConfigService } from '@nestjs/config';
+import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import { CorsConfig } from './config/configuration';
 
 interface RequestWithRawBody extends IncomingMessage {
@@ -41,6 +42,27 @@ async function bootstrap() {
   );
 
   app.setGlobalPrefix('api');
+
+  // Swagger UI at /api/docs (JSON at /api/docs-json). Off in production —
+  // set SWAGGER_ENABLED=true to expose it there deliberately.
+  if (
+    configService.get<string>('nodeEnv') !== 'production' ||
+    process.env.SWAGGER_ENABLED === 'true'
+  ) {
+    const swaggerConfig = new DocumentBuilder()
+      .setTitle('MaxiHabana API')
+      .setDescription(
+        'Backoffice + storefront API. Success responses are wrapped as ' +
+          '`{ "data": ... }` and errors as `{ "error": { code, message } }` ' +
+          'by global interceptors (not reflected in the schemas below).',
+      )
+      .setVersion('1.0')
+      .addBearerAuth()
+      .build();
+    SwaggerModule.setup('api/docs', app, () =>
+      SwaggerModule.createDocument(app, swaggerConfig),
+    );
+  }
 
   const cors = configService.get<CorsConfig>('cors') ?? {
     origins: [],
