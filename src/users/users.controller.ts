@@ -21,7 +21,10 @@ import { UserResponseDto } from './dto/user-response.dto';
 import { Role, User } from './entities/user.entity';
 import { InvitationsService } from './invitations.service';
 import { UsersService } from './users.service';
+import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 
+@ApiTags('users')
+@ApiBearerAuth()
 @Controller('users')
 @Roles(Role.SUPER_ADMIN, Role.ADMIN)
 export class UsersController {

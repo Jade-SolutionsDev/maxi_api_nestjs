@@ -8,6 +8,7 @@ import {
 import { Request } from 'express';
 import { Public } from '../common/decorators/public.decorator';
 import { WebhooksService } from './webhooks.service';
+import { ApiTags } from '@nestjs/swagger';
 
 interface RequestWithRawBody extends Request {
   rawBody?: string;
@@ -16,6 +17,7 @@ interface RequestWithRawBody extends Request {
 // Clerk's signed webhook calls carry no Bearer token; they self-authenticate
 // via signature verification inside the service.
 @Public()
+@ApiTags('webhooks')
 @Controller('webhooks')
 export class WebhooksController {
   constructor(private readonly webhooksService: WebhooksService) {}

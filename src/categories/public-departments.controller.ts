@@ -3,9 +3,11 @@ import { Public } from '../common/decorators/public.decorator';
 import { CategoriesService } from './categories.service';
 import { CategoryResponseDto } from './dto/category-response.dto';
 import { PublicDepartmentsQueryDto } from './dto/public-taxonomy-query.dto';
+import { ApiTags } from '@nestjs/swagger';
 
 // Unauthenticated storefront catalog. @Public() bypasses the global AuthGuard;
 // no @Roles so RolesGuard passes without a backoffice user. Returns active only.
+@ApiTags('storefront')
 @Controller('public/departments')
 @Public()
 export class PublicDepartmentsController {

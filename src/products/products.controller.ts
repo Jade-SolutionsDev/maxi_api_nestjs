@@ -14,6 +14,7 @@ import { CreateProductDto } from './dto/create-product.dto';
 import { ProductResponseDto } from './dto/product-response.dto';
 import { UpdateProductDto } from './dto/update-product.dto';
 import { ProductsService } from './products.service';
+import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 
 // Query params arrive as strings; coerce the numeric/boolean filters.
 const toNumber = (value?: string): number | undefined => {
@@ -29,6 +30,8 @@ const toBoolean = (value?: string): boolean | undefined => {
 
 // Global catalog: reads are open to every backoffice role; writes are limited to
 // SUPER_ADMIN/ADMIN/KARDIST (method-level @Roles overrides the class default).
+@ApiTags('products')
+@ApiBearerAuth()
 @Controller('products')
 @Roles(Role.SUPER_ADMIN, Role.ADMIN, Role.KARDIST)
 export class ProductsController {

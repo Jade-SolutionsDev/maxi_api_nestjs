@@ -13,8 +13,11 @@ import {
   MAX_IMAGE_SIZE_BYTES,
   StorageService,
 } from './storage.service';
+import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 
 // Backoffice roles that manage the taxonomy and product catalog upload images.
+@ApiTags('uploads')
+@ApiBearerAuth()
 @Controller('uploads')
 @Roles(Role.SUPER_ADMIN, Role.ADMIN, Role.KARDIST)
 export class UploadsController {

@@ -14,7 +14,10 @@ import { ClientsService } from './clients.service';
 import { CreateClientDto } from './dto/create-client.dto';
 import { UpdateClientDto } from './dto/update-client.dto';
 import { ClientResponseDto } from './dto/client-response.dto';
+import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 
+@ApiTags('clients')
+@ApiBearerAuth()
 @Controller('clients')
 @Roles(Role.SUPER_ADMIN, Role.ADMIN)
 export class ClientsController {
