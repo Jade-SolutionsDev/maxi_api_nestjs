@@ -170,6 +170,30 @@ export class StockLocationsService {
     await this.locationRepository.softDelete(id);
   }
 
+  // ---------------- Public helpers (used by the inventory module) ----------------
+
+  // Ensures the user may operate on this storage: managers always may; a grocer
+  // must be assigned to it. Returns the location entity.
+  async assertCanManage(
+    user: User,
+    locationId: string,
+  ): Promise<StockLocation> {
+    const location = await this.getLocationOrThrow(locationId);
+    if (!this.isManager(user)) {
+      await this.assertGrocerAssigned(user, locationId);
+    }
+    return location;
+  }
+
+  // For transfer destinations: the location must exist and be active.
+  async getActiveLocationOrThrow(id: string): Promise<StockLocation> {
+    const location = await this.getLocationOrThrow(id);
+    if (!location.isActive) {
+      throw new BadRequestException(`Stock location "${id}" is not active`);
+    }
+    return location;
+  }
+
   // ---------------- Internal helpers ----------------
 
   private isManager(user: User): boolean {

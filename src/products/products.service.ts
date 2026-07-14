@@ -82,6 +82,22 @@ export class ProductsService {
       .getMany();
   }
 
+  // Total physical stock per product, summed across all storages. Queries the
+  // inventory table directly (raw) to avoid coupling ProductsModule to the
+  // inventory entity. Products with no inventory rows are simply absent (→ 0).
+  async amountsFor(productIds: string[]): Promise<Map<string, number>> {
+    if (productIds.length === 0) return new Map();
+    const rows: { product_id: string; total: number }[] =
+      await this.productRepository.manager.query(
+        `SELECT product_id, COALESCE(SUM(quantity), 0)::int AS total
+           FROM inventory
+          WHERE product_id = ANY($1)
+          GROUP BY product_id`,
+        [productIds],
+      );
+    return new Map(rows.map((r) => [r.product_id, Number(r.total)]));
+  }
+
   async findOne(id: string): Promise<Product> {
     const product = await this.productRepository.findOne({ where: { id } });
     if (!product) {

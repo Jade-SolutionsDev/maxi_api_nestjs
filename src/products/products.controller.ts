@@ -57,15 +57,20 @@ export class ProductsController {
       featured: toBoolean(featured),
       isActive: toBoolean(isActive),
     });
-    return products.map(ProductResponseDto.fromEntity);
+    const amounts = await this.productsService.amountsFor(
+      products.map((p) => p.id),
+    );
+    return products.map((p) =>
+      ProductResponseDto.fromEntity(p, amounts.get(p.id) ?? 0),
+    );
   }
 
   @Get(':id')
   @Roles(Role.SUPER_ADMIN, Role.ADMIN, Role.GROCER, Role.KARDIST)
   async findOne(@Param('id') id: string): Promise<ProductResponseDto> {
-    return ProductResponseDto.fromEntity(
-      await this.productsService.findOne(id),
-    );
+    const product = await this.productsService.findOne(id);
+    const amounts = await this.productsService.amountsFor([product.id]);
+    return ProductResponseDto.fromEntity(product, amounts.get(product.id) ?? 0);
   }
 
   @Post()

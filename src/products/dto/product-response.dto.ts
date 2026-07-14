@@ -17,14 +17,15 @@ export class ProductResponseDto {
   featured: boolean;
   sortOrder: number;
   isActive: boolean;
-  // Calculated stock figures. ponytail: 0 until the inventory module lands; the
-  // field is exposed now so the frontend contract stays stable.
+  // Calculated stock figures. `amount` = total physical stock summed across all
+  // storages; `available` = amount (no reservations yet). Passed in by the
+  // controller from the inventory sums.
   amount: number;
   available: number;
   createdAt: Date;
   updatedAt: Date;
 
-  static fromEntity(product: Product): ProductResponseDto {
+  static fromEntity(product: Product, amount = 0): ProductResponseDto {
     const dto = new ProductResponseDto();
     dto.id = product.id;
     dto.categoryId = product.categoryId;
@@ -44,8 +45,8 @@ export class ProductResponseDto {
     dto.featured = product.isFeatured;
     dto.sortOrder = product.sortOrder;
     dto.isActive = product.isActive;
-    dto.amount = 0;
-    dto.available = 0;
+    dto.amount = amount;
+    dto.available = amount;
     dto.createdAt = product.createdAt;
     dto.updatedAt = product.updatedAt;
     return dto;
