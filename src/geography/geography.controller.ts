@@ -1,4 +1,5 @@
 import { Controller, Get, Param, Query } from '@nestjs/common';
+import { ApiTags } from '@nestjs/swagger';
 import { Public } from '../common/decorators/public.decorator';
 import {
   MunicipalityResponseDto,
@@ -8,6 +9,7 @@ import { GeographyService } from './geography.service';
 
 // Reference geography for Cuba. Public so the storefront can read it too; the
 // backoffice dataProvider consumes the `provinces` / `municipalities` resources.
+@ApiTags('geography')
 @Controller()
 @Public()
 export class GeographyController {

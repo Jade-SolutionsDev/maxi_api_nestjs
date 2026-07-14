@@ -9,6 +9,7 @@ import {
   Query,
   Req,
 } from '@nestjs/common';
+import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import type { AuthenticatedUserRequest } from '../auth/types/authenticated-request';
 import { Roles } from '../common/decorators/roles.decorator';
 import { Role } from '../users/entities/user.entity';
@@ -23,6 +24,8 @@ const toBoolean = (value?: string): boolean | undefined => {
   return undefined;
 };
 
+@ApiTags('stock-locations')
+@ApiBearerAuth()
 @Controller('stock-locations')
 @Roles(Role.SUPER_ADMIN, Role.ADMIN)
 export class StockLocationsController {
