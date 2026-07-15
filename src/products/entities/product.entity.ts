@@ -4,14 +4,16 @@ import {
   DeleteDateColumn,
   Entity,
   Index,
+  JoinColumn,
+  ManyToOne,
   PrimaryGeneratedColumn,
   UpdateDateColumn,
 } from 'typeorm';
+import { Category } from '../../categories/entities/category.entity';
 
 // Global catalog: products are shared across the whole platform (no provider
 // ownership). ponytail: no `departmentId` column — a product's department is the
-// parent of its category, derived when needed; the department picker is a
-// frontend cascade only.
+// parent of its category, exposed read-only via the `category` relation below.
 @Entity('products')
 @Index(['sku'], { unique: true })
 @Index(['slug'], { unique: true })
@@ -21,6 +23,12 @@ export class Product {
 
   @Column({ name: 'category_id', type: 'uuid' })
   categoryId: string;
+
+  // Read-only join to derive the department (category.parentId). No FK
+  // constraint — the column already exists; this only enables eager loading.
+  @ManyToOne(() => Category, { createForeignKeyConstraints: false })
+  @JoinColumn({ name: 'category_id' })
+  category?: Category;
 
   @Column({ type: 'varchar', length: 100 })
   sku: string;

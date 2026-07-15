@@ -3,6 +3,10 @@ import { Product } from '../entities/product.entity';
 export class ProductResponseDto {
   id: string;
   categoryId: string;
+  // The category's parent department, when the category relation is loaded
+  // (findOne). Lets the edit form pre-fill the department cascade. Null in list
+  // responses, which don't need it.
+  departmentId: string | null;
   sku: string;
   name: string;
   slug: string;
@@ -28,6 +32,7 @@ export class ProductResponseDto {
     const dto = new ProductResponseDto();
     dto.id = product.id;
     dto.categoryId = product.categoryId;
+    dto.departmentId = product.category?.parentId ?? null;
     dto.sku = product.sku;
     dto.name = product.name;
     dto.slug = product.slug;
