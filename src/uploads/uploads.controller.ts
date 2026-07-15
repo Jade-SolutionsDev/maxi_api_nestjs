@@ -13,10 +13,13 @@ import {
   MAX_IMAGE_SIZE_BYTES,
   StorageService,
 } from './storage.service';
+import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 
-// Only backoffice admins manage the taxonomy, so only they upload its images.
+// Backoffice roles that manage the taxonomy and product catalog upload images.
+@ApiTags('uploads')
+@ApiBearerAuth()
 @Controller('uploads')
-@Roles(Role.SUPER_ADMIN, Role.ADMIN)
+@Roles(Role.SUPER_ADMIN, Role.ADMIN, Role.KARDIST)
 export class UploadsController {
   constructor(private readonly storageService: StorageService) {}
 

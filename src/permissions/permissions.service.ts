@@ -28,7 +28,12 @@ export interface UserPermissionsPayload {
 }
 
 /** Modules whose actions are governed by managed permissions this stage. */
-export const MODULES = ['products', 'categories', 'departments'] as const;
+export const MODULES = [
+  'products',
+  'categories',
+  'departments',
+  'stock-locations',
+] as const;
 export const ACTIONS = ['list', 'read', 'create', 'update', 'delete'] as const;
 
 const READ: readonly string[] = ['list', 'read'];
@@ -43,9 +48,15 @@ const DEFAULT_ROLE_PERMISSIONS: Record<
   string,
   Record<string, readonly string[]>
 > = {
-  // GROCER: full control of products + read-only taxonomy (today's @Roles).
-  [Role.GROCER]: { products: ACTIONS, categories: READ, departments: READ },
-  // KARDIST: read-only taxonomy, no product access (today's @Roles).
+  // GROCER: full control of products + read-only taxonomy, and manage their
+  // assigned storages — list/read/update but not create/delete (today's @Roles).
+  [Role.GROCER]: {
+    products: ACTIONS,
+    categories: READ,
+    departments: READ,
+    'stock-locations': ['list', 'read', 'update'],
+  },
+  // KARDIST: read-only taxonomy, no product/storage access (today's @Roles).
   [Role.KARDIST]: { categories: READ, departments: READ },
 };
 

@@ -10,10 +10,13 @@ import { CategoriesModule } from './categories/categories.module';
 import { ClientsModule } from './clients/clients.module';
 import { AuthGuard } from './common/guards/auth.guard';
 import { RolesGuard } from './common/guards/roles.guard';
+import { GeographyModule } from './geography/geography.module';
 import { HealthModule } from './health/health.module';
+import { InventoryModule } from './inventory/inventory.module';
 import { PermissionGuard } from './permissions/guards/permission.guard';
 import { PermissionsModule } from './permissions/permissions.module';
 import { ProductsModule } from './products/products.module';
+import { StockLocationsModule } from './stock-locations/stock-locations.module';
 import { UploadsModule } from './uploads/uploads.module';
 import { UsersModule } from './users/users.module';
 import { WebhooksModule } from './webhooks/webhooks.module';
@@ -42,6 +45,9 @@ import { WebhooksModule } from './webhooks/webhooks.module';
     AuthModule,
     CategoriesModule,
     ProductsModule,
+    GeographyModule,
+    StockLocationsModule,
+    InventoryModule,
     UploadsModule,
     WebhooksModule,
     PermissionsModule,

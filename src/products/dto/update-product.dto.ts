@@ -1,12 +1,13 @@
 import {
-  ArrayMaxSize,
-  IsArray,
   IsBoolean,
+  IsDateString,
+  IsInt,
   IsNumber,
   IsOptional,
   IsString,
   IsUUID,
   Length,
+  Max,
   MaxLength,
   Min,
 } from 'class-validator';
@@ -36,21 +37,43 @@ export class UpdateProductDto {
   description?: string;
 
   @IsOptional()
+  @IsString()
+  @MaxLength(2048)
+  imageUrl?: string;
+
+  @IsOptional()
+  @IsString()
+  @Length(1, 100)
+  format?: string;
+
+  @IsOptional()
+  @IsDateString()
+  expiryDate?: string;
+
+  @IsOptional()
+  @IsString()
+  @Length(1, 50)
+  measureUnit?: string;
+
+  @IsOptional()
   @IsNumber()
   @Min(0)
   basePrice?: number;
 
   @IsOptional()
-  @IsString()
-  @Length(1, 50)
-  unit?: string;
+  @IsNumber()
+  @Min(0)
+  @Max(100)
+  discount?: number;
 
   @IsOptional()
-  @IsArray()
-  @IsString({ each: true })
-  @MaxLength(2048, { each: true })
-  @ArrayMaxSize(20)
-  images?: string[];
+  @IsBoolean()
+  featured?: boolean;
+
+  @IsOptional()
+  @IsInt()
+  @Min(0)
+  sortOrder?: number;
 
   @IsOptional()
   @IsBoolean()
