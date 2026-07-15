@@ -10,7 +10,15 @@ const dataSource = new DataSource({
   type: 'postgres',
   url: DATABASE_URL,
   entities: [User],
-  synchronize: true,
+  // Data-only: the table already exists (API owns the schema). Never emit DDL
+  // against the target DB — this script only reads/updates a row.
+  synchronize: false,
+  // Render (and most managed Postgres) require TLS for external connections;
+  // their cert isn't in Node's default CA bundle, hence rejectUnauthorized:false.
+  // Local dev URLs stay plaintext.
+  ssl: /render\.com|sslmode=require/.test(DATABASE_URL)
+    ? { rejectUnauthorized: false }
+    : false,
 });
 
 const rl = readline.createInterface({
@@ -37,13 +45,22 @@ async function main() {
   await dataSource.initialize();
   const repository = dataSource.getRepository(User);
 
+  // Match an existing account by clerkId OR email (both unique) so a user
+  // auto-created by the Clerk webhook can be promoted rather than duplicated.
   const existing = await repository.findOne({
-    where: { clerkId },
+    where: [{ clerkId }, { email: email.toLowerCase() }],
     withDeleted: true,
   });
 
   if (existing) {
-    console.warn(`A user with clerkId "${clerkId}" already exists. Skipping.`);
+    const before = existing.role;
+    existing.role = Role.SUPER_ADMIN;
+    existing.isActive = true;
+    existing.deletedAt = null; // restore if it had been soft-deleted
+    await repository.save(existing);
+    console.log(
+      `Existing user "${existing.email ?? existing.clerkId}" promoted ${before} -> SUPER_ADMIN.`,
+    );
   } else {
     const user = repository.create({
       clerkId,
