@@ -132,7 +132,7 @@ export class ProductsService {
       name: dto.name,
       slug,
       description: dto.description ?? null,
-      imageUrl: dto.imageUrl,
+      imageUrl: dto.imageUrl ?? null,
       format: dto.format ?? null,
       expiryDate: dto.expiryDate ?? null,
       measureUnit: dto.measureUnit ?? 'unidad',

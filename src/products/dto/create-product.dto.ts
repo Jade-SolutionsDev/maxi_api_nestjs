@@ -37,10 +37,14 @@ export class CreateProductDto {
   @IsString()
   description?: string;
 
+  // TEMPORARY: optional until the Render file server (image uploads) is
+  // configured — QA cannot upload images yet, so requiring one blocks testing.
+  // To restore: add back `@IsNotEmpty()` here and `validate={required()}` on the
+  // frontend <ImageUploadInput source="imageUrl">.
+  @IsOptional()
   @IsString()
-  @IsNotEmpty()
   @MaxLength(2048)
-  imageUrl: string;
+  imageUrl?: string;
 
   @IsOptional()
   @IsString()

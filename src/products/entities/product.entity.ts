@@ -42,8 +42,8 @@ export class Product {
   @Column({ type: 'text', nullable: true })
   description: string | null;
 
-  // Nullable at the DB level so `synchronize` doesn't fail on pre-existing rows;
-  // the DTO requires it on write.
+  // Nullable: the DTO also treats it as optional while the file server is not
+  // configured (see CreateProductDto.imageUrl).
   @Column({ name: 'image_url', type: 'text', nullable: true })
   imageUrl: string | null;
 

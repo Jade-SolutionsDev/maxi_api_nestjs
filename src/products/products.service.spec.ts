@@ -128,6 +128,21 @@ describe('ProductsService', () => {
       expect(result.sku).toBe('COLA-1L');
     });
 
+    it('creates without an image (optional while the file server is off)', async () => {
+      categoriesService.getChildCategoryOrThrow.mockResolvedValue(
+        makeChildCategory(),
+      );
+      repository.findOne.mockResolvedValue(null);
+
+      const result = await service.create({
+        categoryId: 'cat-1',
+        name: 'Cola 1L',
+        basePrice: 9.99,
+      });
+
+      expect(result.imageUrl).toBeNull();
+    });
+
     it('propagates BadRequest when the category is a department', async () => {
       categoriesService.getChildCategoryOrThrow.mockRejectedValue(
         new BadRequestException('is a department'),
