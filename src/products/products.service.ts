@@ -19,6 +19,8 @@ export interface ProductFilters {
   maxPrice?: number;
   featured?: boolean;
   isActive?: boolean;
+  sortBy?: 'name' | 'price' | 'createdAt';
+  sortOrder?: 'asc' | 'desc';
 }
 
 // Global catalog: no provider scoping. Every authenticated backoffice user can
@@ -76,10 +78,27 @@ export class ProductsService {
       });
     }
 
-    return qb
-      .orderBy('product.sortOrder', 'ASC')
-      .addOrderBy('product.createdAt', 'DESC')
-      .getMany();
+    const dir = (filters.sortOrder ?? 'asc').toUpperCase() as 'ASC' | 'DESC';
+    switch (filters.sortBy) {
+      case 'name':
+        qb.orderBy('product.name', dir);
+        break;
+      case 'price':
+        // ponytail: sorts by list price; final (discounted) price ordering only
+        // differs when discounts vary — add an expression sort if needed.
+        qb.orderBy('product.basePrice', dir);
+        break;
+      case 'createdAt':
+        qb.orderBy('product.createdAt', dir);
+        break;
+      default:
+        // Catalog order: curated first, then newest.
+        qb.orderBy('product.sortOrder', 'ASC').addOrderBy(
+          'product.createdAt',
+          'DESC',
+        );
+    }
+    return qb.getMany();
   }
 
   // Total physical stock per product, summed across all storages. Queries the

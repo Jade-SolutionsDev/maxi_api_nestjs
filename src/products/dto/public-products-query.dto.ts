@@ -1,6 +1,7 @@
 import { Transform } from 'class-transformer';
 import {
   IsBoolean,
+  IsIn,
   IsNumber,
   IsOptional,
   IsString,
@@ -10,6 +11,7 @@ import {
 import {
   toOptionalBoolean,
   toOptionalNumber,
+  toSortOrder,
 } from '../../common/dto/query-transforms';
 
 export class PublicProductsQueryDto {
@@ -68,4 +70,18 @@ export class PublicProductsQueryDto {
   @IsNumber()
   @Min(1)
   limit?: number;
+
+  /**
+   * Sort field. Omitted → catalog order (curated `sortOrder`, then newest).
+   * `price` sorts by list price. For a "recent" section use `createdAt` + `desc`.
+   */
+  @IsOptional()
+  @IsIn(['name', 'price', 'createdAt'])
+  sortBy?: 'name' | 'price' | 'createdAt';
+
+  /** Sort direction (default `asc`). */
+  @IsOptional()
+  @Transform(toSortOrder)
+  @IsIn(['asc', 'desc'])
+  sortOrder?: 'asc' | 'desc';
 }

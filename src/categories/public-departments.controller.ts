@@ -24,6 +24,8 @@ export class PublicDepartmentsController {
   ): Promise<CategoryResponseDto[]> {
     const departments = await this.categoriesService.listPublicDepartments({
       featured: query.featured,
+      sortBy: query.sortBy,
+      sortOrder: query.sortOrder,
     });
     return departments.map(CategoryResponseDto.fromEntity);
   }

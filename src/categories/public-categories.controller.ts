@@ -23,6 +23,8 @@ export class PublicCategoriesController {
   ): Promise<CategoryResponseDto[]> {
     const categories = await this.categoriesService.listPublicCategories({
       departmentId: query.departmentId,
+      sortBy: query.sortBy,
+      sortOrder: query.sortOrder,
     });
     return categories.map(CategoryResponseDto.fromEntity);
   }

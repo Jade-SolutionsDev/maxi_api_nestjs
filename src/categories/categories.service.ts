@@ -5,7 +5,14 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { FindOptionsWhere, ILike, IsNull, Not, Repository } from 'typeorm';
+import {
+  FindOptionsWhere,
+  ILike,
+  IsNull,
+  Not,
+  Repository,
+  SelectQueryBuilder,
+} from 'typeorm';
 import { slugify } from '../common/utils/catalog-ownership.utils';
 import { Product } from '../products/entities/product.entity';
 import { User } from '../users/entities/user.entity';
@@ -14,6 +21,9 @@ import { CreateDepartmentDto } from './dto/create-department.dto';
 import { UpdateCategoryDto } from './dto/update-category.dto';
 import { UpdateDepartmentDto } from './dto/update-department.dto';
 import { Category } from './entities/category.entity';
+
+/** Storefront sort fields shared by the public department/category lists. */
+export type PublicSortField = 'name' | 'sortOrder' | 'createdAt';
 
 // Departments/categories are a single GLOBAL taxonomy: no per-provider
 // ownership, every authenticated user reads the same rows (writes are gated to
@@ -248,6 +258,8 @@ export class CategoriesService {
 
   async listPublicDepartments(filters: {
     featured?: boolean;
+    sortBy?: PublicSortField;
+    sortOrder?: 'asc' | 'desc';
   }): Promise<Category[]> {
     const qb = this.categoryRepository
       .createQueryBuilder('dep')
@@ -262,14 +274,13 @@ export class CategoriesService {
             AND c.is_active = true
             AND ${this.categoryHasStockSql('c.id')}
         )`,
-      )
-      .orderBy('dep.sortOrder', 'ASC')
-      .addOrderBy('dep.name', 'ASC');
+      );
 
     if (filters.featured) {
       qb.andWhere('dep.isFeatured = :featured', { featured: true });
     }
 
+    this.applyPublicOrder(qb, 'dep', filters.sortBy, filters.sortOrder);
     return qb.getMany();
   }
 
@@ -285,15 +296,15 @@ export class CategoriesService {
 
   async listPublicCategories(filters: {
     departmentId?: string;
+    sortBy?: PublicSortField;
+    sortOrder?: 'asc' | 'desc';
   }): Promise<Category[]> {
     const qb = this.categoryRepository
       .createQueryBuilder('cat')
       .where('cat.parentId IS NOT NULL')
       .andWhere('cat.isActive = :active', { active: true })
       // Valid category = has ≥1 active product with positive stock.
-      .andWhere(this.categoryHasStockSql('cat.id'))
-      .orderBy('cat.sortOrder', 'ASC')
-      .addOrderBy('cat.name', 'ASC');
+      .andWhere(this.categoryHasStockSql('cat.id'));
 
     if (filters.departmentId) {
       qb.andWhere('cat.parentId = :departmentId', {
@@ -301,7 +312,35 @@ export class CategoriesService {
       });
     }
 
+    this.applyPublicOrder(qb, 'cat', filters.sortBy, filters.sortOrder);
     return qb.getMany();
+  }
+
+  // Shared storefront ordering for departments/categories. Default (no sortBy)
+  // preserves the curated order: sortOrder asc, then name.
+  private applyPublicOrder(
+    qb: SelectQueryBuilder<Category>,
+    alias: string,
+    sortBy: PublicSortField | undefined,
+    sortOrder: 'asc' | 'desc' | undefined,
+  ): void {
+    const dir = (sortOrder ?? 'asc').toUpperCase() as 'ASC' | 'DESC';
+    switch (sortBy) {
+      case 'name':
+        qb.orderBy(`${alias}.name`, dir);
+        break;
+      case 'createdAt':
+        qb.orderBy(`${alias}.createdAt`, dir);
+        break;
+      case 'sortOrder':
+        qb.orderBy(`${alias}.sortOrder`, dir);
+        break;
+      default:
+        qb.orderBy(`${alias}.sortOrder`, 'ASC').addOrderBy(
+          `${alias}.name`,
+          'ASC',
+        );
+    }
   }
 
   async getPublicCategory(id: string): Promise<Category> {

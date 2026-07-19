@@ -42,6 +42,8 @@ export class PublicProductsController {
         minPrice: query.minPrice,
         maxPrice: query.maxPrice,
         featured: query.featured,
+        sortBy: query.sortBy,
+        sortOrder: query.sortOrder,
       },
       {
         locationId: query.locationId,

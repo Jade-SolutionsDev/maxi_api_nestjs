@@ -22,3 +22,7 @@ export const toOptionalNumber = ({ value }: TransformFnParams): unknown => {
   const n = Number(value);
   return Number.isNaN(n) ? undefined : n;
 };
+
+/** Lower-case a `?sortOrder=ASC` value so `@IsIn(['asc','desc'])` is case-tolerant. */
+export const toSortOrder = ({ value }: TransformFnParams): unknown =>
+  typeof value === 'string' ? value.toLowerCase() : value;
