@@ -282,35 +282,43 @@ describe('CategoriesService', () => {
   });
 
   describe('public reads', () => {
-    it('listPublicDepartments returns rows and applies the featured filter', async () => {
+    it('listPublicDepartments always filters by stock validity + optional featured', async () => {
       const rows = [makeCategory({ id: 'dep-1', isFeatured: true })];
       const qb = makeQueryBuilderStub(rows);
       repository.createQueryBuilder.mockReturnValue(qb as never);
 
-      const result = await service.listPublicDepartments({
-        featured: true,
-        hasActiveCategories: true,
-      });
+      const result = await service.listPublicDepartments({ featured: true });
 
       expect(result).toBe(rows);
-      // base isActive filter + featured + hasActiveCategories EXISTS
+      // Validity EXISTS is always applied (stock-aware, references inventory).
+      expect(qb.andWhere).toHaveBeenCalledWith(
+        expect.stringContaining('inventory'),
+      );
       expect(qb.andWhere).toHaveBeenCalledWith('dep.isFeatured = :featured', {
         featured: true,
       });
-      expect(qb.andWhere).toHaveBeenCalledTimes(3);
     });
 
-    it('listPublicCategories filters by department and product existence', async () => {
+    it('listPublicCategories filters by stock validity even with no facets', async () => {
       const rows = [makeCategory({ id: 'cat-1', parentId: 'dep-1' })];
       const qb = makeQueryBuilderStub(rows);
       repository.createQueryBuilder.mockReturnValue(qb as never);
 
-      const result = await service.listPublicCategories({
-        departmentId: 'dep-1',
-        active: true,
-      });
+      const result = await service.listPublicCategories({});
 
       expect(result).toBe(rows);
+      expect(qb.andWhere).toHaveBeenCalledWith(
+        expect.stringContaining('inventory'),
+      );
+    });
+
+    it('listPublicCategories narrows to a department when given', async () => {
+      const rows = [makeCategory({ id: 'cat-1', parentId: 'dep-1' })];
+      const qb = makeQueryBuilderStub(rows);
+      repository.createQueryBuilder.mockReturnValue(qb as never);
+
+      await service.listPublicCategories({ departmentId: 'dep-1' });
+
       expect(qb.andWhere).toHaveBeenCalledWith('cat.parentId = :departmentId', {
         departmentId: 'dep-1',
       });

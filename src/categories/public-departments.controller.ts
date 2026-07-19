@@ -13,17 +13,22 @@ import { ApiTags } from '@nestjs/swagger';
 export class PublicDepartmentsController {
   constructor(private readonly categoriesService: CategoriesService) {}
 
+  /**
+   * List storefront departments. Only valid departments are returned — active
+   * departments that have at least one active child category with in-stock
+   * products. Pass `featured=true` to restrict to featured departments.
+   */
   @Get()
   async findAll(
     @Query() query: PublicDepartmentsQueryDto,
   ): Promise<CategoryResponseDto[]> {
     const departments = await this.categoriesService.listPublicDepartments({
       featured: query.featured,
-      hasActiveCategories: query.hasActiveCategories,
     });
     return departments.map(CategoryResponseDto.fromEntity);
   }
 
+  /** Get a single active department by id (404 if missing or inactive). */
   @Get(':id')
   async findOne(@Param('id') id: string): Promise<CategoryResponseDto> {
     return CategoryResponseDto.fromEntity(

@@ -2,18 +2,16 @@ import { Transform } from 'class-transformer';
 import { IsBoolean, IsOptional, IsUUID } from 'class-validator';
 import { toOptionalBoolean } from '../../common/dto/query-transforms';
 
+// Storefront endpoints already return only *valid* rows (active departments
+// with in-stock categories / active categories with in-stock products), so no
+// opt-in validity flag is needed — these DTOs only carry genuine facets.
+
 export class PublicDepartmentsQueryDto {
   /** Only departments flagged as featured. */
   @IsOptional()
   @Transform(toOptionalBoolean)
   @IsBoolean()
   featured?: boolean;
-
-  /** Only departments that have ≥1 active child category with products. */
-  @IsOptional()
-  @Transform(toOptionalBoolean)
-  @IsBoolean()
-  hasActiveCategories?: boolean;
 }
 
 export class PublicCategoriesQueryDto {
@@ -21,10 +19,4 @@ export class PublicCategoriesQueryDto {
   @IsOptional()
   @IsUUID()
   departmentId?: string;
-
-  /** Only categories that have ≥1 product associated. */
-  @IsOptional()
-  @Transform(toOptionalBoolean)
-  @IsBoolean()
-  active?: boolean;
 }

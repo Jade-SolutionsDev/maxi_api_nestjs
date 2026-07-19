@@ -12,17 +12,22 @@ import { ApiTags } from '@nestjs/swagger';
 export class PublicCategoriesController {
   constructor(private readonly categoriesService: CategoriesService) {}
 
+  /**
+   * List storefront categories. Only valid categories are returned — active
+   * categories that have at least one active product with positive stock. Pass
+   * `departmentId` to list the categories of a single department.
+   */
   @Get()
   async findAll(
     @Query() query: PublicCategoriesQueryDto,
   ): Promise<CategoryResponseDto[]> {
     const categories = await this.categoriesService.listPublicCategories({
       departmentId: query.departmentId,
-      active: query.active,
     });
     return categories.map(CategoryResponseDto.fromEntity);
   }
 
+  /** Get a single active category by id (404 if missing or inactive). */
   @Get(':id')
   async findOne(@Param('id') id: string): Promise<CategoryResponseDto> {
     return CategoryResponseDto.fromEntity(

@@ -228,34 +228,46 @@ export class CategoriesService {
 
   // ---------------- Public storefront reads (active rows only) ----------------
 
+  // A category is "valid" (browsable in the storefront) when it has at least
+  // one active, non-deleted product whose total inventory across locations is
+  // positive. Reused by both public list queries; `catId` is the correlated
+  // category-id column (safe: internal literals, never user input).
+  private categoryHasStockSql(catId: string): string {
+    return `EXISTS (
+      SELECT 1 FROM products p
+      WHERE p.category_id = ${catId}
+        AND p.deleted_at IS NULL
+        AND p.is_active = true
+        AND (
+          SELECT COALESCE(SUM(i.quantity), 0)
+          FROM inventory i
+          WHERE i.product_id = p.id
+        ) > 0
+    )`;
+  }
+
   async listPublicDepartments(filters: {
     featured?: boolean;
-    hasActiveCategories?: boolean;
   }): Promise<Category[]> {
     const qb = this.categoryRepository
       .createQueryBuilder('dep')
       .where('dep.parentId IS NULL')
       .andWhere('dep.isActive = :active', { active: true })
-      .orderBy('dep.sortOrder', 'ASC')
-      .addOrderBy('dep.name', 'ASC');
-
-    if (filters.featured) {
-      qb.andWhere('dep.isFeatured = :featured', { featured: true });
-    }
-    if (filters.hasActiveCategories) {
-      // Department has ≥1 active child category that has ≥1 product.
-      qb.andWhere(
+      // Valid department = has ≥1 active child category with in-stock products.
+      .andWhere(
         `EXISTS (
           SELECT 1 FROM categories c
           WHERE c.parent_id = dep.id
             AND c.deleted_at IS NULL
             AND c.is_active = true
-            AND EXISTS (
-              SELECT 1 FROM products p
-              WHERE p.category_id = c.id AND p.deleted_at IS NULL
-            )
+            AND ${this.categoryHasStockSql('c.id')}
         )`,
-      );
+      )
+      .orderBy('dep.sortOrder', 'ASC')
+      .addOrderBy('dep.name', 'ASC');
+
+    if (filters.featured) {
+      qb.andWhere('dep.isFeatured = :featured', { featured: true });
     }
 
     return qb.getMany();
@@ -273,12 +285,13 @@ export class CategoriesService {
 
   async listPublicCategories(filters: {
     departmentId?: string;
-    active?: boolean;
   }): Promise<Category[]> {
     const qb = this.categoryRepository
       .createQueryBuilder('cat')
       .where('cat.parentId IS NOT NULL')
       .andWhere('cat.isActive = :active', { active: true })
+      // Valid category = has ≥1 active product with positive stock.
+      .andWhere(this.categoryHasStockSql('cat.id'))
       .orderBy('cat.sortOrder', 'ASC')
       .addOrderBy('cat.name', 'ASC');
 
@@ -286,15 +299,6 @@ export class CategoriesService {
       qb.andWhere('cat.parentId = :departmentId', {
         departmentId: filters.departmentId,
       });
-    }
-    if (filters.active) {
-      // "Active category" = has ≥1 (non-deleted) product associated.
-      qb.andWhere(
-        `EXISTS (
-          SELECT 1 FROM products p
-          WHERE p.category_id = cat.id AND p.deleted_at IS NULL
-        )`,
-      );
     }
 
     return qb.getMany();
