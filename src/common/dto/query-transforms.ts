@@ -13,3 +13,12 @@ export const toOptionalBoolean = ({ value }: TransformFnParams): unknown => {
   }
   return value;
 };
+
+/** Coerce `?n=123` query strings into numbers (absent/empty/invalid → undefined). */
+export const toOptionalNumber = ({ value }: TransformFnParams): unknown => {
+  if (value === undefined || value === '' || value === null) {
+    return undefined;
+  }
+  const n = Number(value);
+  return Number.isNaN(n) ? undefined : n;
+};

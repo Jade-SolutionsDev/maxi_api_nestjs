@@ -98,6 +98,57 @@ export class ProductsService {
     return new Map(rows.map((r) => [r.product_id, Number(r.total)]));
   }
 
+  // Storefront listing: active products with stock. Reuses findAll for the
+  // catalog filters, then attaches stock (per-location if locationId is given,
+  // else the total across all storages) and drops out-of-stock rows unless
+  // includeOutOfStock is set. ponytail: stock filter + limit applied in JS over
+  // the (small) catalog; push into SQL with a LIMIT if it ever grows.
+  async findStorefront(
+    filters: ProductFilters,
+    opts: {
+      locationId?: string;
+      includeOutOfStock?: boolean;
+      limit?: number;
+    } = {},
+  ): Promise<{ product: Product; stock: number }[]> {
+    const products = await this.findAll({ ...filters, isActive: true });
+    const stock = await this.stockMap(
+      opts.locationId,
+      products.map((p) => p.id),
+    );
+
+    let rows = products.map((p) => ({
+      product: p,
+      stock: stock.get(p.id) ?? 0,
+    }));
+    if (!opts.includeOutOfStock) {
+      rows = rows.filter((r) => r.stock > 0);
+    }
+    if (opts.limit != null) {
+      rows = rows.slice(0, opts.limit);
+    }
+    return rows;
+  }
+
+  // Stock per product: summed for a single storage when locationId is given,
+  // otherwise across all storages (same query shape as amountsFor).
+  private async stockMap(
+    locationId: string | undefined,
+    productIds: string[],
+  ): Promise<Map<string, number>> {
+    if (productIds.length === 0) return new Map();
+    if (!locationId) return this.amountsFor(productIds);
+    const rows: { product_id: string; total: number }[] =
+      await this.productRepository.manager.query(
+        `SELECT product_id, COALESCE(SUM(quantity), 0)::int AS total
+           FROM inventory
+          WHERE location_id = $1 AND product_id = ANY($2)
+          GROUP BY product_id`,
+        [locationId, productIds],
+      );
+    return new Map(rows.map((r) => [r.product_id, Number(r.total)]));
+  }
+
   async findOne(id: string): Promise<Product> {
     const product = await this.productRepository.findOne({
       where: { id },
