@@ -71,6 +71,7 @@ describe('ProductsService', () => {
             create: jest.fn(),
             save: jest.fn(),
             softDelete: jest.fn(),
+            manager: { query: jest.fn() },
           },
         },
         { provide: CategoriesService, useValue: categoriesService },
@@ -181,6 +182,85 @@ describe('ProductsService', () => {
       repository.findOne.mockResolvedValue(null);
       await expect(service.findOne('missing')).rejects.toBeInstanceOf(
         NotFoundException,
+      );
+    });
+  });
+
+  describe('findStorefront', () => {
+    it('returns only in-stock products (total across storages) and applies limit', async () => {
+      jest
+        .spyOn(service, 'findAll')
+        .mockResolvedValue([
+          makeProduct({ id: 'p1' }),
+          makeProduct({ id: 'p2' }),
+          makeProduct({ id: 'p3' }),
+        ]);
+      jest.spyOn(service, 'amountsFor').mockResolvedValue(
+        new Map([
+          ['p1', 5],
+          ['p2', 0],
+          ['p3', 12],
+        ]),
+      );
+
+      const rows = await service.findStorefront({}, { limit: 1 });
+
+      // p2 (0 stock) dropped; p1 then p3 remain; limit 1 → p1 only.
+      expect(rows).toEqual([
+        { product: expect.objectContaining({ id: 'p1' }), stock: 5 },
+      ]);
+    });
+
+    it('includeOutOfStock keeps zero-stock products', async () => {
+      jest
+        .spyOn(service, 'findAll')
+        .mockResolvedValue([
+          makeProduct({ id: 'p1' }),
+          makeProduct({ id: 'p2' }),
+        ]);
+      jest.spyOn(service, 'amountsFor').mockResolvedValue(
+        new Map([
+          ['p1', 0],
+          ['p2', 3],
+        ]),
+      );
+
+      const rows = await service.findStorefront(
+        {},
+        { includeOutOfStock: true },
+      );
+      expect(rows.map((r) => r.stock)).toEqual([0, 3]);
+    });
+
+    it('uses location-specific stock when locationId is given', async () => {
+      jest
+        .spyOn(service, 'findAll')
+        .mockResolvedValue([makeProduct({ id: 'p1' })]);
+      const amountsSpy = jest.spyOn(service, 'amountsFor');
+      repository.manager.query = jest
+        .fn()
+        .mockResolvedValue([{ product_id: 'p1', total: 7 }]);
+
+      const rows = await service.findStorefront({}, { locationId: 'loc-1' });
+
+      expect(rows).toEqual([
+        { product: expect.objectContaining({ id: 'p1' }), stock: 7 },
+      ]);
+      expect(amountsSpy).not.toHaveBeenCalled(); // location path bypasses the all-storages sum
+      expect(repository.manager.query).toHaveBeenCalledWith(
+        expect.stringContaining('location_id = $1'),
+        ['loc-1', ['p1']],
+      );
+    });
+
+    it('forces isActive=true so inactive products never reach the storefront', async () => {
+      const findAllSpy = jest.spyOn(service, 'findAll').mockResolvedValue([]);
+      jest.spyOn(service, 'amountsFor').mockResolvedValue(new Map());
+
+      await service.findStorefront({ featured: true });
+
+      expect(findAllSpy).toHaveBeenCalledWith(
+        expect.objectContaining({ featured: true, isActive: true }),
       );
     });
   });
