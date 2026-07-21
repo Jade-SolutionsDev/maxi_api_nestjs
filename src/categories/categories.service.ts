@@ -146,7 +146,7 @@ export class CategoriesService {
     });
   }
 
-  async getCategory(_user: User, id: string): Promise<Category> {
+  async getCategory(id: string): Promise<Category> {
     const category = await this.categoryRepository.findOne({
       where: { id },
     });
@@ -182,7 +182,7 @@ export class CategoriesService {
     id: string,
     dto: UpdateCategoryDto,
   ): Promise<Category> {
-    const category = await this.getCategory(user, id);
+    const category = await this.getCategory(id);
 
     if (dto.departmentId !== undefined) {
       // Re-parent only onto a department, never onto another category.
@@ -216,7 +216,7 @@ export class CategoriesService {
   }
 
   async removeCategory(user: User, id: string): Promise<void> {
-    const category = await this.getCategory(user, id);
+    const category = await this.getCategory(id);
 
     if (category.parentId === null) {
       throw new BadRequestException(

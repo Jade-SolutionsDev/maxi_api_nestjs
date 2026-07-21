@@ -40,12 +40,9 @@ export class CategoriesController {
 
   @Get(':id')
   @RequirePermission({ module: 'categories', action: 'read' })
-  async findOne(
-    @Param('id') id: string,
-    @Req() request: AuthenticatedUserRequest,
-  ): Promise<CategoryResponseDto> {
+  async findOne(@Param('id') id: string): Promise<CategoryResponseDto> {
     return CategoryResponseDto.fromEntity(
-      await this.categoriesService.getCategory(request.user, id),
+      await this.categoriesService.getCategory(id),
     );
   }
 

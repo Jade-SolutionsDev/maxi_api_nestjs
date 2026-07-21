@@ -10,6 +10,8 @@ import { Public } from '../common/decorators/public.decorator';
 import { ProductResponseDto } from './dto/product-response.dto';
 import { PublicProductsQueryDto } from './dto/public-products-query.dto';
 import { ProductsService } from './products.service';
+import { CategoriesService } from '../categories/categories.service';
+import { CategoryResponseDto } from '../categories/dto/category-response.dto';
 
 // Unauthenticated storefront catalog. @Public() bypasses the global AuthGuard;
 // no @Roles so RolesGuard passes without a backoffice user. See the other
@@ -18,7 +20,10 @@ import { ProductsService } from './products.service';
 @Controller('public/products')
 @Public()
 export class PublicProductsController {
-  constructor(private readonly productsService: ProductsService) {}
+  constructor(
+    private readonly productsService: ProductsService,
+    private readonly categoryService: CategoriesService,
+  ) {}
 
   @Get()
   @ApiOperation({
@@ -51,7 +56,9 @@ export class PublicProductsController {
         limit: query.limit,
       },
     );
-    return rows.map((r) => ProductResponseDto.fromEntity(r.product, r.stock));
+    return rows.map((r) =>
+      ProductResponseDto.fromEntity(r.product, r.stock, undefined),
+    );
   }
 
   @Get(':id')
@@ -61,11 +68,20 @@ export class PublicProductsController {
   @ApiOkResponse({ type: ProductResponseDto })
   async findOne(@Param('id') id: string): Promise<ProductResponseDto> {
     const product = await this.productsService.findOne(id);
+    const category = product.categoryId
+      ? CategoryResponseDto.fromEntity(
+          await this.categoryService.getCategory(product.categoryId),
+        )
+      : undefined;
     if (!product.isActive) {
       // Inactive products are not part of the storefront catalog.
       throw new NotFoundException(`Product with id "${id}" not found`);
     }
     const amounts = await this.productsService.amountsFor([id]);
-    return ProductResponseDto.fromEntity(product, amounts.get(id) ?? 0);
+    return ProductResponseDto.fromEntity(
+      product,
+      amounts.get(id) ?? 0,
+      category,
+    );
   }
 }

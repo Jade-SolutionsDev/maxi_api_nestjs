@@ -60,7 +60,7 @@ export class ProductsController {
       products.map((p) => p.id),
     );
     return products.map((p) =>
-      ProductResponseDto.fromEntity(p, amounts.get(p.id) ?? 0),
+      ProductResponseDto.fromEntity(p, amounts.get(p.id) ?? 0, undefined),
     );
   }
 
@@ -69,7 +69,11 @@ export class ProductsController {
   async findOne(@Param('id') id: string): Promise<ProductResponseDto> {
     const product = await this.productsService.findOne(id);
     const amounts = await this.productsService.amountsFor([product.id]);
-    return ProductResponseDto.fromEntity(product, amounts.get(product.id) ?? 0);
+    return ProductResponseDto.fromEntity(
+      product,
+      amounts.get(product.id) ?? 0,
+      undefined,
+    );
   }
 
   @Post()
@@ -77,6 +81,8 @@ export class ProductsController {
   async create(@Body() dto: CreateProductDto): Promise<ProductResponseDto> {
     return ProductResponseDto.fromEntity(
       await this.productsService.create(dto),
+      undefined,
+      undefined,
     );
   }
 
@@ -88,6 +94,8 @@ export class ProductsController {
   ): Promise<ProductResponseDto> {
     return ProductResponseDto.fromEntity(
       await this.productsService.update(id, dto),
+      undefined,
+      undefined,
     );
   }
 
