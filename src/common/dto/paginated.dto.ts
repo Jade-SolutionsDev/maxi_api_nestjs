@@ -1,6 +1,7 @@
 import { applyDecorators, Type } from '@nestjs/common';
 import {
   ApiExtraModels,
+  ApiHideProperty,
   ApiOkResponse,
   ApiProperty,
   getSchemaPath,
@@ -11,7 +12,10 @@ import {
  * `{ data: PaginatedDto }`, so clients read `res.data.items` + `res.data.total`.
  */
 export class PaginatedDto<T> {
-  items: T[]; // element schema is supplied per-endpoint via ApiPaginatedResponse
+  // Hidden from the base schema (the generic `T[]` confuses the Swagger CLI
+  // plugin); ApiPaginatedResponse supplies the real element schema per-endpoint.
+  @ApiHideProperty()
+  items: T[];
 
   @ApiProperty({ description: 'Total matching rows across all pages.' })
   total: number;
