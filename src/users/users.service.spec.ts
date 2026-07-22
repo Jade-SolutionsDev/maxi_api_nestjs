@@ -48,6 +48,7 @@ describe('UsersService', () => {
     businessLogoUrl: null,
     clerkOrgId: null,
     isActive: true,
+    approvedAt: new Date(),
     createdBy: null,
     createdAt: new Date(),
     updatedAt: new Date(),
@@ -166,18 +167,34 @@ describe('UsersService', () => {
       expect(qb.andWhere).toHaveBeenCalledWith('user.isActive = true');
     });
 
-    it('should return only pending invitations for status=pending', async () => {
+    it('should combine invitations and awaiting-approval users for status=pending', async () => {
       invitationRepository.find.mockResolvedValue([
         {
           id: 'inv-1',
           email: 'p@example.com',
           role: Role.GROCER,
+          createdAt: new Date('2026-01-02'),
         } as Invitation,
+      ]);
+      // Registered-but-not-approved user surfaced in the same tab.
+      repository.find.mockResolvedValue([
+        {
+          ...user,
+          id: 'awaiting-1',
+          isActive: false,
+          approvedAt: null,
+          createdAt: new Date('2026-01-01'),
+        },
       ]);
       const result = await service.findAll({ status: 'pending' });
       expect(qb.getManyAndCount).not.toHaveBeenCalled();
-      expect(result.data).toHaveLength(1);
-      expect(result.meta.total).toBe(1);
+      expect(repository.find).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: expect.objectContaining({ isActive: false }),
+        }),
+      );
+      expect(result.data).toHaveLength(2);
+      expect(result.meta.total).toBe(2);
     });
 
     it('should include soft-deleted users when includeDeleted is set', async () => {
@@ -245,6 +262,19 @@ describe('UsersService', () => {
       const result = await service.update(user.id, updateDto);
 
       expect(result.firstName).toBe('Janet');
+    });
+
+    it('should stamp approvedAt when first activating an awaiting-approval user', async () => {
+      const awaiting = { ...user, isActive: false, approvedAt: null };
+      repository.findOne.mockResolvedValue(awaiting);
+      repository.save.mockImplementation((u) => Promise.resolve(u as User));
+
+      const result = await service.update(user.id, {
+        isActive: true,
+      });
+
+      expect(result.isActive).toBe(true);
+      expect(result.approvedAt).toBeInstanceOf(Date);
     });
 
     it('should preserve unset fields on a partial update (no name clobber)', async () => {
@@ -441,17 +471,18 @@ describe('UsersService', () => {
         lastName: 'User',
       });
 
+      // Invited users register disabled, awaiting admin approval.
       expect(repository.create).toHaveBeenCalledWith(
         expect.objectContaining({
           clerkId: 'clerk_new',
           email: 'new@example.com',
           role: Role.KARDIST,
-          isActive: true,
+          isActive: false,
         }),
       );
     });
 
-    it('should update an existing user and reactivate them', async () => {
+    it('should update an existing user without changing activation', async () => {
       const existing = { ...user, isActive: false };
       repository.findOne.mockResolvedValue(existing);
       repository.save.mockImplementation((u) => Promise.resolve(u as User));
@@ -461,7 +492,8 @@ describe('UsersService', () => {
       });
 
       expect(result.email).toBe('updated@example.com');
-      expect(result.isActive).toBe(true);
+      // Profile updates must not re-enable a disabled account.
+      expect(result.isActive).toBe(false);
     });
   });
 

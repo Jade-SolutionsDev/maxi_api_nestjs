@@ -76,6 +76,12 @@ export class User {
   @Column({ name: 'is_active', type: 'boolean', default: true })
   isActive: boolean;
 
+  // Set the first time the account is activated (= approved). Distinguishes a
+  // brand-new invited user awaiting approval (null) from one an admin disabled
+  // after approving (non-null). See UsersService.update / user-response.dto.
+  @Column({ name: 'approved_at', type: 'timestamp', nullable: true })
+  approvedAt: Date | null;
+
   @Column({ name: 'created_by', type: 'uuid', nullable: true })
   createdBy: string | null;
 

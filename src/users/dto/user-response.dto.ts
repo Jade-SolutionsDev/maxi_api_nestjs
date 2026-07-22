@@ -14,9 +14,11 @@ export class UserResponseDto {
   businessLogoUrl: string | null;
   clerkOrgId: string | null;
   isActive: boolean;
-  status?: 'active' | 'inactive' | 'pending' | 'deleted';
+  status?: 'active' | 'inactive' | 'pending' | 'deleted' | 'awaiting_approval';
   isPending?: boolean;
   isDeleted?: boolean;
+  /** Registered but not yet approved by an admin (isActive=false, approvedAt=null). */
+  isAwaitingApproval?: boolean;
   deletedAt: Date | null;
   createdBy: string | null;
   createdAt: Date;
@@ -40,13 +42,17 @@ export class UserResponseDto {
     dto.deletedAt = user.deletedAt ?? null;
     dto.isDeleted = !isPending && !!user.deletedAt;
     dto.isPending = isPending;
+    dto.isAwaitingApproval =
+      !isPending && !dto.isDeleted && !user.isActive && !user.approvedAt;
     dto.status = isPending
       ? 'pending'
       : dto.isDeleted
         ? 'deleted'
         : user.isActive
           ? 'active'
-          : 'inactive';
+          : dto.isAwaitingApproval
+            ? 'awaiting_approval'
+            : 'inactive';
     dto.createdBy = user.createdBy;
     dto.createdAt = user.createdAt;
     dto.updatedAt = user.updatedAt;

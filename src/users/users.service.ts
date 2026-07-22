@@ -8,7 +8,7 @@ import {
 import { ConfigService } from '@nestjs/config';
 import { InjectRepository } from '@nestjs/typeorm';
 import { createClerkClient } from '@clerk/backend';
-import { Repository } from 'typeorm';
+import { IsNull, Repository } from 'typeorm';
 import {
   buildPaginatedResponse,
   getPaginationParams,
@@ -45,12 +45,23 @@ export class UsersService {
   ): Promise<PaginatedResponse<User>> {
     const { page, limit, skip } = getPaginationParams(pagination);
 
-    // "Pending" is a facet over invitations only — no real users.
+    // "Pending" (the "Awaiting approval" tab) combines two not-yet-usable
+    // states: pending invitations (not registered) and registered users that
+    // haven't been approved yet (isActive=false, never approved).
     if (filter.status === 'pending') {
-      const pending = await this.loadPendingInvitationUsers();
+      const [invitations, awaiting] = await Promise.all([
+        this.loadPendingInvitationUsers(),
+        this.usersRepository.find({
+          where: { isActive: false, approvedAt: IsNull() },
+          order: { createdAt: 'DESC', id: 'DESC' },
+        }),
+      ]);
+      const combined = [...invitations, ...awaiting].sort(
+        (a, b) => b.createdAt.getTime() - a.createdAt.getTime(),
+      );
       return buildPaginatedResponse(
-        pending.slice(skip, skip + limit),
-        pending.length,
+        combined.slice(skip, skip + limit),
+        combined.length,
         page,
         limit,
       );
@@ -73,7 +84,11 @@ export class UsersService {
     if (filter.status === 'active') {
       qb.andWhere('user.isActive = true');
     } else if (filter.status === 'inactive') {
-      qb.andWhere('user.isActive = false');
+      // Admin-disabled only — awaiting-approval accounts live in the "pending"
+      // facet, not here.
+      qb.andWhere('user.isActive = false').andWhere(
+        'user.approvedAt IS NOT NULL',
+      );
     }
     // id is a unique PK — a deterministic tiebreaker so rows keep a stable
     // total order across refetches (createdAt alone ties on same-instant seeds).
@@ -196,6 +211,12 @@ export class UsersService {
       const email = updateUserDto.email.toLowerCase();
       await this.guardDuplicateEmail(email, id);
       user.email = email;
+    }
+
+    // First activation doubles as approval — stamp it so an awaiting-approval
+    // account (never approved) stays distinguishable from an admin-disabled one.
+    if (user.isActive && !user.approvedAt) {
+      user.approvedAt = new Date();
     }
 
     return this.usersRepository.save(user);
@@ -323,6 +344,9 @@ export class UsersService {
       if (data.email) {
         await this.guardDuplicateEmail(data.email.toLowerCase());
       }
+      // Invited users register into a DISABLED state and cannot access the app
+      // until an ADMIN/SUPER_ADMIN approves them (auth.service rejects inactive
+      // accounts). approvedAt stays null → "awaiting approval".
       user = this.usersRepository.create({
         clerkId,
         email: data.email?.toLowerCase() ?? null,
@@ -331,7 +355,7 @@ export class UsersService {
         phone: data.phone ?? null,
         businessName: data.businessName ?? null,
         role: data.role ?? Role.KARDIST,
-        isActive: true,
+        isActive: false,
       });
     } else {
       if (data.email) {
@@ -343,7 +367,8 @@ export class UsersService {
       user.phone = data.phone ?? user.phone;
       user.businessName = data.businessName ?? user.businessName;
       user.role = data.role ?? user.role;
-      user.isActive = true;
+      // Profile updates from Clerk must NOT change activation — approval is an
+      // explicit admin action, and a disabled account stays disabled.
     }
 
     return this.usersRepository.save(user);
