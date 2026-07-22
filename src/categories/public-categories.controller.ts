@@ -1,5 +1,10 @@
 import { Controller, Get, Param, Query } from '@nestjs/common';
 import { Public } from '../common/decorators/public.decorator';
+import {
+  ApiPaginatedResponse,
+  paginate,
+  PaginatedDto,
+} from '../common/dto/paginated.dto';
 import { CategoriesService } from './categories.service';
 import { CategoryResponseDto } from './dto/category-response.dto';
 import { PublicCategoriesQueryDto } from './dto/public-taxonomy-query.dto';
@@ -18,15 +23,17 @@ export class PublicCategoriesController {
    * `departmentId` to list the categories of a single department.
    */
   @Get()
+  @ApiPaginatedResponse(CategoryResponseDto)
   async findAll(
     @Query() query: PublicCategoriesQueryDto,
-  ): Promise<CategoryResponseDto[]> {
+  ): Promise<PaginatedDto<CategoryResponseDto>> {
     const categories = await this.categoriesService.listPublicCategories({
       departmentId: query.departmentId,
       sortBy: query.sortBy,
       sortOrder: query.sortOrder,
     });
-    return categories.map(CategoryResponseDto.fromEntity);
+    const page = paginate(categories, query.page, query.limit);
+    return { ...page, items: page.items.map(CategoryResponseDto.fromEntity) };
   }
 
   /** Get a single active category by id (404 if missing or inactive). */

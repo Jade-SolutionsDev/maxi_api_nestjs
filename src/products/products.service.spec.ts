@@ -187,7 +187,7 @@ describe('ProductsService', () => {
   });
 
   describe('findStorefront', () => {
-    it('returns only in-stock products (total across storages) and applies limit', async () => {
+    it('returns only in-stock products with their total stock', async () => {
       jest
         .spyOn(service, 'findAll')
         .mockResolvedValue([
@@ -203,11 +203,12 @@ describe('ProductsService', () => {
         ]),
       );
 
-      const rows = await service.findStorefront({}, { limit: 1 });
+      const rows = await service.findStorefront({});
 
-      // p2 (0 stock) dropped; p1 then p3 remain; limit 1 → p1 only.
+      // p2 (0 stock) dropped; p1 and p3 remain (pagination happens in the controller).
       expect(rows).toEqual([
         { product: expect.objectContaining({ id: 'p1' }), stock: 5 },
+        { product: expect.objectContaining({ id: 'p3' }), stock: 12 },
       ]);
     });
 

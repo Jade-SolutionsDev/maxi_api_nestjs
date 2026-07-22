@@ -127,7 +127,6 @@ export class ProductsService {
     opts: {
       locationId?: string;
       includeOutOfStock?: boolean;
-      limit?: number;
     } = {},
   ): Promise<{ product: Product; stock: number }[]> {
     const products = await this.findAll({ ...filters, isActive: true });
@@ -136,17 +135,12 @@ export class ProductsService {
       products.map((p) => p.id),
     );
 
-    let rows = products.map((p) => ({
+    const rows = products.map((p) => ({
       product: p,
       stock: stock.get(p.id) ?? 0,
     }));
-    if (!opts.includeOutOfStock) {
-      rows = rows.filter((r) => r.stock > 0);
-    }
-    if (opts.limit != null) {
-      rows = rows.slice(0, opts.limit);
-    }
-    return rows;
+    // Full stock-filtered, sorted list; the controller paginates it.
+    return opts.includeOutOfStock ? rows : rows.filter((r) => r.stock > 0);
   }
 
   // Stock per product: summed for a single storage when locationId is given,

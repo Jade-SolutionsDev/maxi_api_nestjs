@@ -1,5 +1,10 @@
 import { Controller, Get, Param, Query } from '@nestjs/common';
 import { Public } from '../common/decorators/public.decorator';
+import {
+  ApiPaginatedResponse,
+  paginate,
+  PaginatedDto,
+} from '../common/dto/paginated.dto';
 import { CategoriesService } from './categories.service';
 import { CategoryResponseDto } from './dto/category-response.dto';
 import { PublicDepartmentsQueryDto } from './dto/public-taxonomy-query.dto';
@@ -19,15 +24,17 @@ export class PublicDepartmentsController {
    * products. Pass `featured=true` to restrict to featured departments.
    */
   @Get()
+  @ApiPaginatedResponse(CategoryResponseDto)
   async findAll(
     @Query() query: PublicDepartmentsQueryDto,
-  ): Promise<CategoryResponseDto[]> {
+  ): Promise<PaginatedDto<CategoryResponseDto>> {
     const departments = await this.categoriesService.listPublicDepartments({
       featured: query.featured,
       sortBy: query.sortBy,
       sortOrder: query.sortOrder,
     });
-    return departments.map(CategoryResponseDto.fromEntity);
+    const page = paginate(departments, query.page, query.limit);
+    return { ...page, items: page.items.map(CategoryResponseDto.fromEntity) };
   }
 
   /** Get a single active department by id (404 if missing or inactive). */

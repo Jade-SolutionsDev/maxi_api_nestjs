@@ -7,6 +7,11 @@ import {
 } from '@nestjs/common';
 import { ApiOkResponse, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { Public } from '../common/decorators/public.decorator';
+import {
+  ApiPaginatedResponse,
+  paginate,
+  PaginatedDto,
+} from '../common/dto/paginated.dto';
 import { ProductResponseDto } from './dto/product-response.dto';
 import { PublicProductsQueryDto } from './dto/public-products-query.dto';
 import { ProductsService } from './products.service';
@@ -33,12 +38,13 @@ export class PublicProductsController {
       'name and price range. Only products with stock > 0 are returned unless ' +
       '`includeOutOfStock=true`. `finalPrice` is the discounted price. ' +
       '`amount`/`available` hold the stock at `locationId` when given, otherwise ' +
-      'the total across all storages.',
+      'the total across all storages. Paginated: pass `page` + `limit` (omit ' +
+      '`limit` to get everything on one page).',
   })
-  @ApiOkResponse({ type: ProductResponseDto, isArray: true })
+  @ApiPaginatedResponse(ProductResponseDto)
   async findAll(
     @Query() query: PublicProductsQueryDto,
-  ): Promise<ProductResponseDto[]> {
+  ): Promise<PaginatedDto<ProductResponseDto>> {
     const rows = await this.productsService.findStorefront(
       {
         q: query.q,
@@ -53,12 +59,15 @@ export class PublicProductsController {
       {
         locationId: query.locationId,
         includeOutOfStock: query.includeOutOfStock ?? false,
-        limit: query.limit,
       },
     );
-    return rows.map((r) =>
-      ProductResponseDto.fromEntity(r.product, r.stock, undefined),
-    );
+    const page = paginate(rows, query.page, query.limit);
+    return {
+      ...page,
+      items: page.items.map((r) =>
+        ProductResponseDto.fromEntity(r.product, r.stock, undefined),
+      ),
+    };
   }
 
   @Get(':id')

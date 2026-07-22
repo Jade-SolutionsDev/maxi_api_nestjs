@@ -4,6 +4,7 @@ import {
   toOptionalBoolean,
   toSortOrder,
 } from '../../common/dto/query-transforms';
+import { PaginationQueryDto } from '../../common/dto/pagination-query.dto';
 
 // Storefront endpoints already return only *valid* rows (active departments
 // with in-stock categories / active categories with in-stock products), so no
@@ -13,7 +14,7 @@ import {
 const SORT_FIELDS = ['name', 'sortOrder', 'createdAt'] as const;
 type SortField = (typeof SORT_FIELDS)[number];
 
-export class PublicDepartmentsQueryDto {
+export class PublicDepartmentsQueryDto extends PaginationQueryDto {
   /** Only departments flagged as featured. */
   @IsOptional()
   @Transform(toOptionalBoolean)
@@ -32,7 +33,7 @@ export class PublicDepartmentsQueryDto {
   sortOrder?: 'asc' | 'desc';
 }
 
-export class PublicCategoriesQueryDto {
+export class PublicCategoriesQueryDto extends PaginationQueryDto {
   /** Restrict to a single department (parent). */
   @IsOptional()
   @IsUUID()

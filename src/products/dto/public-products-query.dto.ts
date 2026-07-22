@@ -13,8 +13,9 @@ import {
   toOptionalNumber,
   toSortOrder,
 } from '../../common/dto/query-transforms';
+import { PaginationQueryDto } from '../../common/dto/pagination-query.dto';
 
-export class PublicProductsQueryDto {
+export class PublicProductsQueryDto extends PaginationQueryDto {
   /** Full-text match on the product name. */
   @IsOptional()
   @IsString()
@@ -64,12 +65,7 @@ export class PublicProductsQueryDto {
   @IsBoolean()
   includeOutOfStock?: boolean;
 
-  /** Cap the number of products returned (e.g. featured / recent sections). */
-  @IsOptional()
-  @Transform(toOptionalNumber)
-  @IsNumber()
-  @Min(1)
-  limit?: number;
+  // page + limit are inherited from PaginationQueryDto.
 
   /**
    * Sort field. Omitted → catalog order (curated `sortOrder`, then newest).
