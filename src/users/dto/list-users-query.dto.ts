@@ -4,7 +4,12 @@ import { PaginationQueryDto } from '../../common/dto/pagination.dto';
 import { toOptionalBoolean } from '../../common/dto/query-transforms';
 import { Role } from '../entities/user.entity';
 
-export const USER_STATUS_FILTERS = ['active', 'inactive', 'pending'] as const;
+export const USER_STATUS_FILTERS = [
+  'active',
+  'inactive',
+  'pending',
+  'awaiting_approval',
+] as const;
 export type UserStatusFilter = (typeof USER_STATUS_FILTERS)[number];
 
 export class ListUsersQueryDto extends PaginationQueryDto {

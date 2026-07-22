@@ -197,6 +197,22 @@ describe('UsersService', () => {
       expect(result.meta.total).toBe(2);
     });
 
+    it('should filter to registered awaiting-approval users for status=awaiting_approval', async () => {
+      qb.getManyAndCount.mockResolvedValue([[user], 1]);
+      await service.findAll({ status: 'awaiting_approval' });
+      expect(invitationRepository.find).not.toHaveBeenCalled();
+      expect(qb.andWhere).toHaveBeenCalledWith('user.isActive = false');
+      expect(qb.andWhere).toHaveBeenCalledWith('user.approvedAt IS NULL');
+    });
+
+    it('should hide awaiting-approval users from the default view', async () => {
+      qb.getManyAndCount.mockResolvedValue([[user], 1]);
+      await service.findAll({});
+      expect(qb.andWhere).toHaveBeenCalledWith(
+        '(user.isActive = true OR user.approvedAt IS NOT NULL)',
+      );
+    });
+
     it('should include soft-deleted users when includeDeleted is set', async () => {
       qb.getManyAndCount.mockResolvedValue([[user], 1]);
       await service.findAll({ includeDeleted: true });

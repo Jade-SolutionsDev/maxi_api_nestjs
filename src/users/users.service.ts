@@ -89,6 +89,14 @@ export class UsersService {
       qb.andWhere('user.isActive = false').andWhere(
         'user.approvedAt IS NOT NULL',
       );
+    } else if (filter.status === 'awaiting_approval') {
+      // Registered users that still need approval (drives the tab count badge).
+      qb.andWhere('user.isActive = false').andWhere('user.approvedAt IS NULL');
+    } else if (!filter.includeDeleted) {
+      // Default "all" view hides awaiting-approval users — they belong only in
+      // the "Awaiting approval" tab. (The show-deleted view opts out so a
+      // mistakenly rejected user can still be found and restored.)
+      qb.andWhere('(user.isActive = true OR user.approvedAt IS NOT NULL)');
     }
     // id is a unique PK — a deterministic tiebreaker so rows keep a stable
     // total order across refetches (createdAt alone ties on same-instant seeds).
