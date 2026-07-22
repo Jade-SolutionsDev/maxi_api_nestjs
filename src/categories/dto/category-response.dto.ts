@@ -14,6 +14,12 @@ export class CategoryResponseDto {
   createdAt: Date;
   updatedAt: Date;
 
+  /** Storefront departments only: number of valid child categories. */
+  childrenCount?: number;
+
+  /** Storefront categories only: number of active, in-stock products. */
+  productsCount?: number;
+
   static fromEntity(category: Category): CategoryResponseDto {
     const dto = new CategoryResponseDto();
     dto.id = category.id;

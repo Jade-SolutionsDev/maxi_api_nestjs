@@ -33,14 +33,26 @@ export class PublicCategoriesController {
       sortOrder: query.sortOrder,
     });
     const page = paginate(categories, query.page, query.limit);
-    return { ...page, items: page.items.map(CategoryResponseDto.fromEntity) };
+    const counts = await this.categoriesService.countValidProducts(
+      page.items.map((c) => c.id),
+    );
+    return {
+      ...page,
+      items: page.items.map((c) => {
+        const dto = CategoryResponseDto.fromEntity(c);
+        dto.productsCount = counts.get(c.id) ?? 0;
+        return dto;
+      }),
+    };
   }
 
   /** Get a single active category by id (404 if missing or inactive). */
   @Get(':id')
   async findOne(@Param('id') id: string): Promise<CategoryResponseDto> {
-    return CategoryResponseDto.fromEntity(
-      await this.categoriesService.getPublicCategory(id),
-    );
+    const category = await this.categoriesService.getPublicCategory(id);
+    const dto = CategoryResponseDto.fromEntity(category);
+    dto.productsCount =
+      (await this.categoriesService.countValidProducts([id])).get(id) ?? 0;
+    return dto;
   }
 }

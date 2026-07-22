@@ -65,6 +65,18 @@ function makeQueryBuilderStub(rows: Category[]) {
   return qb;
 }
 
+/** Chainable stub for the raw grouped count queries (getRawMany). */
+function makeRawQueryBuilderStub(rawRows: { id: string; count: string }[]) {
+  return {
+    select: jest.fn().mockReturnThis(),
+    addSelect: jest.fn().mockReturnThis(),
+    where: jest.fn().mockReturnThis(),
+    andWhere: jest.fn().mockReturnThis(),
+    groupBy: jest.fn().mockReturnThis(),
+    getRawMany: jest.fn().mockResolvedValue(rawRows),
+  };
+}
+
 describe('CategoriesService', () => {
   let service: CategoriesService;
   let repository: jest.Mocked<Repository<Category>>;
@@ -91,6 +103,7 @@ describe('CategoriesService', () => {
           provide: getRepositoryToken(Product),
           useValue: {
             count: jest.fn(),
+            createQueryBuilder: jest.fn(),
           },
         },
       ],
@@ -335,6 +348,32 @@ describe('CategoriesService', () => {
       const cat = makeCategory({ id: 'cat-1', parentId: 'dep-1' });
       repository.findOne.mockResolvedValue(cat);
       await expect(service.getPublicCategory('cat-1')).resolves.toBe(cat);
+    });
+
+    it('countValidChildren maps departmentId -> numeric count', async () => {
+      const qb = makeRawQueryBuilderStub([{ id: 'dep-1', count: '3' }]);
+      repository.createQueryBuilder.mockReturnValue(qb as never);
+
+      const map = await service.countValidChildren(['dep-1', 'dep-2']);
+
+      expect(map.get('dep-1')).toBe(3);
+      expect(map.get('dep-2')).toBeUndefined(); // no products -> absent
+    });
+
+    it('countValidProducts maps categoryId -> numeric count', async () => {
+      const qb = makeRawQueryBuilderStub([{ id: 'cat-1', count: '7' }]);
+      productRepository.createQueryBuilder.mockReturnValue(qb as never);
+
+      const map = await service.countValidProducts(['cat-1']);
+
+      expect(map.get('cat-1')).toBe(7);
+    });
+
+    it('count helpers short-circuit on an empty id list (no query)', async () => {
+      expect((await service.countValidChildren([])).size).toBe(0);
+      expect((await service.countValidProducts([])).size).toBe(0);
+      expect(repository.createQueryBuilder).not.toHaveBeenCalled();
+      expect(productRepository.createQueryBuilder).not.toHaveBeenCalled();
     });
   });
 });

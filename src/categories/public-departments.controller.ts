@@ -34,14 +34,26 @@ export class PublicDepartmentsController {
       sortOrder: query.sortOrder,
     });
     const page = paginate(departments, query.page, query.limit);
-    return { ...page, items: page.items.map(CategoryResponseDto.fromEntity) };
+    const counts = await this.categoriesService.countValidChildren(
+      page.items.map((d) => d.id),
+    );
+    return {
+      ...page,
+      items: page.items.map((d) => {
+        const dto = CategoryResponseDto.fromEntity(d);
+        dto.childrenCount = counts.get(d.id) ?? 0;
+        return dto;
+      }),
+    };
   }
 
   /** Get a single active department by id (404 if missing or inactive). */
   @Get(':id')
   async findOne(@Param('id') id: string): Promise<CategoryResponseDto> {
-    return CategoryResponseDto.fromEntity(
-      await this.categoriesService.getPublicDepartment(id),
-    );
+    const department = await this.categoriesService.getPublicDepartment(id);
+    const dto = CategoryResponseDto.fromEntity(department);
+    dto.childrenCount =
+      (await this.categoriesService.countValidChildren([id])).get(id) ?? 0;
+    return dto;
   }
 }

@@ -248,12 +248,52 @@ export class CategoriesService {
       WHERE p.category_id = ${catId}
         AND p.deleted_at IS NULL
         AND p.is_active = true
-        AND (
-          SELECT COALESCE(SUM(i.quantity), 0)
-          FROM inventory i
-          WHERE i.product_id = p.id
-        ) > 0
+        AND ${this.productHasStockSql('p')}
     )`;
+  }
+
+  // A product is purchasable when its summed inventory across locations is
+  // positive. `p` is the correlated products-table alias (internal literal).
+  private productHasStockSql(p: string): string {
+    return `(
+      SELECT COALESCE(SUM(i.quantity), 0)
+      FROM inventory i
+      WHERE i.product_id = ${p}.id
+    ) > 0`;
+  }
+
+  /** departmentId -> number of valid child categories, for the given ids. */
+  async countValidChildren(
+    departmentIds: string[],
+  ): Promise<Map<string, number>> {
+    if (departmentIds.length === 0) return new Map();
+    const rows = await this.categoryRepository
+      .createQueryBuilder('c')
+      .select('c.parentId', 'id')
+      .addSelect('COUNT(*)', 'count')
+      .where('c.parentId IN (:...ids)', { ids: departmentIds })
+      .andWhere('c.isActive = :active', { active: true })
+      .andWhere(this.categoryHasStockSql('c.id'))
+      .groupBy('c.parentId')
+      .getRawMany<{ id: string; count: string }>();
+    return new Map(rows.map((r) => [r.id, Number(r.count)]));
+  }
+
+  /** categoryId -> number of valid (active, in-stock) products, for the ids. */
+  async countValidProducts(
+    categoryIds: string[],
+  ): Promise<Map<string, number>> {
+    if (categoryIds.length === 0) return new Map();
+    const rows = await this.productRepository
+      .createQueryBuilder('p')
+      .select('p.categoryId', 'id')
+      .addSelect('COUNT(*)', 'count')
+      .where('p.categoryId IN (:...ids)', { ids: categoryIds })
+      .andWhere('p.isActive = :active', { active: true })
+      .andWhere(this.productHasStockSql('p'))
+      .groupBy('p.categoryId')
+      .getRawMany<{ id: string; count: string }>();
+    return new Map(rows.map((r) => [r.id, Number(r.count)]));
   }
 
   async listPublicDepartments(filters: {
