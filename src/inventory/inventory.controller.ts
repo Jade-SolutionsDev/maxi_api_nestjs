@@ -3,6 +3,7 @@ import {
   Body,
   Controller,
   Get,
+  Param,
   Post,
   Query,
   Req,
@@ -15,6 +16,7 @@ import { CreateOperationDto } from './dto/create-operation.dto';
 import {
   InventoryResponseDto,
   OperationResponseDto,
+  ProductStockLocationDto,
 } from './dto/inventory-response.dto';
 import { InventoryService } from './inventory.service';
 
@@ -47,6 +49,17 @@ export class InventoryController {
       throw new BadRequestException('locationId is required');
     }
     return this.inventoryService.listOperations(request.user, locationId);
+  }
+
+  // Per-storage stock of one product across all storages (product detail
+  // breakdown). Read-only catalog info, so KARDIST is allowed too and it is not
+  // grocer-scoped.
+  @Get('product/:productId')
+  @Roles(Role.SUPER_ADMIN, Role.ADMIN, Role.GROCER, Role.KARDIST)
+  async stockByProduct(
+    @Param('productId') productId: string,
+  ): Promise<ProductStockLocationDto[]> {
+    return this.inventoryService.stockByProduct(productId);
   }
 
   // Create an In / Out / Transfer operation (atomic, multi-product).

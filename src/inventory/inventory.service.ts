@@ -8,6 +8,7 @@ import { CreateOperationDto } from './dto/create-operation.dto';
 import {
   InventoryResponseDto,
   OperationResponseDto,
+  ProductStockLocationDto,
 } from './dto/inventory-response.dto';
 import { Inventory } from './entities/inventory.entity';
 import {
@@ -67,6 +68,47 @@ export class InventoryService {
         items.filter((i) => i.operationId === op.id),
       ),
     );
+  }
+
+  // Per-storage stock of one product across ALL storages (not grocer-scoped —
+  // this is catalog info, consistent with the product's `amount` total). Only
+  // storages that actually hold the product (quantity > 0) are returned.
+  async stockByProduct(productId: string): Promise<ProductStockLocationDto[]> {
+    const rows: { location_id: string; name: string; quantity: number }[] =
+      await this.inventoryRepository.manager.query(
+        `SELECT i.location_id, sl.name, i.quantity
+           FROM inventory i
+           JOIN stock_locations sl
+             ON sl.id = i.location_id AND sl.deleted_at IS NULL
+          WHERE i.product_id = $1 AND i.quantity > 0
+          ORDER BY i.quantity DESC, sl.name ASC`,
+        [productId],
+      );
+    if (rows.length === 0) return [];
+
+    const locationIds = rows.map((r) => r.location_id);
+    const coverage: { location_id: string; province: string }[] =
+      await this.inventoryRepository.manager.query(
+        `SELECT DISTINCT c.location_id, p.name AS province
+           FROM stock_location_coverage c
+           JOIN provinces p ON p.id = c.province_id
+          WHERE c.location_id = ANY($1)
+          ORDER BY p.name ASC`,
+        [locationIds],
+      );
+    const provincesByLocation = new Map<string, string[]>();
+    for (const c of coverage) {
+      const list = provincesByLocation.get(c.location_id) ?? [];
+      list.push(c.province);
+      provincesByLocation.set(c.location_id, list);
+    }
+
+    return rows.map((r) => ({
+      locationId: r.location_id,
+      locationName: r.name,
+      provinces: provincesByLocation.get(r.location_id) ?? [],
+      quantity: Number(r.quantity),
+    }));
   }
 
   async createOperation(
