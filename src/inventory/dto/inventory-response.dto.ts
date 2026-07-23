@@ -18,6 +18,15 @@ export class InventoryResponseDto {
   }
 }
 
+/** One storage's stock of a given product, for the product detail breakdown. */
+export class ProductStockLocationDto {
+  locationId: string;
+  locationName: string;
+  /** Names of the provinces this storage covers (may be empty). */
+  provinces: string[];
+  quantity: number;
+}
+
 export class OperationResponseDto {
   id: string;
   type: string;
