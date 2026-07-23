@@ -11,6 +11,9 @@ import { Request, Response } from 'express';
 export interface ErrorDetail {
   field?: string;
   message: string;
+  // Machine-readable stock count on cart 409s, so the frontend can clamp its
+  // quantity stepper without parsing the message.
+  available?: number;
 }
 
 export interface ErrorEnvelope {
@@ -68,6 +71,17 @@ export class AllExceptionsFilter implements ExceptionFilter {
         envelope.error.details = (res as { message: string[] }).message.map(
           (message) => ({ message }),
         );
+      }
+
+      // Explicit details from the throw site (e.g. cart 409 with `available`)
+      // pass through as-is.
+      if (
+        typeof res === 'object' &&
+        res !== null &&
+        'details' in res &&
+        Array.isArray(res.details)
+      ) {
+        envelope.error.details = (res as { details: ErrorDetail[] }).details;
       }
     }
 

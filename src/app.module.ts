@@ -6,6 +6,7 @@ import { AppController } from './app.controller';
 import { AppService } from './app.service';
 import configuration, { databaseConfig } from './config/configuration';
 import { AuthModule } from './auth/auth.module';
+import { CartModule } from './cart/cart.module';
 import { CategoriesModule } from './categories/categories.module';
 import { ClientsModule } from './clients/clients.module';
 import { AuthGuard } from './common/guards/auth.guard';
@@ -45,6 +46,7 @@ import { WebhooksModule } from './webhooks/webhooks.module';
     AuthModule,
     CategoriesModule,
     ProductsModule,
+    CartModule,
     GeographyModule,
     StockLocationsModule,
     InventoryModule,
