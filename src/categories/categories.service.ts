@@ -296,6 +296,36 @@ export class CategoriesService {
     return new Map(rows.map((r) => [r.id, Number(r.count)]));
   }
 
+  // Backoffice totals. Unlike the countValid* helpers these ignore active/stock
+  // so they mirror the delete guards exactly — an admin seeing "0" must be able
+  // to delete the row, and any non-zero count is what blocks the deletion.
+
+  /** departmentId -> total (non-deleted) child categories. */
+  async countChildren(departmentIds: string[]): Promise<Map<string, number>> {
+    if (departmentIds.length === 0) return new Map();
+    const rows = await this.categoryRepository
+      .createQueryBuilder('c')
+      .select('c.parentId', 'id')
+      .addSelect('COUNT(*)', 'count')
+      .where('c.parentId IN (:...ids)', { ids: departmentIds })
+      .groupBy('c.parentId')
+      .getRawMany<{ id: string; count: string }>();
+    return new Map(rows.map((r) => [r.id, Number(r.count)]));
+  }
+
+  /** categoryId -> total (non-deleted) products. */
+  async countProducts(categoryIds: string[]): Promise<Map<string, number>> {
+    if (categoryIds.length === 0) return new Map();
+    const rows = await this.productRepository
+      .createQueryBuilder('p')
+      .select('p.categoryId', 'id')
+      .addSelect('COUNT(*)', 'count')
+      .where('p.categoryId IN (:...ids)', { ids: categoryIds })
+      .groupBy('p.categoryId')
+      .getRawMany<{ id: string; count: string }>();
+    return new Map(rows.map((r) => [r.id, Number(r.count)]));
+  }
+
   async listPublicDepartments(filters: {
     featured?: boolean;
     sortBy?: PublicSortField;

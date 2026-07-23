@@ -35,7 +35,14 @@ export class CategoriesController {
       departmentId,
       q,
     );
-    return categories.map(CategoryResponseDto.fromEntity);
+    const counts = await this.categoriesService.countProducts(
+      categories.map((c) => c.id),
+    );
+    return categories.map((c) => {
+      const dto = CategoryResponseDto.fromEntity(c);
+      dto.productsCount = counts.get(c.id) ?? 0;
+      return dto;
+    });
   }
 
   @Get(':id')

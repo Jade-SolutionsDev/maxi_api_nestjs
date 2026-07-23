@@ -369,6 +369,19 @@ describe('CategoriesService', () => {
       expect(map.get('cat-1')).toBe(7);
     });
 
+    it('countChildren/countProducts return backoffice totals', async () => {
+      const catQb = makeRawQueryBuilderStub([{ id: 'dep-1', count: '5' }]);
+      repository.createQueryBuilder.mockReturnValue(catQb as never);
+      const prodQb = makeRawQueryBuilderStub([{ id: 'cat-1', count: '9' }]);
+      productRepository.createQueryBuilder.mockReturnValue(prodQb as never);
+
+      expect((await service.countChildren(['dep-1'])).get('dep-1')).toBe(5);
+      expect((await service.countProducts(['cat-1'])).get('cat-1')).toBe(9);
+      // Totals mirror the delete guards: no active/stock narrowing applied.
+      expect(catQb.andWhere).not.toHaveBeenCalled();
+      expect(prodQb.andWhere).not.toHaveBeenCalled();
+    });
+
     it('count helpers short-circuit on an empty id list (no query)', async () => {
       expect((await service.countValidChildren([])).size).toBe(0);
       expect((await service.countValidProducts([])).size).toBe(0);

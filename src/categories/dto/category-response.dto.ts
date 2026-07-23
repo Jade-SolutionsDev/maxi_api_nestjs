@@ -14,10 +14,18 @@ export class CategoryResponseDto {
   createdAt: Date;
   updatedAt: Date;
 
-  /** Storefront departments only: number of valid child categories. */
+  /**
+   * Departments, on list routes. Storefront reports only *valid* children
+   * (active with in-stock products); the backoffice reports the total, which
+   * is what the delete guard blocks on.
+   */
   childrenCount?: number;
 
-  /** Storefront categories only: number of active, in-stock products. */
+  /**
+   * Categories, on list routes. Storefront reports only *valid* products
+   * (active and in stock); the backoffice reports the total, which is what the
+   * delete guard blocks on.
+   */
   productsCount?: number;
 
   static fromEntity(category: Category): CategoryResponseDto {

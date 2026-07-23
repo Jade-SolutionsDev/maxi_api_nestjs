@@ -27,7 +27,14 @@ export class DepartmentsController {
   @RequirePermission({ module: 'departments', action: 'list' })
   async findAll(@Query('q') q?: string): Promise<CategoryResponseDto[]> {
     const departments = await this.categoriesService.listDepartments(q);
-    return departments.map(CategoryResponseDto.fromEntity);
+    const counts = await this.categoriesService.countChildren(
+      departments.map((d) => d.id),
+    );
+    return departments.map((d) => {
+      const dto = CategoryResponseDto.fromEntity(d);
+      dto.childrenCount = counts.get(d.id) ?? 0;
+      return dto;
+    });
   }
 
   @Get(':id')
