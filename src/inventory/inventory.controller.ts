@@ -14,11 +14,20 @@ import { Roles } from '../common/decorators/roles.decorator';
 import { Role } from '../users/entities/user.entity';
 import { CreateOperationDto } from './dto/create-operation.dto';
 import {
+  AggregatedInventoryDto,
+  InventoryHistoryEventDto,
   InventoryResponseDto,
   OperationResponseDto,
   ProductStockLocationDto,
 } from './dto/inventory-response.dto';
 import { InventoryService } from './inventory.service';
+
+// Query params arrive as strings; coerce the numeric stock filters.
+const toNumber = (value?: string): number | undefined => {
+  if (value === undefined || value === '') return undefined;
+  const n = Number(value);
+  return Number.isNaN(n) ? undefined : n;
+};
 
 @ApiTags('inventory')
 @ApiBearerAuth()
@@ -26,6 +35,46 @@ import { InventoryService } from './inventory.service';
 @Roles(Role.SUPER_ADMIN, Role.ADMIN, Role.GROCER)
 export class InventoryController {
   constructor(private readonly inventoryService: InventoryService) {}
+
+  // Admin cross-storage list, aggregated by product. Managers + kardist; not
+  // grocer-scoped (grocers use the per-storage Productos tab). Individual @Query
+  // params (no DTO) so the frontend's page/limit/sortBy don't trip whitelisting.
+  @Get('aggregate')
+  @Roles(Role.SUPER_ADMIN, Role.ADMIN, Role.KARDIST)
+  async aggregate(
+    @Query('departmentId') departmentId?: string,
+    @Query('categoryId') categoryId?: string,
+    @Query('atLocationId') atLocationId?: string,
+    @Query('minStock') minStock?: string,
+    @Query('maxStock') maxStock?: string,
+  ): Promise<AggregatedInventoryDto[]> {
+    return this.inventoryService.aggregateByProduct({
+      departmentId,
+      categoryId,
+      atLocationId,
+      minStock: toNumber(minStock),
+      maxStock: toNumber(maxStock),
+    });
+  }
+
+  // Change timeline for one product across all storages (manual ops + order
+  // movements). Managers + kardist.
+  @Get('product/:productId/history')
+  @Roles(Role.SUPER_ADMIN, Role.ADMIN, Role.KARDIST)
+  async productHistory(
+    @Param('productId') productId: string,
+  ): Promise<InventoryHistoryEventDto[]> {
+    return this.inventoryService.history({ productId });
+  }
+
+  // Change timeline for one storage (grocer-scoped via assertCanManage).
+  @Get('location/:locationId/history')
+  async locationHistory(
+    @Param('locationId') locationId: string,
+    @Req() request: AuthenticatedUserRequest,
+  ): Promise<InventoryHistoryEventDto[]> {
+    return this.inventoryService.locationHistory(request.user, locationId);
+  }
 
   // Current stock at a storage (one row per product). Used by the Productos tab.
   @Get()

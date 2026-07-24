@@ -105,26 +105,40 @@ export class ProductsService {
   // inventory table directly (raw) to avoid coupling ProductsModule to the
   // inventory entity. Products with no inventory rows are simply absent (→ 0).
   async amountsFor(productIds: string[]): Promise<Map<string, number>> {
-    return this.sumInventory(productIds, 'quantity');
+    return this.sumInventory(productIds, 'i.quantity', false);
   }
 
   // Sellable stock per product: physical minus what pending orders hold
-  // (inventory.reserved_quantity). This is what the storefront and cart see.
+  // (inventory.reserved_quantity), counting only ENABLED storages — stock in a
+  // disabled/soft-deleted location is not available. This is what the storefront
+  // and cart see.
   async availableFor(productIds: string[]): Promise<Map<string, number>> {
-    return this.sumInventory(productIds, 'quantity - reserved_quantity');
+    return this.sumInventory(
+      productIds,
+      'i.quantity - i.reserved_quantity',
+      true,
+    );
   }
 
   private async sumInventory(
     productIds: string[],
-    expr: 'quantity' | 'quantity - reserved_quantity',
+    expr: 'i.quantity' | 'i.quantity - i.reserved_quantity',
+    activeLocationsOnly: boolean,
   ): Promise<Map<string, number>> {
     if (productIds.length === 0) return new Map();
+    const activeJoin = activeLocationsOnly
+      ? `JOIN stock_locations sl
+             ON sl.id = i.location_id
+            AND sl.is_active = true
+            AND sl.deleted_at IS NULL`
+      : '';
     const rows: { product_id: string; total: number }[] =
       await this.productRepository.manager.query(
-        `SELECT product_id, COALESCE(SUM(${expr}), 0)::int AS total
-           FROM inventory
-          WHERE product_id = ANY($1)
-          GROUP BY product_id`,
+        `SELECT i.product_id, COALESCE(SUM(${expr}), 0)::int AS total
+           FROM inventory i
+           ${activeJoin}
+          WHERE i.product_id = ANY($1)
+          GROUP BY i.product_id`,
         [productIds],
       );
     return new Map(rows.map((r) => [r.product_id, Number(r.total)]));
@@ -158,8 +172,8 @@ export class ProductsService {
   }
 
   // Sellable stock per product: summed for a single storage when locationId is
-  // given, otherwise across all storages. Always net of reservations — this
-  // feeds the storefront only.
+  // given, otherwise across all storages. Always net of reservations and only
+  // from enabled storages (a disabled location yields 0) — feeds the storefront.
   private async stockMap(
     locationId: string | undefined,
     productIds: string[],
@@ -168,10 +182,14 @@ export class ProductsService {
     if (!locationId) return this.availableFor(productIds);
     const rows: { product_id: string; total: number }[] =
       await this.productRepository.manager.query(
-        `SELECT product_id, COALESCE(SUM(quantity - reserved_quantity), 0)::int AS total
-           FROM inventory
-          WHERE location_id = $1 AND product_id = ANY($2)
-          GROUP BY product_id`,
+        `SELECT i.product_id, COALESCE(SUM(i.quantity - i.reserved_quantity), 0)::int AS total
+           FROM inventory i
+           JOIN stock_locations sl
+             ON sl.id = i.location_id
+            AND sl.is_active = true
+            AND sl.deleted_at IS NULL
+          WHERE i.location_id = $1 AND i.product_id = ANY($2)
+          GROUP BY i.product_id`,
         [locationId, productIds],
       );
     return new Map(rows.map((r) => [r.product_id, Number(r.total)]));

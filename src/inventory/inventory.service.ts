@@ -10,6 +10,8 @@ import { StockLocationsService } from '../stock-locations/stock-locations.servic
 import { User } from '../users/entities/user.entity';
 import { CreateOperationDto } from './dto/create-operation.dto';
 import {
+  AggregatedInventoryDto,
+  InventoryHistoryEventDto,
   InventoryResponseDto,
   OperationResponseDto,
   ProductStockLocationDto,
@@ -85,15 +87,16 @@ export class InventoryService {
     const rows: {
       location_id: string;
       name: string;
+      is_active: boolean;
       quantity: number;
       reserved_quantity: number;
     }[] = await this.inventoryRepository.manager.query(
-      `SELECT i.location_id, sl.name, i.quantity, i.reserved_quantity
+      `SELECT i.location_id, sl.name, sl.is_active, i.quantity, i.reserved_quantity
            FROM inventory i
            JOIN stock_locations sl
              ON sl.id = i.location_id AND sl.deleted_at IS NULL
           WHERE i.product_id = $1 AND i.quantity > 0
-          ORDER BY i.quantity DESC, sl.name ASC`,
+          ORDER BY sl.is_active DESC, i.quantity DESC, sl.name ASC`,
       [productId],
     );
     if (rows.length === 0) return [];
@@ -115,13 +118,238 @@ export class InventoryService {
       provincesByLocation.set(c.location_id, list);
     }
 
+    return rows.map((r) => {
+      const quantity = Number(r.quantity);
+      const reservedQuantity = Number(r.reserved_quantity);
+      return {
+        locationId: r.location_id,
+        locationName: r.name,
+        provinces: provincesByLocation.get(r.location_id) ?? [],
+        quantity,
+        reservedQuantity,
+        isActive: r.is_active,
+        available: r.is_active ? Math.max(0, quantity - reservedQuantity) : 0,
+      };
+    });
+  }
+
+  // Admin cross-storage list: one row per product, stock rolled up across all
+  // storages. `real` = SUM(quantity); `reserved` = SUM(reserved_quantity);
+  // `available` = SUM(quantity - reserved) counting only enabled storages.
+  // Returns the full filtered set (frontend paginates/sorts client-side).
+  async aggregateByProduct(filters: {
+    departmentId?: string;
+    categoryId?: string;
+    atLocationId?: string;
+    minStock?: number;
+    maxStock?: number;
+  }): Promise<AggregatedInventoryDto[]> {
+    const params: unknown[] = [];
+    const add = (v: unknown): string => {
+      params.push(v);
+      return `$${params.length}`;
+    };
+
+    const where: string[] = [];
+    if (filters.categoryId) {
+      where.push(`p.category_id = ${add(filters.categoryId)}`);
+    }
+    if (filters.departmentId) {
+      where.push(
+        `EXISTS (SELECT 1 FROM categories cc
+                  WHERE cc.id = p.category_id
+                    AND cc.parent_id = ${add(filters.departmentId)})`,
+      );
+    }
+    if (filters.atLocationId) {
+      where.push(
+        `EXISTS (SELECT 1 FROM inventory il
+                  WHERE il.product_id = p.id
+                    AND il.location_id = ${add(filters.atLocationId)})`,
+      );
+    }
+
+    const having: string[] = [];
+    if (filters.minStock != null) {
+      having.push(`COALESCE(SUM(i.quantity), 0) >= ${add(filters.minStock)}`);
+    }
+    if (filters.maxStock != null) {
+      having.push(`COALESCE(SUM(i.quantity), 0) <= ${add(filters.maxStock)}`);
+    }
+
+    const rows: {
+      id: string;
+      product_name: string;
+      image_url: string | null;
+      category_id: string | null;
+      department_id: string | null;
+      measure_unit: string;
+      real: number;
+      reserved: number;
+      available: number;
+      storage_count: number;
+    }[] = await this.inventoryRepository.manager.query(
+      `SELECT p.id AS id, p.name AS product_name, p.image_url,
+              p.category_id, c.parent_id AS department_id, p.measure_unit,
+              COALESCE(SUM(i.quantity), 0)::int AS real,
+              COALESCE(SUM(i.reserved_quantity), 0)::int AS reserved,
+              COALESCE(SUM(CASE WHEN sl.is_active AND sl.deleted_at IS NULL
+                                THEN i.quantity - i.reserved_quantity
+                                ELSE 0 END), 0)::int AS available,
+              COUNT(DISTINCT i.location_id)::int AS storage_count
+         FROM inventory i
+         JOIN products p ON p.id = i.product_id AND p.deleted_at IS NULL
+         LEFT JOIN categories c ON c.id = p.category_id
+         LEFT JOIN stock_locations sl ON sl.id = i.location_id
+        ${where.length ? `WHERE ${where.join(' AND ')}` : ''}
+        GROUP BY p.id, p.name, p.image_url, p.category_id, c.parent_id, p.measure_unit
+        ${having.length ? `HAVING ${having.join(' AND ')}` : ''}
+        ORDER BY p.name ASC`,
+      params,
+    );
+
     return rows.map((r) => ({
-      locationId: r.location_id,
-      locationName: r.name,
-      provinces: provincesByLocation.get(r.location_id) ?? [],
-      quantity: Number(r.quantity),
-      reservedQuantity: Number(r.reserved_quantity),
+      id: r.id,
+      productName: r.product_name,
+      imageUrl: r.image_url,
+      categoryId: r.category_id,
+      departmentId: r.department_id,
+      measureUnit: r.measure_unit,
+      real: Number(r.real),
+      reserved: Number(r.reserved),
+      available: Number(r.available),
+      storageCount: Number(r.storage_count),
     }));
+  }
+
+  // Combined change timeline for one product OR one location: manual operations
+  // (with the acting user) merged with order reservation events. Deltas only.
+  async history(
+    filter: { productId: string } | { locationId: string },
+  ): Promise<InventoryHistoryEventDto[]> {
+    const byProduct = 'productId' in filter;
+    const id = byProduct ? filter.productId : filter.locationId;
+
+    const opWhere = byProduct
+      ? 'oi.product_id = $1'
+      : '(o.location_id = $1 OR o.target_location_id = $1)';
+    const ops: {
+      type: string;
+      product_id: string;
+      product_name: string | null;
+      quantity: number;
+      location_id: string;
+      location_name: string | null;
+      target_location_id: string | null;
+      target_location_name: string | null;
+      note: string | null;
+      created_by: string | null;
+      first_name: string | null;
+      last_name: string | null;
+      created_at: Date;
+    }[] = await this.inventoryRepository.manager.query(
+      `SELECT o.type, oi.product_id, p.name AS product_name, oi.quantity,
+              o.location_id, sl.name AS location_name,
+              o.target_location_id, tl.name AS target_location_name,
+              o.note, o.created_by,
+              u."firstName" AS first_name, u."lastName" AS last_name,
+              o.created_at
+         FROM inventory_operation_items oi
+         JOIN inventory_operations o ON o.id = oi.operation_id
+         LEFT JOIN products p ON p.id = oi.product_id
+         LEFT JOIN stock_locations sl ON sl.id = o.location_id
+         LEFT JOIN stock_locations tl ON tl.id = o.target_location_id
+         LEFT JOIN users u ON u.id = o.created_by
+        WHERE ${opWhere}
+        ORDER BY o.created_at DESC
+        LIMIT 200`,
+      [id],
+    );
+
+    const resWhere = byProduct ? 'r.product_id = $1' : 'r.location_id = $1';
+    const reservations: {
+      status: string;
+      product_id: string;
+      product_name: string | null;
+      quantity: number;
+      location_id: string;
+      location_name: string | null;
+      order_id: string;
+      created_at: Date;
+      updated_at: Date;
+    }[] = await this.inventoryRepository.manager.query(
+      `SELECT r.status, r.product_id, p.name AS product_name, r.quantity,
+              r.location_id, sl.name AS location_name, r.order_id,
+              r.created_at, r.updated_at
+         FROM inventory_reservations r
+         LEFT JOIN products p ON p.id = r.product_id
+         LEFT JOIN stock_locations sl ON sl.id = r.location_id
+        WHERE ${resWhere}
+        ORDER BY r.created_at DESC
+        LIMIT 200`,
+      [id],
+    );
+
+    const events: InventoryHistoryEventDto[] = [];
+
+    for (const o of ops) {
+      const actorName =
+        [o.first_name, o.last_name].filter(Boolean).join(' ').trim() || null;
+      events.push({
+        kind: 'operation',
+        type: o.type,
+        productId: o.product_id,
+        productName: o.product_name ?? '',
+        quantity: Number(o.quantity),
+        locationId: o.location_id,
+        locationName: o.location_name,
+        targetLocationId: o.target_location_id,
+        targetLocationName: o.target_location_name,
+        note: o.note,
+        actorId: o.created_by,
+        actorName,
+        orderId: null,
+        createdAt: o.created_at,
+      });
+    }
+
+    for (const r of reservations) {
+      const base = {
+        kind: 'reservation' as const,
+        productId: r.product_id,
+        productName: r.product_name ?? '',
+        quantity: Number(r.quantity),
+        locationId: r.location_id,
+        locationName: r.location_name,
+        targetLocationId: null,
+        targetLocationName: null,
+        note: null,
+        actorId: null,
+        actorName: null,
+        orderId: r.order_id,
+      };
+      events.push({ ...base, type: 'reserved', createdAt: r.created_at });
+      if (r.status === 'confirmed') {
+        events.push({ ...base, type: 'confirmed', createdAt: r.updated_at });
+      } else if (r.status === 'cancelled') {
+        events.push({ ...base, type: 'cancelled', createdAt: r.updated_at });
+      }
+    }
+
+    events.sort(
+      (a, b) =>
+        new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
+    );
+    return events.slice(0, 200);
+  }
+
+  // Location timeline for the storage detail — grocer must manage the location.
+  async locationHistory(
+    user: User,
+    locationId: string,
+  ): Promise<InventoryHistoryEventDto[]> {
+    await this.stockLocationsService.assertCanManage(user, locationId);
+    return this.history({ locationId });
   }
 
   async createOperation(
@@ -222,10 +450,19 @@ export class InventoryService {
     quantity: number,
   ): Promise<void> {
     const repo = manager.getRepository(Inventory);
-    const rows = await repo.find({
-      where: { productId },
-      lock: { mode: 'pessimistic_write' },
-    });
+    // Only enabled storages can fulfil an order — never reserve from a disabled
+    // or soft-deleted location.
+    const activeLocations: { id: string }[] = await manager.query(
+      `SELECT id FROM stock_locations WHERE is_active = true AND deleted_at IS NULL`,
+    );
+    const activeIds = activeLocations.map((l) => l.id);
+    const rows =
+      activeIds.length === 0
+        ? []
+        : await repo.find({
+            where: { productId, locationId: In(activeIds) },
+            lock: { mode: 'pessimistic_write' },
+          });
     rows.sort(
       (a, b) =>
         b.quantity - b.reservedQuantity - (a.quantity - a.reservedQuantity),

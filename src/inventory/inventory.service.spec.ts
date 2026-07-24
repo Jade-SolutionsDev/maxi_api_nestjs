@@ -24,6 +24,7 @@ type MockRepo = {
   create: jest.Mock;
   save: jest.Mock;
   count: jest.Mock;
+  manager: { query: jest.Mock };
 };
 
 describe('InventoryService', () => {
@@ -48,6 +49,7 @@ describe('InventoryService', () => {
           Promise.resolve(Array.isArray(d) ? d : { id: 'op-1', ...d }),
         ),
       count: jest.fn().mockResolvedValue(1),
+      manager: { query: jest.fn().mockResolvedValue([]) },
     });
     inventoryRepo = repoMock();
     operationRepo = repoMock();
@@ -193,7 +195,10 @@ describe('InventoryService', () => {
 
   describe('order reservations', () => {
     let reservationRepo: MockRepo;
-    let manager: { getRepository: (entity: unknown) => MockRepo };
+    let manager: {
+      getRepository: (entity: unknown) => MockRepo;
+      query: jest.Mock;
+    };
 
     beforeEach(() => {
       reservationRepo = {
@@ -202,10 +207,14 @@ describe('InventoryService', () => {
         create: jest.fn().mockImplementation((d: unknown) => d),
         save: jest.fn().mockImplementation((d: unknown) => Promise.resolve(d)),
         count: jest.fn(),
+        manager: { query: jest.fn().mockResolvedValue([]) },
       };
       manager = {
         getRepository: (entity: unknown): MockRepo =>
           entity === Inventory ? inventoryRepo : reservationRepo,
+        // reserve() first fetches enabled-location ids; the mock inventoryRepo
+        // ignores the where clause, so any non-empty set keeps the flow intact.
+        query: jest.fn().mockResolvedValue([{ id: 'loc-A' }, { id: 'loc-B' }]),
       };
     });
 
@@ -252,6 +261,25 @@ describe('InventoryService', () => {
         service.reserve(manager as never, 'order-1', 'p-1', 3),
       ).rejects.toBeInstanceOf(ConflictException);
       expect(inventoryRepo.save).not.toHaveBeenCalled();
+      expect(reservationRepo.save).not.toHaveBeenCalled();
+    });
+
+    it('does not reserve when no storages are enabled', async () => {
+      manager.query.mockResolvedValue([]); // no active locations
+      inventoryRepo.find.mockResolvedValue([
+        {
+          locationId: 'loc-A',
+          productId: 'p-1',
+          quantity: 99,
+          reservedQuantity: 0,
+        },
+      ]);
+
+      await expect(
+        service.reserve(manager as never, 'order-1', 'p-1', 1),
+      ).rejects.toBeInstanceOf(ConflictException);
+      // The disabled-location stock is never even queried/locked.
+      expect(inventoryRepo.find).not.toHaveBeenCalled();
       expect(reservationRepo.save).not.toHaveBeenCalled();
     });
 
@@ -312,6 +340,57 @@ describe('InventoryService', () => {
       expect(row.quantity).toBe(8); // 5 + 3 restocked
       expect(held.status).toBe(ReservationStatus.CANCELLED);
       expect(committed.status).toBe(ReservationStatus.CANCELLED);
+    });
+  });
+
+  describe('history', () => {
+    it('merges manual operations and order reservations, newest first', async () => {
+      inventoryRepo.manager.query
+        .mockResolvedValueOnce([
+          {
+            type: 'IN',
+            product_id: 'p-1',
+            product_name: 'Arroz',
+            quantity: 10,
+            location_id: 'loc-A',
+            location_name: 'A',
+            target_location_id: null,
+            target_location_name: null,
+            note: 'compra',
+            created_by: 'u-1',
+            first_name: 'Ana',
+            last_name: 'Pérez',
+            created_at: new Date('2026-07-20T10:00:00Z'),
+          },
+        ])
+        .mockResolvedValueOnce([
+          {
+            status: 'confirmed',
+            product_id: 'p-1',
+            product_name: 'Arroz',
+            quantity: 5,
+            location_id: 'loc-A',
+            location_name: 'A',
+            order_id: 'ord-9',
+            created_at: new Date('2026-07-21T09:00:00Z'),
+            updated_at: new Date('2026-07-22T09:00:00Z'),
+          },
+        ]);
+
+      const events = await service.history({ productId: 'p-1' });
+
+      // A confirmed reservation yields reserved(created) + confirmed(updated).
+      expect(events.map((e) => e.type)).toEqual([
+        'confirmed',
+        'reserved',
+        'IN',
+      ]);
+      const op = events.find((e) => e.kind === 'operation');
+      expect(op?.actorName).toBe('Ana Pérez');
+      expect(op?.orderId).toBeNull();
+      const confirmed = events.find((e) => e.type === 'confirmed');
+      expect(confirmed?.orderId).toBe('ord-9');
+      expect(confirmed?.actorName).toBeNull();
     });
   });
 });

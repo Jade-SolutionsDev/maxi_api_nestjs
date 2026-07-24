@@ -7,6 +7,9 @@ export class InventoryResponseDto {
   locationId: string;
   productId: string;
   quantity: number;
+  reservedQuantity: number;
+  /** Sellable at this storage: quantity - reservedQuantity. */
+  available: number;
 
   static fromEntity(row: Inventory): InventoryResponseDto {
     const dto = new InventoryResponseDto();
@@ -14,6 +17,8 @@ export class InventoryResponseDto {
     dto.locationId = row.locationId;
     dto.productId = row.productId;
     dto.quantity = row.quantity;
+    dto.reservedQuantity = row.reservedQuantity;
+    dto.available = Math.max(0, row.quantity - row.reservedQuantity);
     return dto;
   }
 }
@@ -27,6 +32,57 @@ export class ProductStockLocationDto {
   quantity: number;
   /** Units held by pending orders; quantity - reservedQuantity is sellable. */
   reservedQuantity: number;
+  /** Whether the storage is enabled. Disabled storages contribute 0 available. */
+  isActive: boolean;
+  /** Sellable here: quantity - reservedQuantity, or 0 when the storage is disabled. */
+  available: number;
+}
+
+/**
+ * One product's stock rolled up across ALL storages, for the admin inventory
+ * list. `id` is the product id (react-admin record key + detail route).
+ */
+export class AggregatedInventoryDto {
+  id: string;
+  productName: string;
+  imageUrl: string | null;
+  categoryId: string | null;
+  departmentId: string | null;
+  measureUnit: string;
+  /** Physical total across every storage. */
+  real: number;
+  /** Held by pending orders across every storage. */
+  reserved: number;
+  /** Sellable: (quantity - reserved) summed over ENABLED storages only. */
+  available: number;
+  /** Number of storages holding this product. */
+  storageCount: number;
+}
+
+/**
+ * One entry in a stock change timeline — a manual operation (IN/OUT/TRANSFER,
+ * with the acting user) or an order-driven reservation event (reserved/
+ * confirmed/cancelled, with the order reference). Deltas only; no running balance.
+ */
+export class InventoryHistoryEventDto {
+  kind: 'operation' | 'reservation';
+  /** IN | OUT | TRANSFER | reserved | confirmed | cancelled */
+  type: string;
+  productId: string;
+  productName: string;
+  quantity: number;
+  locationId: string;
+  locationName: string | null;
+  /** Transfer destination (operations only). */
+  targetLocationId: string | null;
+  targetLocationName: string | null;
+  note: string | null;
+  /** Back-office user who ran a manual operation; null for order movements. */
+  actorId: string | null;
+  actorName: string | null;
+  /** Order reference for reservation events; null for manual operations. */
+  orderId: string | null;
+  createdAt: Date;
 }
 
 export class OperationResponseDto {
