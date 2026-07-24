@@ -105,10 +105,23 @@ export class ProductsService {
   // inventory table directly (raw) to avoid coupling ProductsModule to the
   // inventory entity. Products with no inventory rows are simply absent (→ 0).
   async amountsFor(productIds: string[]): Promise<Map<string, number>> {
+    return this.sumInventory(productIds, 'quantity');
+  }
+
+  // Sellable stock per product: physical minus what pending orders hold
+  // (inventory.reserved_quantity). This is what the storefront and cart see.
+  async availableFor(productIds: string[]): Promise<Map<string, number>> {
+    return this.sumInventory(productIds, 'quantity - reserved_quantity');
+  }
+
+  private async sumInventory(
+    productIds: string[],
+    expr: 'quantity' | 'quantity - reserved_quantity',
+  ): Promise<Map<string, number>> {
     if (productIds.length === 0) return new Map();
     const rows: { product_id: string; total: number }[] =
       await this.productRepository.manager.query(
-        `SELECT product_id, COALESCE(SUM(quantity), 0)::int AS total
+        `SELECT product_id, COALESCE(SUM(${expr}), 0)::int AS total
            FROM inventory
           WHERE product_id = ANY($1)
           GROUP BY product_id`,
@@ -117,11 +130,12 @@ export class ProductsService {
     return new Map(rows.map((r) => [r.product_id, Number(r.total)]));
   }
 
-  // Storefront listing: active products with stock. Reuses findAll for the
-  // catalog filters, then attaches stock (per-location if locationId is given,
-  // else the total across all storages) and drops out-of-stock rows unless
-  // includeOutOfStock is set. ponytail: stock filter + limit applied in JS over
-  // the (small) catalog; push into SQL with a LIMIT if it ever grows.
+  // Storefront listing: active products with sellable stock (physical minus
+  // order reservations). Reuses findAll for the catalog filters, then attaches
+  // stock (per-location if locationId is given, else the total across all
+  // storages) and drops out-of-stock rows unless includeOutOfStock is set.
+  // ponytail: stock filter + limit applied in JS over the (small) catalog;
+  // push into SQL with a LIMIT if it ever grows.
   async findStorefront(
     filters: ProductFilters,
     opts: {
@@ -143,17 +157,18 @@ export class ProductsService {
     return opts.includeOutOfStock ? rows : rows.filter((r) => r.stock > 0);
   }
 
-  // Stock per product: summed for a single storage when locationId is given,
-  // otherwise across all storages (same query shape as amountsFor).
+  // Sellable stock per product: summed for a single storage when locationId is
+  // given, otherwise across all storages. Always net of reservations — this
+  // feeds the storefront only.
   private async stockMap(
     locationId: string | undefined,
     productIds: string[],
   ): Promise<Map<string, number>> {
     if (productIds.length === 0) return new Map();
-    if (!locationId) return this.amountsFor(productIds);
+    if (!locationId) return this.availableFor(productIds);
     const rows: { product_id: string; total: number }[] =
       await this.productRepository.manager.query(
-        `SELECT product_id, COALESCE(SUM(quantity), 0)::int AS total
+        `SELECT product_id, COALESCE(SUM(quantity - reserved_quantity), 0)::int AS total
            FROM inventory
           WHERE location_id = $1 AND product_id = ANY($2)
           GROUP BY product_id`,

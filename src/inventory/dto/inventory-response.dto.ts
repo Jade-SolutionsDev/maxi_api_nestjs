@@ -25,6 +25,8 @@ export class ProductStockLocationDto {
   /** Names of the provinces this storage covers (may be empty). */
   provinces: string[];
   quantity: number;
+  /** Units held by pending orders; quantity - reservedQuantity is sellable. */
+  reservedQuantity: number;
 }
 
 export class OperationResponseDto {

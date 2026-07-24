@@ -6,6 +6,7 @@ import { StockLocationsModule } from '../stock-locations/stock-locations.module'
 import { Inventory } from './entities/inventory.entity';
 import { InventoryOperation } from './entities/inventory-operation.entity';
 import { InventoryOperationItem } from './entities/inventory-operation-item.entity';
+import { InventoryReservation } from './entities/inventory-reservation.entity';
 import { InventoryController } from './inventory.controller';
 import { InventoryService } from './inventory.service';
 
@@ -15,6 +16,7 @@ import { InventoryService } from './inventory.service';
       Inventory,
       InventoryOperation,
       InventoryOperationItem,
+      InventoryReservation,
       Product,
     ]),
     forwardRef(() => AuthModule),

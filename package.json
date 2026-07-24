@@ -29,7 +29,8 @@
     "seed:superadmin": "ts-node scripts/seed-superadmin.ts",
     "seed:client": "ts-node scripts/seed-client.ts",
     "seed:products": "ts-node scripts/seed-products.ts",
-    "seed:stock-locations": "ts-node scripts/seed-stock-locations.ts"
+    "seed:stock-locations": "ts-node scripts/seed-stock-locations.ts",
+    "seed:orders": "ts-node scripts/seed-orders.ts"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1085.0",

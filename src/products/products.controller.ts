@@ -56,11 +56,16 @@ export class ProductsController {
       featured: toBoolean(featured),
       isActive: toBoolean(isActive),
     });
-    const amounts = await this.productsService.amountsFor(
-      products.map((p) => p.id),
-    );
+    const ids = products.map((p) => p.id);
+    const amounts = await this.productsService.amountsFor(ids);
+    const available = await this.productsService.availableFor(ids);
     return products.map((p) =>
-      ProductResponseDto.fromEntity(p, amounts.get(p.id) ?? 0, undefined),
+      ProductResponseDto.fromEntity(
+        p,
+        amounts.get(p.id) ?? 0,
+        undefined,
+        available.get(p.id) ?? 0,
+      ),
     );
   }
 
@@ -69,10 +74,12 @@ export class ProductsController {
   async findOne(@Param('id') id: string): Promise<ProductResponseDto> {
     const product = await this.productsService.findOne(id);
     const amounts = await this.productsService.amountsFor([product.id]);
+    const available = await this.productsService.availableFor([product.id]);
     return ProductResponseDto.fromEntity(
       product,
       amounts.get(product.id) ?? 0,
       undefined,
+      available.get(product.id) ?? 0,
     );
   }
 

@@ -75,7 +75,9 @@ follow-up GET.
   catalog endpoints), recomputed from the live catalog on every read.
 - `lineTotal` = `unitPrice × quantity`; `subtotal` = sum of line totals.
   No taxes/shipping yet.
-- `available` — current total stock across all storages.
+- `available` — current sellable stock across all storages: physical stock
+  minus what pending orders have reserved (see
+  [storefront-orders-integration.md](./storefront-orders-integration.md)).
 - `isAvailable: false` — the product was deactivated/removed from the catalog
   or stock dropped below the cart quantity. The API **reports** this but never
   silently changes the customer's cart. UI should flag the line and offer

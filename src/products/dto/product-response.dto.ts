@@ -24,8 +24,8 @@ export class ProductResponseDto {
   sortOrder: number;
   isActive: boolean;
   // Calculated stock figures. `amount` = total physical stock summed across all
-  // storages; `available` = amount (no reservations yet). Passed in by the
-  // controller from the inventory sums.
+  // storages; `available` = amount minus stock held by pending orders
+  // (inventory reservations). Passed in by the controller from the inventory sums.
   amount: number;
   available: number;
   createdAt: Date;
@@ -35,6 +35,7 @@ export class ProductResponseDto {
     product: Product,
     amount = 0,
     category: CategoryResponseDto | undefined,
+    available = amount,
   ): ProductResponseDto {
     const dto = new ProductResponseDto();
     dto.id = product.id;
@@ -58,7 +59,7 @@ export class ProductResponseDto {
     dto.sortOrder = product.sortOrder;
     dto.isActive = product.isActive;
     dto.amount = amount;
-    dto.available = amount;
+    dto.available = available;
     dto.createdAt = product.createdAt;
     dto.updatedAt = product.updatedAt;
     return dto;
