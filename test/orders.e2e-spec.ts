@@ -230,6 +230,19 @@ describe('Orders (e2e)', () => {
     expect(list.body.data.meta.total).toBe(1);
     expect(list.body.data.data[0].clientEmail).toBe('c1@example.com');
 
+    // Filter by customer (drives the client-detail orders tab).
+    const clientId = list.body.data.data[0].clientId as string;
+    const byClient = await request(app.getHttpServer())
+      .get(`/api/orders?clientId=${clientId}`)
+      .set(adminAuth)
+      .expect(200);
+    expect(byClient.body.data.meta.total).toBe(1);
+    const byOther = await request(app.getHttpServer())
+      .get('/api/orders?clientId=00000000-0000-4000-8000-000000000009')
+      .set(adminAuth)
+      .expect(200);
+    expect(byOther.body.data.meta.total).toBe(0);
+
     const paid = await request(app.getHttpServer())
       .patch(`/api/orders/${order.id}/payment-status`)
       .set(adminAuth)

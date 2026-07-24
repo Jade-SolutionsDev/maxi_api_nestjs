@@ -1,4 +1,4 @@
-import { IsEnum, IsOptional, IsString } from 'class-validator';
+import { IsEnum, IsOptional, IsString, IsUUID } from 'class-validator';
 import { PaginationQueryDto } from '../../common/dto/pagination.dto';
 import { OrderStatus, PaymentStatus } from '../entities/order.entity';
 
@@ -20,4 +20,9 @@ export class AdminOrdersQueryDto extends PaginationQueryDto {
   @IsOptional()
   @IsString()
   id?: string;
+
+  /** All orders of one customer (admin client-detail view). */
+  @IsOptional()
+  @IsUUID()
+  clientId?: string;
 }

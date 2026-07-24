@@ -206,6 +206,9 @@ export class OrdersService {
     if (query.id) {
       qb.andWhere('order.id IN (:...ids)', { ids: query.id.split(',') });
     }
+    if (query.clientId) {
+      qb.andWhere('order.clientId = :clientId', { clientId: query.clientId });
+    }
     if (query.q) {
       qb.andWhere(
         `(order.orderNumber ILIKE :q OR client.email ILIKE :q
