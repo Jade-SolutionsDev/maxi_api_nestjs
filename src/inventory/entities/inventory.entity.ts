@@ -8,7 +8,9 @@ import {
 } from 'typeorm';
 
 // Current physical stock of a product at a storage. One row per (location, product).
-// No reservations yet, so available == quantity (see products amount/available).
+// `quantity` is physical stock; `reservedQuantity` is held by pending orders
+// (inventory_reservations rows with status=reserved). available = quantity -
+// reservedQuantity everywhere the storefront is concerned.
 @Entity('inventory')
 @Index(['locationId', 'productId'], { unique: true })
 export class Inventory {
@@ -23,6 +25,9 @@ export class Inventory {
 
   @Column({ type: 'int', default: 0 })
   quantity: number;
+
+  @Column({ name: 'reserved_quantity', type: 'int', default: 0 })
+  reservedQuantity: number;
 
   @CreateDateColumn({ name: 'created_at' })
   createdAt: Date;

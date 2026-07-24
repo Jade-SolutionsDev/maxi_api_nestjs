@@ -1,4 +1,4 @@
-import { BadRequestException } from '@nestjs/common';
+import { BadRequestException, ConflictException } from '@nestjs/common';
 import { Test, TestingModule } from '@nestjs/testing';
 import { getRepositoryToken } from '@nestjs/typeorm';
 import { DataSource } from 'typeorm';
@@ -11,6 +11,7 @@ import {
   OperationType,
 } from './entities/inventory-operation.entity';
 import { InventoryOperationItem } from './entities/inventory-operation-item.entity';
+import { ReservationStatus } from './entities/inventory-reservation.entity';
 import { InventoryService } from './inventory.service';
 
 function makeUser(overrides: Partial<User> = {}): User {
@@ -172,5 +173,145 @@ describe('InventoryService', () => {
         items: [{ productId: 'ghost', quantity: 1 }],
       }),
     ).rejects.toBeInstanceOf(BadRequestException);
+  });
+
+  it('OUT cannot take stock held by order reservations', async () => {
+    inventoryRepo.findOne.mockResolvedValue({
+      id: 'inv-1',
+      quantity: 5,
+      reservedQuantity: 3,
+    });
+
+    await expect(
+      service.createOperation(makeUser(), {
+        locationId: 'loc-1',
+        type: OperationType.OUT,
+        items: [{ productId: 'p-1', quantity: 4 }], // only 2 unreserved
+      }),
+    ).rejects.toBeInstanceOf(BadRequestException);
+  });
+
+  describe('order reservations', () => {
+    let reservationRepo: MockRepo;
+    let manager: { getRepository: (entity: unknown) => MockRepo };
+
+    beforeEach(() => {
+      reservationRepo = {
+        find: jest.fn().mockResolvedValue([]),
+        findOne: jest.fn().mockResolvedValue(null),
+        create: jest.fn().mockImplementation((d: unknown) => d),
+        save: jest.fn().mockImplementation((d: unknown) => Promise.resolve(d)),
+        count: jest.fn(),
+      };
+      manager = {
+        getRepository: (entity: unknown): MockRepo =>
+          entity === Inventory ? inventoryRepo : reservationRepo,
+      };
+    });
+
+    it('reserves greedily from the storages with most available stock', async () => {
+      const locA = {
+        locationId: 'loc-A',
+        productId: 'p-1',
+        quantity: 5,
+        reservedQuantity: 2,
+      }; // 3 available
+      const locB = {
+        locationId: 'loc-B',
+        productId: 'p-1',
+        quantity: 4,
+        reservedQuantity: 0,
+      }; // 4 available
+      inventoryRepo.find.mockResolvedValue([locA, locB]);
+
+      await service.reserve(manager as never, 'order-1', 'p-1', 5);
+
+      // 4 from loc-B (most available), 1 from loc-A.
+      expect(locB.reservedQuantity).toBe(4);
+      expect(locA.reservedQuantity).toBe(3);
+      expect(reservationRepo.save).toHaveBeenCalledTimes(2);
+      expect(reservationRepo.create).toHaveBeenCalledWith(
+        expect.objectContaining({ locationId: 'loc-B', quantity: 4 }),
+      );
+      expect(reservationRepo.create).toHaveBeenCalledWith(
+        expect.objectContaining({ locationId: 'loc-A', quantity: 1 }),
+      );
+    });
+
+    it('409s when total available across storages is insufficient', async () => {
+      inventoryRepo.find.mockResolvedValue([
+        {
+          locationId: 'loc-A',
+          productId: 'p-1',
+          quantity: 5,
+          reservedQuantity: 3,
+        },
+      ]);
+
+      await expect(
+        service.reserve(manager as never, 'order-1', 'p-1', 3),
+      ).rejects.toBeInstanceOf(ConflictException);
+      expect(inventoryRepo.save).not.toHaveBeenCalled();
+      expect(reservationRepo.save).not.toHaveBeenCalled();
+    });
+
+    it('confirm decrements physical and reserved stock together', async () => {
+      const row = {
+        locationId: 'loc-A',
+        productId: 'p-1',
+        quantity: 5,
+        reservedQuantity: 3,
+      };
+      const reservation = {
+        orderId: 'order-1',
+        locationId: 'loc-A',
+        productId: 'p-1',
+        quantity: 3,
+        status: ReservationStatus.RESERVED,
+      };
+      reservationRepo.find.mockResolvedValueOnce([reservation]);
+      inventoryRepo.findOne.mockResolvedValue(row);
+
+      await service.confirmReservations(manager as never, 'order-1');
+
+      expect(row.quantity).toBe(2);
+      expect(row.reservedQuantity).toBe(0);
+      expect(reservation.status).toBe(ReservationStatus.CONFIRMED);
+    });
+
+    it('release frees held stock and restocks confirmed allocations', async () => {
+      const row = {
+        locationId: 'loc-A',
+        productId: 'p-1',
+        quantity: 5,
+        reservedQuantity: 2,
+      };
+      const held = {
+        orderId: 'order-1',
+        locationId: 'loc-A',
+        productId: 'p-1',
+        quantity: 2,
+        status: ReservationStatus.RESERVED,
+      };
+      const committed = {
+        orderId: 'order-1',
+        locationId: 'loc-A',
+        productId: 'p-1',
+        quantity: 3,
+        status: ReservationStatus.CONFIRMED,
+      };
+      // settle pass sees the reserved row; restock pass sees the confirmed one.
+      reservationRepo.find
+        .mockResolvedValueOnce([held])
+        .mockResolvedValueOnce([committed]);
+      inventoryRepo.findOne.mockResolvedValue(row);
+
+      await service.releaseReservations(manager as never, 'order-1');
+
+      expect(row.reservedQuantity).toBe(0); // hold freed
+      expect(row.quantity).toBe(8); // 5 + 3 restocked
+      expect(held.status).toBe(ReservationStatus.CANCELLED);
+      expect(committed.status).toBe(ReservationStatus.CANCELLED);
+    });
   });
 });

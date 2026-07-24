@@ -35,10 +35,11 @@ export class PublicProductsController {
     summary: 'List storefront products (in-stock, with calculated price)',
     description:
       'Active products filterable by storage location, category, department, ' +
-      'name and price range. Only products with stock > 0 are returned unless ' +
-      '`includeOutOfStock=true`. `finalPrice` is the discounted price. ' +
-      '`amount`/`available` hold the stock at `locationId` when given, otherwise ' +
-      'the total across all storages. Paginated: pass `page` + `limit` (omit ' +
+      'name and price range. Only products with available stock > 0 are ' +
+      'returned unless `includeOutOfStock=true`. `finalPrice` is the ' +
+      'discounted price. `amount`/`available` hold the sellable stock (net of ' +
+      'pending-order reservations) at `locationId` when given, otherwise the ' +
+      'total across all storages. Paginated: pass `page` + `limit` (omit ' +
       '`limit` to get everything on one page).',
   })
   @ApiPaginatedResponse(ProductResponseDto)
@@ -72,7 +73,8 @@ export class PublicProductsController {
 
   @Get(':id')
   @ApiOperation({
-    summary: 'Get one storefront product (total stock across storages)',
+    summary:
+      'Get one storefront product (available stock across storages, net of reservations)',
   })
   @ApiOkResponse({ type: ProductResponseDto })
   async findOne(@Param('id') id: string): Promise<ProductResponseDto> {
@@ -86,10 +88,10 @@ export class PublicProductsController {
       // Inactive products are not part of the storefront catalog.
       throw new NotFoundException(`Product with id "${id}" not found`);
     }
-    const amounts = await this.productsService.amountsFor([id]);
+    const available = await this.productsService.availableFor([id]);
     return ProductResponseDto.fromEntity(
       product,
-      amounts.get(id) ?? 0,
+      available.get(id) ?? 0,
       category,
     );
   }

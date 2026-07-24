@@ -195,7 +195,7 @@ describe('ProductsService', () => {
           makeProduct({ id: 'p2' }),
           makeProduct({ id: 'p3' }),
         ]);
-      jest.spyOn(service, 'amountsFor').mockResolvedValue(
+      jest.spyOn(service, 'availableFor').mockResolvedValue(
         new Map([
           ['p1', 5],
           ['p2', 0],
@@ -219,7 +219,7 @@ describe('ProductsService', () => {
           makeProduct({ id: 'p1' }),
           makeProduct({ id: 'p2' }),
         ]);
-      jest.spyOn(service, 'amountsFor').mockResolvedValue(
+      jest.spyOn(service, 'availableFor').mockResolvedValue(
         new Map([
           ['p1', 0],
           ['p2', 3],
@@ -237,7 +237,7 @@ describe('ProductsService', () => {
       jest
         .spyOn(service, 'findAll')
         .mockResolvedValue([makeProduct({ id: 'p1' })]);
-      const amountsSpy = jest.spyOn(service, 'amountsFor');
+      const amountsSpy = jest.spyOn(service, 'availableFor');
       repository.manager.query = jest
         .fn()
         .mockResolvedValue([{ product_id: 'p1', total: 7 }]);
@@ -256,7 +256,7 @@ describe('ProductsService', () => {
 
     it('forces isActive=true so inactive products never reach the storefront', async () => {
       const findAllSpy = jest.spyOn(service, 'findAll').mockResolvedValue([]);
-      jest.spyOn(service, 'amountsFor').mockResolvedValue(new Map());
+      jest.spyOn(service, 'availableFor').mockResolvedValue(new Map());
 
       await service.findStorefront({ featured: true });
 

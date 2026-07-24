@@ -15,7 +15,7 @@ export class CartItemResponseDto {
   unitPrice: number;
   /** unitPrice * quantity, rounded to cents. */
   lineTotal: number;
-  /** Current total stock across all storages. */
+  /** Current sellable stock across all storages, net of order reservations. */
   available: number;
   /**
    * false when the product was deactivated/removed or stock dropped below the

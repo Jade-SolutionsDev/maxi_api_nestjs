@@ -14,6 +14,7 @@ import { RolesGuard } from './common/guards/roles.guard';
 import { GeographyModule } from './geography/geography.module';
 import { HealthModule } from './health/health.module';
 import { InventoryModule } from './inventory/inventory.module';
+import { OrdersModule } from './orders/orders.module';
 import { PermissionGuard } from './permissions/guards/permission.guard';
 import { PermissionsModule } from './permissions/permissions.module';
 import { ProductsModule } from './products/products.module';
@@ -50,6 +51,7 @@ import { WebhooksModule } from './webhooks/webhooks.module';
     GeographyModule,
     StockLocationsModule,
     InventoryModule,
+    OrdersModule,
     UploadsModule,
     WebhooksModule,
     PermissionsModule,

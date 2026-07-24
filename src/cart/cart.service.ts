@@ -30,7 +30,7 @@ export class CartService {
       order: { createdAt: 'ASC' },
     });
     const present = items.filter((i) => i.product);
-    const stock = await this.productsService.amountsFor(
+    const stock = await this.productsService.availableFor(
       present.map((i) => i.productId),
     );
     return CartResponseDto.fromItems(
@@ -123,7 +123,8 @@ export class CartService {
     productId: string,
     requested: number,
   ): Promise<void> {
-    const amounts = await this.productsService.amountsFor([productId]);
+    // Net of pending-order reservations — reserved stock is not sellable.
+    const amounts = await this.productsService.availableFor([productId]);
     const available = amounts.get(productId) ?? 0;
     if (requested > available) {
       // details.available lets the frontend clamp its quantity stepper.
