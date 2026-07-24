@@ -25,6 +25,7 @@ export interface NotificationsConfig {
 }
 
 export interface StorageConfig {
+  driver: string;
   endpoint: string | undefined;
   region: string;
   bucket: string;
@@ -86,6 +87,7 @@ export const storageConfig = (): StorageConfig => {
     (endpoint ? `${endpoint.replace(/\/$/, '')}/${bucket}` : '');
 
   return {
+    driver: process.env.STORAGE_DRIVER ?? 's3',
     endpoint,
     region: process.env.S3_REGION ?? 'us-east-1',
     bucket,
