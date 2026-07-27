@@ -1,3 +1,4 @@
+import { ApiPropertyOptional } from '@nestjs/swagger';
 import { Transform } from 'class-transformer';
 import {
   IsBoolean,
@@ -71,11 +72,17 @@ export class PublicProductsQueryDto extends PaginationQueryDto {
    * Sort field. Omitted → catalog order (curated `sortOrder`, then newest).
    * `price` sorts by list price. For a "recent" section use `createdAt` + `desc`.
    */
+  @ApiPropertyOptional({
+    enum: ['name', 'price', 'createdAt', 'updatedAt'],
+    description:
+      'Sort field. Omitted → catalog order (curated order, then newest).',
+  })
   @IsOptional()
-  @IsIn(['name', 'price', 'createdAt'])
-  sortBy?: 'name' | 'price' | 'createdAt';
+  @IsIn(['name', 'price', 'createdAt', 'updatedAt'])
+  sortBy?: 'name' | 'price' | 'createdAt' | 'updatedAt';
 
   /** Sort direction (default `asc`). */
+  @ApiPropertyOptional({ enum: ['asc', 'desc'], default: 'asc' })
   @IsOptional()
   @Transform(toSortOrder)
   @IsIn(['asc', 'desc'])

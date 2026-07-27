@@ -19,7 +19,7 @@ export interface ProductFilters {
   maxPrice?: number;
   featured?: boolean;
   isActive?: boolean;
-  sortBy?: 'name' | 'price' | 'createdAt';
+  sortBy?: 'name' | 'price' | 'createdAt' | 'updatedAt';
   sortOrder?: 'asc' | 'desc';
 }
 
@@ -90,6 +90,9 @@ export class ProductsService {
         break;
       case 'createdAt':
         qb.orderBy('product.createdAt', dir);
+        break;
+      case 'updatedAt':
+        qb.orderBy('product.updatedAt', dir);
         break;
       default:
         // Catalog order: curated first, then newest.
