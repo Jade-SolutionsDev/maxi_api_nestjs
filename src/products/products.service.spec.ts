@@ -248,9 +248,98 @@ describe('ProductsService', () => {
         { product: expect.objectContaining({ id: 'p1' }), stock: 7 },
       ]);
       expect(amountsSpy).not.toHaveBeenCalled(); // location path bypasses the all-storages sum
+      // Single storage flows through the same ANY($1) scope query.
       expect(repository.manager.query).toHaveBeenCalledWith(
-        expect.stringContaining('location_id = $1'),
-        ['loc-1', ['p1']],
+        expect.stringContaining('i.location_id = ANY($1)'),
+        [['loc-1'], ['p1']],
+      );
+    });
+
+    it('sums stock across the storages covering a municipality (province derived)', async () => {
+      jest
+        .spyOn(service, 'findAll')
+        .mockResolvedValue([
+          makeProduct({ id: 'p1' }),
+          makeProduct({ id: 'p2' }),
+        ]);
+      const amountsSpy = jest.spyOn(service, 'availableFor');
+      // First query resolves covering locations; second sums stock over them.
+      repository.manager.query = jest.fn().mockImplementation((sql: string) => {
+        if (sql.includes('stock_location_coverage')) {
+          return Promise.resolve([
+            { location_id: 'loc-a' },
+            { location_id: 'loc-b' },
+          ]);
+        }
+        return Promise.resolve([{ product_id: 'p1', total: 9 }]); // p2 not stocked here
+      });
+
+      const rows = await service.findStorefront(
+        {},
+        { municipalityId: 'mun-1' },
+      );
+
+      // Only the product with stock in a covering storage survives.
+      expect(rows).toEqual([
+        { product: expect.objectContaining({ id: 'p1' }), stock: 9 },
+      ]);
+      expect(amountsSpy).not.toHaveBeenCalled();
+      // Coverage query keys off the municipality (province derived via subquery).
+      expect(repository.manager.query).toHaveBeenNthCalledWith(
+        1,
+        expect.stringContaining('c.municipality_id = $1'),
+        ['mun-1'],
+      );
+      // Stock summed over the resolved covering location ids.
+      expect(repository.manager.query).toHaveBeenNthCalledWith(
+        2,
+        expect.stringContaining('i.location_id = ANY($1)'),
+        [
+          ['loc-a', 'loc-b'],
+          ['p1', 'p2'],
+        ],
+      );
+    });
+
+    it('returns nothing when no storage covers the area', async () => {
+      jest
+        .spyOn(service, 'findAll')
+        .mockResolvedValue([makeProduct({ id: 'p1' })]);
+      const stockQuery = jest.fn().mockResolvedValue([]); // coverage → no locations
+      repository.manager.query = stockQuery;
+
+      const rows = await service.findStorefront(
+        {},
+        { municipalityId: 'mun-x' },
+      );
+
+      expect(rows).toEqual([]);
+      // No covering storage → no stock query is issued for the empty scope.
+      expect(stockQuery).toHaveBeenCalledTimes(1);
+    });
+
+    it('province-only scope matches province-wide coverage', async () => {
+      jest
+        .spyOn(service, 'findAll')
+        .mockResolvedValue([makeProduct({ id: 'p1' })]);
+      repository.manager.query = jest.fn().mockImplementation((sql: string) => {
+        if (sql.includes('stock_location_coverage')) {
+          return Promise.resolve([{ location_id: 'loc-a' }]);
+        }
+        return Promise.resolve([{ product_id: 'p1', total: 4 }]);
+      });
+
+      const rows = await service.findStorefront({}, { provinceId: 'prov-1' });
+
+      expect(rows).toEqual([
+        { product: expect.objectContaining({ id: 'p1' }), stock: 4 },
+      ]);
+      expect(repository.manager.query).toHaveBeenNthCalledWith(
+        1,
+        expect.stringContaining(
+          "coverage_type = 'province' AND c.province_id = $1",
+        ),
+        ['prov-1'],
       );
     });
 

@@ -149,20 +149,36 @@ export class ProductsService {
 
   // Storefront listing: active products with sellable stock (physical minus
   // order reservations). Reuses findAll for the catalog filters, then attaches
-  // stock (per-location if locationId is given, else the total across all
-  // storages) and drops out-of-stock rows unless includeOutOfStock is set.
+  // stock scoped to a set of storages and drops out-of-stock rows unless
+  // includeOutOfStock is set. Scope precedence: explicit `locationId` (a single
+  // warehouse) > `municipalityId`/`provinceId` (the storages covering that
+  // delivery area) > all active storages.
   // ponytail: stock filter + limit applied in JS over the (small) catalog;
   // push into SQL with a LIMIT if it ever grows.
   async findStorefront(
     filters: ProductFilters,
     opts: {
       locationId?: string;
+      provinceId?: string;
+      municipalityId?: string;
       includeOutOfStock?: boolean;
     } = {},
   ): Promise<{ product: Product; stock: number }[]> {
     const products = await this.findAll({ ...filters, isActive: true });
+
+    // null scope → sum across all active storages (no geo filter).
+    let scope: string[] | null = null;
+    if (opts.locationId) {
+      scope = [opts.locationId];
+    } else if (opts.municipalityId || opts.provinceId) {
+      scope = await this.coveringLocationIds({
+        provinceId: opts.provinceId,
+        municipalityId: opts.municipalityId,
+      });
+    }
+
     const stock = await this.stockMap(
-      opts.locationId,
+      scope,
       products.map((p) => p.id),
     );
 
@@ -174,15 +190,52 @@ export class ProductsService {
     return opts.includeOutOfStock ? rows : rows.filter((r) => r.stock > 0);
   }
 
-  // Sellable stock per product: summed for a single storage when locationId is
-  // given, otherwise across all storages. Always net of reservations and only
-  // from enabled storages (a disabled location yields 0) — feeds the storefront.
+  // Active storages that deliver to a place. By municipality: those covering the
+  // municipality directly, OR the whole province it belongs to (derived from the
+  // municipality). By province alone: those with province-wide coverage. Disabled
+  // /soft-deleted storages are excluded. Empty result → nothing is deliverable.
+  private async coveringLocationIds(area: {
+    provinceId?: string;
+    municipalityId?: string;
+  }): Promise<string[]> {
+    const activeJoin = `JOIN stock_locations sl
+             ON sl.id = c.location_id
+            AND sl.is_active = true
+            AND sl.deleted_at IS NULL`;
+    let rows: { location_id: string }[];
+    if (area.municipalityId) {
+      rows = await this.productRepository.manager.query(
+        `SELECT DISTINCT c.location_id
+           FROM stock_location_coverage c
+           ${activeJoin}
+          WHERE c.municipality_id = $1
+             OR (c.coverage_type = 'province'
+                 AND c.province_id = (SELECT province_id FROM municipalities WHERE id = $1))`,
+        [area.municipalityId],
+      );
+    } else {
+      rows = await this.productRepository.manager.query(
+        `SELECT DISTINCT c.location_id
+           FROM stock_location_coverage c
+           ${activeJoin}
+          WHERE c.coverage_type = 'province' AND c.province_id = $1`,
+        [area.provinceId],
+      );
+    }
+    return rows.map((r) => r.location_id);
+  }
+
+  // Sellable stock per product, summed over a set of storages. `null` scope sums
+  // across every active storage; an empty array means no storage qualifies (→ no
+  // stock). Always net of reservations and only from enabled storages (a disabled
+  // location yields 0) — feeds the storefront.
   private async stockMap(
-    locationId: string | undefined,
+    locationIds: string[] | null,
     productIds: string[],
   ): Promise<Map<string, number>> {
     if (productIds.length === 0) return new Map();
-    if (!locationId) return this.availableFor(productIds);
+    if (locationIds === null) return this.availableFor(productIds);
+    if (locationIds.length === 0) return new Map();
     const rows: { product_id: string; total: number }[] =
       await this.productRepository.manager.query(
         `SELECT i.product_id, COALESCE(SUM(i.quantity - i.reserved_quantity), 0)::int AS total
@@ -191,9 +244,9 @@ export class ProductsService {
              ON sl.id = i.location_id
             AND sl.is_active = true
             AND sl.deleted_at IS NULL
-          WHERE i.location_id = $1 AND i.product_id = ANY($2)
+          WHERE i.location_id = ANY($1) AND i.product_id = ANY($2)
           GROUP BY i.product_id`,
-        [locationId, productIds],
+        [locationIds, productIds],
       );
     return new Map(rows.map((r) => [r.product_id, Number(r.total)]));
   }

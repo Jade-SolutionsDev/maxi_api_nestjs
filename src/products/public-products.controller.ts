@@ -34,13 +34,15 @@ export class PublicProductsController {
   @ApiOperation({
     summary: 'List storefront products (in-stock, with calculated price)',
     description:
-      'Active products filterable by storage location, category, department, ' +
-      'name and price range. Only products with available stock > 0 are ' +
-      'returned unless `includeOutOfStock=true`. `finalPrice` is the ' +
-      'discounted price. `amount`/`available` hold the sellable stock (net of ' +
-      'pending-order reservations) at `locationId` when given, otherwise the ' +
-      'total across all storages. Paginated: pass `page` + `limit` (omit ' +
-      '`limit` to get everything on one page).',
+      'Active products filterable by storage location, delivery area ' +
+      '(`municipalityId`/`provinceId`), category, department, name and price ' +
+      'range. Only products with available stock > 0 are returned unless ' +
+      '`includeOutOfStock=true`. `finalPrice` is the discounted price. ' +
+      '`amount`/`available` hold the sellable stock (net of pending-order ' +
+      'reservations): at `locationId` when given, else summed across the ' +
+      'storages covering the selected municipality/province, else across all ' +
+      'storages. Paginated: pass `page` + `limit` (omit `limit` to get ' +
+      'everything on one page).',
   })
   @ApiPaginatedResponse(ProductResponseDto)
   async findAll(
@@ -59,6 +61,8 @@ export class PublicProductsController {
       },
       {
         locationId: query.locationId,
+        provinceId: query.provinceId,
+        municipalityId: query.municipalityId,
         includeOutOfStock: query.includeOutOfStock ?? false,
       },
     );

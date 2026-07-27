@@ -40,6 +40,26 @@ export class PublicProductsQueryDto extends PaginationQueryDto {
   @IsUUID()
   locationId?: string;
 
+  /**
+   * Delivery municipality. Returns products deliverable here: stock summed
+   * across every storage that covers this municipality or its whole province
+   * (the province is derived from the municipality). Takes precedence over
+   * `provinceId`.
+   */
+  @ApiPropertyOptional({ format: 'uuid' })
+  @IsOptional()
+  @IsUUID()
+  municipalityId?: string;
+
+  /**
+   * Browse a whole province: stock across storages with province-wide coverage
+   * of it. Ignored when `municipalityId` is set.
+   */
+  @ApiPropertyOptional({ format: 'uuid' })
+  @IsOptional()
+  @IsUUID()
+  provinceId?: string;
+
   /** Minimum base price (inclusive). */
   @IsOptional()
   @Transform(toOptionalNumber)
