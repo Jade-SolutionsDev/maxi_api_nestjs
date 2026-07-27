@@ -361,6 +361,20 @@ export class ProductsService {
 
   async remove(id: string): Promise<void> {
     const product = await this.findOne(id);
+    // Block deletion while the product still holds physical stock anywhere —
+    // kardists must zero it out (out/transfer) first so inventory stays honest.
+    const [row]: { total: number }[] =
+      await this.productRepository.manager.query(
+        `SELECT COALESCE(SUM(i.quantity), 0)::int AS total
+           FROM inventory i
+          WHERE i.product_id = $1`,
+        [product.id],
+      );
+    if (Number(row?.total ?? 0) > 0) {
+      throw new ConflictException(
+        'No se puede eliminar un producto con existencias. Ajusta el stock a 0 en todos los almacenes antes de eliminarlo.',
+      );
+    }
     await this.productRepository.softDelete(product.id);
   }
 

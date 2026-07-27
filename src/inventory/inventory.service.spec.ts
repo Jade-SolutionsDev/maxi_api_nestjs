@@ -393,4 +393,25 @@ describe('InventoryService', () => {
       expect(confirmed?.actorName).toBeNull();
     });
   });
+
+  describe('aggregateByProduct', () => {
+    it('applies a name ILIKE filter when q is given', async () => {
+      inventoryRepo.manager.query = jest.fn().mockResolvedValue([]);
+
+      await service.aggregateByProduct({ q: 'frijol' });
+
+      const [sql, params] = inventoryRepo.manager.query.mock.calls[0];
+      expect(sql).toContain('p.name ILIKE');
+      expect(params).toContain('%frijol%');
+    });
+
+    it('omits the name filter when q is absent', async () => {
+      inventoryRepo.manager.query = jest.fn().mockResolvedValue([]);
+
+      await service.aggregateByProduct({});
+
+      const [sql] = inventoryRepo.manager.query.mock.calls[0];
+      expect(sql).not.toContain('ILIKE');
+    });
+  });
 });

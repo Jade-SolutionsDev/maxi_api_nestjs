@@ -19,12 +19,14 @@ import { CreateStockLocationDto } from './dto/create-stock-location.dto';
 import { UpdateStockLocationDto } from './dto/update-stock-location.dto';
 import { StockLocationResponseDto } from './dto/stock-location-response.dto';
 import { CoverageItemDto } from './dto/coverage-item.dto';
+import { PickupAddressItemDto } from './dto/pickup-address-item.dto';
 import { StockLocation } from './entities/stock-location.entity';
 import {
   CoverageType,
   StockLocationCoverage,
 } from './entities/stock-location-coverage.entity';
 import { StockLocationGrocer } from './entities/stock-location-grocer.entity';
+import { StockLocationPickupAddress } from './entities/stock-location-pickup-address.entity';
 
 export interface StockLocationFilters {
   q?: string;
@@ -47,6 +49,8 @@ export class StockLocationsService {
     private readonly coverageRepository: Repository<StockLocationCoverage>,
     @InjectRepository(StockLocationGrocer)
     private readonly grocerRepository: Repository<StockLocationGrocer>,
+    @InjectRepository(StockLocationPickupAddress)
+    private readonly pickupAddressRepository: Repository<StockLocationPickupAddress>,
     @InjectRepository(User)
     private readonly userRepository: Repository<User>,
     private readonly geographyService: GeographyService,
@@ -77,9 +81,10 @@ export class StockLocationsService {
     if (locations.length === 0) return [];
 
     const ids = locations.map((l) => l.id);
-    const [coverage, grocers] = await Promise.all([
+    const [coverage, grocers, pickupAddresses] = await Promise.all([
       this.coverageRepository.find({ where: { locationId: In(ids) } }),
       this.grocerRepository.find({ where: { locationId: In(ids) } }),
+      this.pickupAddressRepository.find({ where: { locationId: In(ids) } }),
     ]);
 
     return locations.map((location) =>
@@ -87,6 +92,7 @@ export class StockLocationsService {
         location,
         coverage.filter((c) => c.locationId === location.id),
         grocers.filter((g) => g.locationId === location.id),
+        pickupAddresses.filter((a) => a.locationId === location.id),
       ),
     );
   }
@@ -116,6 +122,11 @@ export class StockLocationsService {
       );
       await this.writeCoverage(manager, saved.id, coverage);
       await this.writeGrocers(manager, saved.id, grocerIds);
+      await this.writePickupAddresses(
+        manager,
+        saved.id,
+        dto.pickupAddresses ?? [],
+      );
       return saved;
     });
 
@@ -158,6 +169,12 @@ export class StockLocationsService {
       if (grocerIds !== undefined) {
         await tx.getRepository(StockLocationGrocer).delete({ locationId: id });
         await this.writeGrocers(tx, id, grocerIds);
+      }
+      if (dto.pickupAddresses !== undefined) {
+        await tx
+          .getRepository(StockLocationPickupAddress)
+          .delete({ locationId: id });
+        await this.writePickupAddresses(tx, id, dto.pickupAddresses);
       }
     });
 
@@ -230,11 +247,17 @@ export class StockLocationsService {
   private async buildResponse(
     location: StockLocation,
   ): Promise<StockLocationResponseDto> {
-    const [coverage, grocers] = await Promise.all([
+    const [coverage, grocers, pickupAddresses] = await Promise.all([
       this.coverageRepository.find({ where: { locationId: location.id } }),
       this.grocerRepository.find({ where: { locationId: location.id } }),
+      this.pickupAddressRepository.find({ where: { locationId: location.id } }),
     ]);
-    return StockLocationResponseDto.build(location, coverage, grocers);
+    return StockLocationResponseDto.build(
+      location,
+      coverage,
+      grocers,
+      pickupAddresses,
+    );
   }
 
   // Validates FKs + municipality/province consistency, dedups, and normalizes.
@@ -317,6 +340,24 @@ export class StockLocationsService {
     const repo = manager.getRepository(StockLocationGrocer);
     await repo.save(
       grocerIds.map((grocerId) => repo.create({ locationId, grocerId })),
+    );
+  }
+
+  private async writePickupAddresses(
+    manager: EntityManager,
+    locationId: string,
+    items: PickupAddressItemDto[],
+  ): Promise<void> {
+    if (items.length === 0) return;
+    const repo = manager.getRepository(StockLocationPickupAddress);
+    await repo.save(
+      items.map((item) =>
+        repo.create({
+          locationId,
+          label: item.label?.trim() || null,
+          address: item.address.trim(),
+        }),
+      ),
     );
   }
 }

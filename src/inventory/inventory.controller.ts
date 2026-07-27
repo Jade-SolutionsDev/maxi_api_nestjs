@@ -42,6 +42,7 @@ export class InventoryController {
   @Get('aggregate')
   @Roles(Role.SUPER_ADMIN, Role.ADMIN, Role.KARDIST)
   async aggregate(
+    @Query('q') q?: string,
     @Query('departmentId') departmentId?: string,
     @Query('categoryId') categoryId?: string,
     @Query('atLocationId') atLocationId?: string,
@@ -49,6 +50,7 @@ export class InventoryController {
     @Query('maxStock') maxStock?: string,
   ): Promise<AggregatedInventoryDto[]> {
     return this.inventoryService.aggregateByProduct({
+      q,
       departmentId,
       categoryId,
       atLocationId,

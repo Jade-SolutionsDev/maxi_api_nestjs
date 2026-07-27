@@ -4,11 +4,18 @@ import {
   StockLocationCoverage,
 } from '../entities/stock-location-coverage.entity';
 import { StockLocationGrocer } from '../entities/stock-location-grocer.entity';
+import { StockLocationPickupAddress } from '../entities/stock-location-pickup-address.entity';
 
 export class CoverageResponseItem {
   coverageType: CoverageType;
   provinceId: string;
   municipalityId: string | null;
+}
+
+export class PickupAddressResponseItem {
+  id: string;
+  label: string | null;
+  address: string;
 }
 
 export class StockLocationResponseDto {
@@ -17,6 +24,7 @@ export class StockLocationResponseDto {
   isActive: boolean;
   coverage: CoverageResponseItem[];
   grocerIds: string[];
+  pickupAddresses: PickupAddressResponseItem[];
   createdAt: Date;
   updatedAt: Date;
 
@@ -24,6 +32,7 @@ export class StockLocationResponseDto {
     location: StockLocation,
     coverage: StockLocationCoverage[],
     grocers: StockLocationGrocer[],
+    pickupAddresses: StockLocationPickupAddress[] = [],
   ): StockLocationResponseDto {
     const dto = new StockLocationResponseDto();
     dto.id = location.id;
@@ -35,6 +44,11 @@ export class StockLocationResponseDto {
       municipalityId: c.municipalityId,
     }));
     dto.grocerIds = grocers.map((g) => g.grocerId);
+    dto.pickupAddresses = pickupAddresses.map((a) => ({
+      id: a.id,
+      label: a.label,
+      address: a.address,
+    }));
     dto.createdAt = location.createdAt;
     dto.updatedAt = location.updatedAt;
     return dto;

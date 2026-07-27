@@ -6,6 +6,7 @@ import { User } from '../users/entities/user.entity';
 import { StockLocation } from './entities/stock-location.entity';
 import { StockLocationCoverage } from './entities/stock-location-coverage.entity';
 import { StockLocationGrocer } from './entities/stock-location-grocer.entity';
+import { StockLocationPickupAddress } from './entities/stock-location-pickup-address.entity';
 import { StockLocationsController } from './stock-locations.controller';
 import { StockLocationsService } from './stock-locations.service';
 
@@ -15,6 +16,7 @@ import { StockLocationsService } from './stock-locations.service';
       StockLocation,
       StockLocationCoverage,
       StockLocationGrocer,
+      StockLocationPickupAddress,
       User,
     ]),
     forwardRef(() => AuthModule),

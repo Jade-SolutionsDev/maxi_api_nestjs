@@ -356,8 +356,9 @@ describe('ProductsService', () => {
   });
 
   describe('remove', () => {
-    it('soft-deletes a product', async () => {
+    it('soft-deletes a product with no stock', async () => {
       repository.findOne.mockResolvedValue(makeProduct());
+      repository.manager.query = jest.fn().mockResolvedValue([{ total: 0 }]); // no stock anywhere
       repository.softDelete.mockResolvedValue({
         affected: 1,
         raw: [],
@@ -366,6 +367,16 @@ describe('ProductsService', () => {
 
       await service.remove('prod-1');
       expect(repository.softDelete).toHaveBeenCalledWith('prod-1');
+    });
+
+    it('refuses to delete a product that still has stock', async () => {
+      repository.findOne.mockResolvedValue(makeProduct());
+      repository.manager.query = jest.fn().mockResolvedValue([{ total: 12 }]); // stock remains
+
+      await expect(service.remove('prod-1')).rejects.toBeInstanceOf(
+        ConflictException,
+      );
+      expect(repository.softDelete).not.toHaveBeenCalled();
     });
   });
 });

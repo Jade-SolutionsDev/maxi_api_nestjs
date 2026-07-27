@@ -10,6 +10,7 @@ import {
   StockLocationCoverage,
 } from './entities/stock-location-coverage.entity';
 import { StockLocationGrocer } from './entities/stock-location-grocer.entity';
+import { StockLocationPickupAddress } from './entities/stock-location-pickup-address.entity';
 import { StockLocationsService } from './stock-locations.service';
 
 function makeUser(overrides: Partial<User> = {}): User {
@@ -42,6 +43,7 @@ describe('StockLocationsService', () => {
   let locationRepo: MockRepo;
   let coverageRepo: MockRepo;
   let grocerRepo: MockRepo;
+  let pickupRepo: MockRepo;
   let userRepo: MockRepo;
   let geography: {
     getProvinceOrThrow: jest.Mock;
@@ -60,6 +62,7 @@ describe('StockLocationsService', () => {
     locationRepo = repoMock();
     coverageRepo = repoMock();
     grocerRepo = repoMock();
+    pickupRepo = repoMock();
     userRepo = repoMock();
     geography = {
       getProvinceOrThrow: jest.fn().mockResolvedValue({ id: 'prov-1' }),
@@ -79,6 +82,7 @@ describe('StockLocationsService', () => {
               if (entity === StockLocation) return locationRepo;
               if (entity === StockLocationCoverage) return coverageRepo;
               if (entity === StockLocationGrocer) return grocerRepo;
+              if (entity === StockLocationPickupAddress) return pickupRepo;
               return null;
             },
           }),
@@ -96,6 +100,10 @@ describe('StockLocationsService', () => {
         {
           provide: getRepositoryToken(StockLocationGrocer),
           useValue: grocerRepo,
+        },
+        {
+          provide: getRepositoryToken(StockLocationPickupAddress),
+          useValue: pickupRepo,
         },
         { provide: getRepositoryToken(User), useValue: userRepo },
         { provide: GeographyService, useValue: geography },

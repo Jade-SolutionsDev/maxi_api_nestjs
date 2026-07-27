@@ -138,6 +138,7 @@ export class InventoryService {
   // `available` = SUM(quantity - reserved) counting only enabled storages.
   // Returns the full filtered set (frontend paginates/sorts client-side).
   async aggregateByProduct(filters: {
+    q?: string;
     departmentId?: string;
     categoryId?: string;
     atLocationId?: string;
@@ -151,6 +152,9 @@ export class InventoryService {
     };
 
     const where: string[] = [];
+    if (filters.q) {
+      where.push(`p.name ILIKE ${add(`%${filters.q}%`)}`);
+    }
     if (filters.categoryId) {
       where.push(`p.category_id = ${add(filters.categoryId)}`);
     }

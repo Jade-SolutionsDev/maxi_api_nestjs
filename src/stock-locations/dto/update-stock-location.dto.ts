@@ -11,6 +11,7 @@ import {
   ValidateNested,
 } from 'class-validator';
 import { CoverageItemDto } from './coverage-item.dto';
+import { PickupAddressItemDto } from './pickup-address-item.dto';
 
 export class UpdateStockLocationDto {
   @IsOptional()
@@ -36,4 +37,11 @@ export class UpdateStockLocationDto {
   @IsArray()
   @IsUUID('all', { each: true })
   grocerIds?: string[];
+
+  // When provided, replaces the whole pickup-address set.
+  @IsOptional()
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => PickupAddressItemDto)
+  pickupAddresses?: PickupAddressItemDto[];
 }
