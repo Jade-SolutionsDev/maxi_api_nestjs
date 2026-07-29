@@ -7,6 +7,8 @@ import {
 } from './dto/geography-response.dto';
 import { GeographyService } from './geography.service';
 
+const isTrue = (v?: string): boolean => v === 'true' || v === '1';
+
 // Reference geography for Cuba. Public so the storefront can read it too; the
 // backoffice dataProvider consumes the `provinces` / `municipalities` resources.
 @ApiTags('geography')
@@ -15,26 +17,38 @@ import { GeographyService } from './geography.service';
 export class GeographyController {
   constructor(private readonly geographyService: GeographyService) {}
 
+  // `all=true` bypasses the active-coverage filter (see the service). Default is
+  // covered-only, so the storefront only offers deliverable provinces/municipalities.
   @Get('provinces')
-  async listProvinces(): Promise<ProvinceResponseDto[]> {
-    const provinces = await this.geographyService.listProvinces();
+  async listProvinces(
+    @Query('all') all?: string,
+  ): Promise<ProvinceResponseDto[]> {
+    const provinces = await this.geographyService.listProvinces({
+      all: isTrue(all),
+    });
     return provinces.map(ProvinceResponseDto.fromEntity);
   }
 
   @Get('provinces/:id/municipalities')
   async listByProvince(
     @Param('id') id: string,
+    @Query('all') all?: string,
   ): Promise<MunicipalityResponseDto[]> {
-    const municipalities = await this.geographyService.listMunicipalities(id);
+    const municipalities = await this.geographyService.listMunicipalities(id, {
+      all: isTrue(all),
+    });
     return municipalities.map(MunicipalityResponseDto.fromEntity);
   }
 
   @Get('municipalities')
   async listMunicipalities(
     @Query('provinceId') provinceId?: string,
+    @Query('all') all?: string,
   ): Promise<MunicipalityResponseDto[]> {
-    const municipalities =
-      await this.geographyService.listMunicipalities(provinceId);
+    const municipalities = await this.geographyService.listMunicipalities(
+      provinceId,
+      { all: isTrue(all) },
+    );
     return municipalities.map(MunicipalityResponseDto.fromEntity);
   }
 }
