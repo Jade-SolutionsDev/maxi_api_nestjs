@@ -382,6 +382,49 @@ describe('CategoriesService', () => {
       expect(prodQb.andWhere).not.toHaveBeenCalled();
     });
 
+    it('getPublicCatalog groups categories under departments with totals', async () => {
+      const depA = makeCategory({ id: 'dep-a', parentId: null });
+      const depB = makeCategory({ id: 'dep-b', parentId: null });
+      const catA1 = makeCategory({ id: 'cat-a1', parentId: 'dep-a' });
+      const catA2 = makeCategory({ id: 'cat-a2', parentId: 'dep-a' });
+      const catB1 = makeCategory({ id: 'cat-b1', parentId: 'dep-b' });
+
+      jest
+        .spyOn(service, 'listPublicDepartments')
+        .mockResolvedValue([depA, depB]);
+      jest
+        .spyOn(service, 'listPublicCategories')
+        .mockResolvedValue([catA1, catA2, catB1]);
+      jest.spyOn(service, 'countValidProducts').mockResolvedValue(
+        new Map([
+          ['cat-a1', 84],
+          ['cat-a2', 21],
+          ['cat-b1', 5],
+        ]),
+      );
+
+      const tree = await service.getPublicCatalog();
+
+      expect(tree).toHaveLength(2);
+      const a = tree.find((n) => n.department.id === 'dep-a')!;
+      expect(a.categories.map((c) => c.category.id)).toEqual([
+        'cat-a1',
+        'cat-a2',
+      ]);
+      expect(a.productsCount).toBe(105); // 84 + 21, summed server-side
+      const b = tree.find((n) => n.department.id === 'dep-b')!;
+      expect(b.productsCount).toBe(5);
+    });
+
+    it('getPublicCatalog drops departments with no valid categories', async () => {
+      const dep = makeCategory({ id: 'dep-empty', parentId: null });
+      jest.spyOn(service, 'listPublicDepartments').mockResolvedValue([dep]);
+      jest.spyOn(service, 'listPublicCategories').mockResolvedValue([]);
+      jest.spyOn(service, 'countValidProducts').mockResolvedValue(new Map());
+
+      expect(await service.getPublicCatalog()).toEqual([]);
+    });
+
     it('count helpers short-circuit on an empty id list (no query)', async () => {
       expect((await service.countValidChildren([])).size).toBe(0);
       expect((await service.countValidProducts([])).size).toBe(0);

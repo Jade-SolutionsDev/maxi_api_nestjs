@@ -423,6 +423,53 @@ export class CategoriesService {
     return category;
   }
 
+  /**
+   * The whole storefront catalog as a department -> categories tree, each node
+   * carrying its valid-product count and each department a total (sum of its
+   * categories). Only valid rows are included (same semantics as the flat
+   * public list endpoints). Assembled from the existing primitives in 3 small
+   * queries — the taxonomy is tiny, so returning it whole (unpaginated) is the
+   * cheapest thing to cache for an always-on nav.
+   */
+  async getPublicCatalog(): Promise<
+    Array<{
+      department: Category;
+      productsCount: number;
+      categories: Array<{ category: Category; productsCount: number }>;
+    }>
+  > {
+    const [departments, categories] = await Promise.all([
+      this.listPublicDepartments({}),
+      this.listPublicCategories({}),
+    ]);
+    const counts = await this.countValidProducts(categories.map((c) => c.id));
+
+    const byParent = new Map<string, Category[]>();
+    for (const cat of categories) {
+      if (!cat.parentId) continue;
+      const siblings = byParent.get(cat.parentId) ?? [];
+      siblings.push(cat);
+      byParent.set(cat.parentId, siblings);
+    }
+
+    return (
+      departments
+        .map((department) => {
+          const cats = (byParent.get(department.id) ?? []).map((category) => ({
+            category,
+            productsCount: counts.get(category.id) ?? 0,
+          }));
+          return {
+            department,
+            categories: cats,
+            productsCount: cats.reduce((sum, c) => sum + c.productsCount, 0),
+          };
+        })
+        // Safety net: listPublicDepartments already guarantees ≥1 valid child.
+        .filter((node) => node.categories.length > 0)
+    );
+  }
+
   // ---------------- Shared helpers used by ProductsService ----------------
 
   /**
