@@ -93,13 +93,14 @@ export class PublicProductsQueryDto extends PaginationQueryDto {
    * `price` sorts by list price. For a "recent" section use `createdAt` + `desc`.
    */
   @ApiPropertyOptional({
-    enum: ['name', 'price', 'createdAt', 'updatedAt'],
+    enum: ['name', 'price', 'finalPrice', 'createdAt', 'updatedAt'],
     description:
-      'Sort field. Omitted → catalog order (curated order, then newest).',
+      'Sort field. Omitted → catalog order (curated order, then newest). ' +
+      '`price` = list price; `finalPrice` = discounted price.',
   })
   @IsOptional()
-  @IsIn(['name', 'price', 'createdAt', 'updatedAt'])
-  sortBy?: 'name' | 'price' | 'createdAt' | 'updatedAt';
+  @IsIn(['name', 'price', 'finalPrice', 'createdAt', 'updatedAt'])
+  sortBy?: 'name' | 'price' | 'finalPrice' | 'createdAt' | 'updatedAt';
 
   /** Sort direction (default `asc`). */
   @ApiPropertyOptional({ enum: ['asc', 'desc'], default: 'asc' })

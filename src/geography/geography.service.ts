@@ -5,7 +5,7 @@ import {
   OnApplicationBootstrap,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { In, Repository } from 'typeorm';
 import { CUBA_GEOGRAPHY } from './data/cuba-geography';
 import { Municipality } from './entities/municipality.entity';
 import { Province } from './entities/province.entity';
@@ -66,16 +66,69 @@ export class GeographyService implements OnApplicationBootstrap {
     }
   }
 
-  listProvinces(): Promise<Province[]> {
+  // By default only provinces reachable by an active (enabled, non-deleted)
+  // storage are returned — the storefront should offer a province only if
+  // something can be delivered there. Pass `all` to get every active province
+  // (the backoffice coverage editor needs the full list to assign coverage).
+  async listProvinces(opts: { all?: boolean } = {}): Promise<Province[]> {
+    if (opts.all) {
+      return this.provinceRepository.find({
+        where: { isActive: true },
+        order: { name: 'ASC' },
+      });
+    }
+    const rows: { province_id: string }[] =
+      await this.provinceRepository.manager.query(
+        `SELECT DISTINCT c.province_id
+           FROM stock_location_coverage c
+           JOIN stock_locations sl ON sl.id = c.location_id
+            AND sl.is_active = true AND sl.deleted_at IS NULL`,
+      );
+    const ids = rows.map((r) => r.province_id);
+    if (ids.length === 0) return [];
     return this.provinceRepository.find({
-      where: { isActive: true },
+      where: { isActive: true, id: In(ids) },
       order: { name: 'ASC' },
     });
   }
 
-  listMunicipalities(provinceId?: string): Promise<Municipality[]> {
+  // Same coverage filter as provinces: a municipality is covered when an active
+  // storage covers it directly OR covers its whole province. `all` bypasses it.
+  async listMunicipalities(
+    provinceId?: string,
+    opts: { all?: boolean } = {},
+  ): Promise<Municipality[]> {
+    if (opts.all) {
+      return this.municipalityRepository.find({
+        where: { isActive: true, ...(provinceId ? { provinceId } : {}) },
+        order: { name: 'ASC' },
+      });
+    }
+    const rows: { id: string }[] =
+      await this.municipalityRepository.manager.query(
+        `SELECT m.id
+           FROM municipalities m
+          WHERE m.is_active = true
+            AND (
+              EXISTS (SELECT 1 FROM stock_location_coverage c
+                        JOIN stock_locations sl ON sl.id = c.location_id
+                         AND sl.is_active = true AND sl.deleted_at IS NULL
+                       WHERE c.municipality_id = m.id)
+              OR EXISTS (SELECT 1 FROM stock_location_coverage c
+                        JOIN stock_locations sl ON sl.id = c.location_id
+                         AND sl.is_active = true AND sl.deleted_at IS NULL
+                       WHERE c.coverage_type = 'province'
+                         AND c.province_id = m.province_id)
+            )`,
+      );
+    const ids = rows.map((r) => r.id);
+    if (ids.length === 0) return [];
     return this.municipalityRepository.find({
-      where: { isActive: true, ...(provinceId ? { provinceId } : {}) },
+      where: {
+        isActive: true,
+        id: In(ids),
+        ...(provinceId ? { provinceId } : {}),
+      },
       order: { name: 'ASC' },
     });
   }

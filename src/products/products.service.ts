@@ -19,7 +19,7 @@ export interface ProductFilters {
   maxPrice?: number;
   featured?: boolean;
   isActive?: boolean;
-  sortBy?: 'name' | 'price' | 'createdAt' | 'updatedAt';
+  sortBy?: 'name' | 'price' | 'finalPrice' | 'createdAt' | 'updatedAt';
   sortOrder?: 'asc' | 'desc';
 }
 
@@ -84,9 +84,13 @@ export class ProductsService {
         qb.orderBy('product.name', dir);
         break;
       case 'price':
-        // ponytail: sorts by list price; final (discounted) price ordering only
-        // differs when discounts vary — add an expression sort if needed.
         qb.orderBy('product.basePrice', dir);
+        break;
+      case 'finalPrice':
+        // Discounted price: basePrice * (1 - discount/100). Mirrors
+        // ProductResponseDto.fromEntity's finalPrice. TypeORM maps the
+        // `product.<prop>` tokens to their columns.
+        qb.orderBy('product.basePrice * (1 - product.discount / 100)', dir);
         break;
       case 'createdAt':
         qb.orderBy('product.createdAt', dir);
