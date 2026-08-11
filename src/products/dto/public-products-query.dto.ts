@@ -60,14 +60,14 @@ export class PublicProductsQueryDto extends PaginationQueryDto {
   @IsUUID()
   provinceId?: string;
 
-  /** Minimum base price (inclusive). */
+  /** Minimum final (discounted) price, inclusive. */
   @IsOptional()
   @Transform(toOptionalNumber)
   @IsNumber()
   @Min(0)
   minPrice?: number;
 
-  /** Maximum base price (inclusive). */
+  /** Maximum final (discounted) price, inclusive. */
   @IsOptional()
   @Transform(toOptionalNumber)
   @IsNumber()

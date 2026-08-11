@@ -1,5 +1,6 @@
-import { Controller, Get } from '@nestjs/common';
+import { Controller, Get, Header } from '@nestjs/common';
 import { ApiOkResponse, ApiTags } from '@nestjs/swagger';
+import { TAXONOMY_CACHE } from '../common/constants/cache-control';
 import { Public } from '../common/decorators/public.decorator';
 import { CategoriesService } from './categories.service';
 import {
@@ -21,6 +22,7 @@ export class PublicCatalogController {
    * intended to back an always-on catalog nav, so cache it on the client.
    */
   @Get()
+  @Header('Cache-Control', TAXONOMY_CACHE)
   @ApiOkResponse({ type: PublicCatalogDepartmentDto, isArray: true })
   async findAll(): Promise<PublicCatalogDepartmentDto[]> {
     const tree = await this.categoriesService.getPublicCatalog();

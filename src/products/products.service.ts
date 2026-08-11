@@ -17,6 +17,12 @@ export interface ProductFilters {
   categoryId?: string;
   minPrice?: number;
   maxPrice?: number;
+  /**
+   * Column the price range filters on. Defaults to the list price; the
+   * storefront passes `finalPrice` so the range matches the discounted price
+   * it displays (same expression the `finalPrice` sort uses).
+   */
+  priceField?: 'basePrice' | 'finalPrice';
   featured?: boolean;
   isActive?: boolean;
   sortBy?: 'name' | 'price' | 'finalPrice' | 'createdAt' | 'updatedAt';
@@ -57,13 +63,17 @@ export class ProductsService {
     if (filters.q) {
       qb.andWhere('product.name ILIKE :q', { q: `%${filters.q}%` });
     }
+    const priceExpr =
+      filters.priceField === 'finalPrice'
+        ? 'product.basePrice * (1 - product.discount / 100)'
+        : 'product.basePrice';
     if (filters.minPrice != null) {
-      qb.andWhere('product.basePrice >= :minPrice', {
+      qb.andWhere(`${priceExpr} >= :minPrice`, {
         minPrice: filters.minPrice,
       });
     }
     if (filters.maxPrice != null) {
-      qb.andWhere('product.basePrice <= :maxPrice', {
+      qb.andWhere(`${priceExpr} <= :maxPrice`, {
         maxPrice: filters.maxPrice,
       });
     }

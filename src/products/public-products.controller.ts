@@ -55,6 +55,7 @@ export class PublicProductsController {
         departmentId: query.departmentId,
         minPrice: query.minPrice,
         maxPrice: query.maxPrice,
+        priceField: 'finalPrice',
         featured: query.featured,
         sortBy: query.sortBy,
         sortOrder: query.sortOrder,

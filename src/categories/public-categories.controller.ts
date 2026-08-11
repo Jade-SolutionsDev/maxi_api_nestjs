@@ -1,4 +1,5 @@
-import { Controller, Get, Param, Query } from '@nestjs/common';
+import { Controller, Get, Header, Param, Query } from '@nestjs/common';
+import { TAXONOMY_CACHE } from '../common/constants/cache-control';
 import { Public } from '../common/decorators/public.decorator';
 import {
   ApiPaginatedResponse,
@@ -23,6 +24,7 @@ export class PublicCategoriesController {
    * `departmentId` to list the categories of a single department.
    */
   @Get()
+  @Header('Cache-Control', TAXONOMY_CACHE)
   @ApiPaginatedResponse(CategoryResponseDto)
   async findAll(
     @Query() query: PublicCategoriesQueryDto,
@@ -48,6 +50,7 @@ export class PublicCategoriesController {
 
   /** Get a single active category by id (404 if missing or inactive). */
   @Get(':id')
+  @Header('Cache-Control', TAXONOMY_CACHE)
   async findOne(@Param('id') id: string): Promise<CategoryResponseDto> {
     const category = await this.categoriesService.getPublicCategory(id);
     const dto = CategoryResponseDto.fromEntity(category);
