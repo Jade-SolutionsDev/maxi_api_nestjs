@@ -35,6 +35,15 @@ export interface StorageConfig {
   forcePathStyle: boolean;
 }
 
+export interface MibiConfig {
+  keyId: string | undefined;
+  secretKey: string | undefined;
+  webhookSecret: string | undefined;
+  baseUrl: string;
+  /** Gateway active when both API keys are present; falls back to manual payments otherwise. */
+  enabled: boolean;
+}
+
 export interface AppConfig {
   port: number;
   database: DatabaseConfig;
@@ -43,6 +52,7 @@ export interface AppConfig {
   auth: AuthConfig;
   notifications: NotificationsConfig;
   storage: StorageConfig;
+  mibi: MibiConfig;
   nodeEnv: string;
 }
 
@@ -98,6 +108,23 @@ export const storageConfig = (): StorageConfig => {
   };
 };
 
+export const mibiConfig = (): MibiConfig => {
+  const keyId = process.env.MIBI_KEY_ID;
+  const secretKey = process.env.MIBI_SECRET_KEY;
+  return {
+    keyId,
+    secretKey,
+    webhookSecret: process.env.MIBI_WEBHOOK_SECRET,
+    baseUrl: (process.env.MIBI_API_BASE ?? 'https://mibilletera.cu').replace(
+      /\/$/,
+      '',
+    ),
+    // Never bind the live gateway in tests — e2e checkouts must not create
+    // real charges just because .env carries production keys.
+    enabled: !!(keyId && secretKey) && process.env.NODE_ENV !== 'test',
+  };
+};
+
 export const corsConfig = (): CorsConfig => {
   const raw = process.env.CORS_ORIGINS ?? '';
   const defaultOrigins =
@@ -122,5 +149,6 @@ export default (): AppConfig => ({
   auth: authConfig(),
   notifications: notificationsConfig(),
   storage: storageConfig(),
+  mibi: mibiConfig(),
   nodeEnv: process.env.NODE_ENV ?? 'development',
 });

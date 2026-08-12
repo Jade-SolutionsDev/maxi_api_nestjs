@@ -1,5 +1,6 @@
 import { Order, OrderStatus, PaymentStatus } from '../entities/order.entity';
 import { OrderItem } from '../entities/order-item.entity';
+import { PaymentChargeResponseDto } from '../payments/dto/payment-charge-response.dto';
 
 export class OrderItemResponseDto {
   productId: string;
@@ -43,6 +44,11 @@ export class OrderResponseDto {
   items?: OrderItemResponseDto[];
   /** Hosted-checkout URL from the payment provider (checkout response only). */
   redirectUrl?: string;
+  /**
+   * Latest payment attempt (Mi Billetera charge) with the crypto deposit
+   * instructions. Present on detail responses; absent for manual payments.
+   */
+  payment?: PaymentChargeResponseDto;
   createdAt: Date;
   updatedAt: Date;
 

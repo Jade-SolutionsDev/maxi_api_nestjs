@@ -14,6 +14,7 @@ import { Role, User } from '../users/entities/user.entity';
 import { OrderItem } from './entities/order-item.entity';
 import { Order, OrderStatus, PaymentStatus } from './entities/order.entity';
 import { OrdersService } from './orders.service';
+import { MibiPaymentService } from './payments/mibi-payment.service';
 import { PAYMENT_PROVIDER } from './payments/payment-provider.interface';
 
 function makeClient(): Client {
@@ -127,6 +128,10 @@ describe('OrdersService', () => {
         { provide: CartService, useValue: cartService },
         { provide: InventoryService, useValue: inventoryService },
         { provide: PAYMENT_PROVIDER, useValue: paymentProvider },
+        {
+          provide: MibiPaymentService,
+          useValue: { latestChargeFor: jest.fn().mockResolvedValue(null) },
+        },
         { provide: DataSource, useValue: dataSource },
       ],
     }).compile();
@@ -189,6 +194,20 @@ describe('OrdersService', () => {
       await expect(service.checkout(makeClient(), {})).rejects.toBeInstanceOf(
         BadRequestException,
       );
+    });
+
+    it('survives a payment-initiation failure: order stays pending', async () => {
+      paymentProvider.initiatePayment.mockRejectedValue(
+        new Error('gateway down'),
+      );
+
+      const result = await service.checkout(makeClient(), {});
+
+      // Order + reservations + cart clear all committed regardless.
+      expect(inventoryService.reserve).toHaveBeenCalled();
+      expect(cartItemRepo.delete).toHaveBeenCalled();
+      expect(result.status).toBe(OrderStatus.PENDING);
+      expect(result.paymentStatus).toBe(PaymentStatus.PENDING);
     });
 
     it('409s when a cart line is no longer available', async () => {
@@ -288,6 +307,42 @@ describe('OrdersService', () => {
 
       expect(orderRepo.save).toHaveBeenCalledWith(
         expect.objectContaining({ status: OrderStatus.PROCESSING }),
+      );
+    });
+  });
+
+  describe('updatePaymentStatus', () => {
+    it('settles a pending payment', async () => {
+      orderRepo.findOne
+        .mockResolvedValueOnce(makeOrder())
+        .mockResolvedValue(makeOrder({ items: [] }));
+
+      await service.updatePaymentStatus('order-1', PaymentStatus.PAID);
+
+      expect(orderRepo.save).toHaveBeenCalledWith(
+        expect.objectContaining({ paymentStatus: PaymentStatus.PAID }),
+      );
+    });
+
+    it('rejects nonsense transitions like paid -> pending', async () => {
+      orderRepo.findOne.mockResolvedValue(
+        makeOrder({ paymentStatus: PaymentStatus.PAID }),
+      );
+
+      await expect(
+        service.updatePaymentStatus('order-1', PaymentStatus.PENDING),
+      ).rejects.toBeInstanceOf(ConflictException);
+    });
+
+    it('allows refunding a paid order', async () => {
+      orderRepo.findOne
+        .mockResolvedValueOnce(makeOrder({ paymentStatus: PaymentStatus.PAID }))
+        .mockResolvedValue(makeOrder({ items: [] }));
+
+      await service.updatePaymentStatus('order-1', PaymentStatus.REFUNDED);
+
+      expect(orderRepo.save).toHaveBeenCalledWith(
+        expect.objectContaining({ paymentStatus: PaymentStatus.REFUNDED }),
       );
     });
   });
