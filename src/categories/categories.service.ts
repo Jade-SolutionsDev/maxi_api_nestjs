@@ -15,6 +15,10 @@ import {
 } from 'typeorm';
 import { slugify } from '../common/utils/catalog-ownership.utils';
 import { Product } from '../products/entities/product.entity';
+import {
+  RevalidationService,
+  TAXONOMY_REVALIDATE_TAGS,
+} from '../revalidation/revalidation.service';
 import { User } from '../users/entities/user.entity';
 import { CreateCategoryDto } from './dto/create-category.dto';
 import { CreateDepartmentDto } from './dto/create-department.dto';
@@ -35,6 +39,7 @@ export class CategoriesService {
     private readonly categoryRepository: Repository<Category>,
     @InjectRepository(Product)
     private readonly productRepository: Repository<Product>,
+    private readonly revalidationService: RevalidationService,
   ) {}
 
   // ---------------- Departments (parent_id = null) ----------------
@@ -74,7 +79,9 @@ export class CategoriesService {
       isActive: dto.isActive ?? true,
     });
 
-    return this.categoryRepository.save(department);
+    const saved = await this.categoryRepository.save(department);
+    this.revalidationService.notify(TAXONOMY_REVALIDATE_TAGS);
+    return saved;
   }
 
   async updateDepartment(
@@ -109,7 +116,9 @@ export class CategoriesService {
       department.isActive = dto.isActive;
     }
 
-    return this.categoryRepository.save(department);
+    const saved = await this.categoryRepository.save(department);
+    this.revalidationService.notify(TAXONOMY_REVALIDATE_TAGS);
+    return saved;
   }
 
   async removeDepartment(user: User, id: string): Promise<void> {
@@ -127,6 +136,7 @@ export class CategoriesService {
     }
 
     await this.categoryRepository.softDelete(id);
+    this.revalidationService.notify(TAXONOMY_REVALIDATE_TAGS);
   }
 
   // ---------------- Categories (parent_id = department id) ----------------
@@ -174,7 +184,9 @@ export class CategoriesService {
       isActive: dto.isActive ?? true,
     });
 
-    return this.categoryRepository.save(category);
+    const saved = await this.categoryRepository.save(category);
+    this.revalidationService.notify(TAXONOMY_REVALIDATE_TAGS);
+    return saved;
   }
 
   async updateCategory(
@@ -212,7 +224,9 @@ export class CategoriesService {
       category.isActive = dto.isActive;
     }
 
-    return this.categoryRepository.save(category);
+    const saved = await this.categoryRepository.save(category);
+    this.revalidationService.notify(TAXONOMY_REVALIDATE_TAGS);
+    return saved;
   }
 
   async removeCategory(user: User, id: string): Promise<void> {
@@ -234,6 +248,7 @@ export class CategoriesService {
     }
 
     await this.categoryRepository.softDelete(id);
+    this.revalidationService.notify(TAXONOMY_REVALIDATE_TAGS);
   }
 
   // ---------------- Public storefront reads (active rows only) ----------------

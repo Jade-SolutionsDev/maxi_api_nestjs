@@ -3,6 +3,7 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { getRepositoryToken } from '@nestjs/typeorm';
 import { DataSource } from 'typeorm';
 import { GeographyService } from '../geography/geography.service';
+import { RevalidationService } from '../revalidation/revalidation.service';
 import { Role, User } from '../users/entities/user.entity';
 import { StockLocation } from './entities/stock-location.entity';
 import {
@@ -108,6 +109,7 @@ describe('StockLocationsService', () => {
         { provide: getRepositoryToken(User), useValue: userRepo },
         { provide: GeographyService, useValue: geography },
         { provide: DataSource, useValue: dataSource },
+        { provide: RevalidationService, useValue: { notify: jest.fn() } },
       ],
     }).compile();
 

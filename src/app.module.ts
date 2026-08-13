@@ -18,6 +18,7 @@ import { OrdersModule } from './orders/orders.module';
 import { PermissionGuard } from './permissions/guards/permission.guard';
 import { PermissionsModule } from './permissions/permissions.module';
 import { ProductsModule } from './products/products.module';
+import { RevalidationModule } from './revalidation/revalidation.module';
 import { StockLocationsModule } from './stock-locations/stock-locations.module';
 import { UploadsModule } from './uploads/uploads.module';
 import { UsersModule } from './users/users.module';
@@ -42,6 +43,7 @@ import { WebhooksModule } from './webhooks/webhooks.module';
       },
     }),
     HealthModule,
+    RevalidationModule,
     UsersModule,
     ClientsModule,
     AuthModule,

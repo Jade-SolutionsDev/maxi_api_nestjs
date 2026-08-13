@@ -35,6 +35,13 @@ export interface StorageConfig {
   forcePathStyle: boolean;
 }
 
+export interface StorefrontConfig {
+  /** Public base URL of the Next.js storefront (no trailing slash). */
+  url: string | undefined;
+  /** Shared secret for POST {url}/api/revalidate. Unset disables the pings. */
+  revalidateSecret: string | undefined;
+}
+
 export interface AppConfig {
   port: number;
   database: DatabaseConfig;
@@ -43,6 +50,7 @@ export interface AppConfig {
   auth: AuthConfig;
   notifications: NotificationsConfig;
   storage: StorageConfig;
+  storefront: StorefrontConfig;
   nodeEnv: string;
 }
 
@@ -114,6 +122,11 @@ export const corsConfig = (): CorsConfig => {
   };
 };
 
+export const storefrontConfig = (): StorefrontConfig => ({
+  url: process.env.STOREFRONT_URL?.replace(/\/+$/, ''),
+  revalidateSecret: process.env.STOREFRONT_REVALIDATE_SECRET,
+});
+
 export default (): AppConfig => ({
   port: parseInt(process.env.PORT ?? '3000', 10),
   database: databaseConfig(),
@@ -122,5 +135,6 @@ export default (): AppConfig => ({
   auth: authConfig(),
   notifications: notificationsConfig(),
   storage: storageConfig(),
+  storefront: storefrontConfig(),
   nodeEnv: process.env.NODE_ENV ?? 'development',
 });
