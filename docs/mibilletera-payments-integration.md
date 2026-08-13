@@ -113,3 +113,41 @@ Gateway disabled (keys unset) → orders fall back to manual payments; every
 storefront payment endpoint 404s on GET (no attempt) and the admin marks
 payments by hand. The webhook URL to register with Mi Billetera:
 `https://<api-host>/api/webhooks/mibilletera`.
+
+## Storefront implementation (feat/payments-mibilletera in maxi_web_client_next)
+
+The full customer journey is implemented: cart → `/checkout` (delivery form +
+summary, municipality from the `maxi_location` cookie) → `POST
+/storefront/orders` → `/pedidos/[id]` with the **PaymentPanel**, which renders
+the deposit instructions strictly from the API's `payment` object
+(address + exact amount + token + network + countdown to `expiresAt`), polls
+`GET /storefront/orders/:id/payment` every 8s while visible, offers
+"Reintentar pago" after FAILED/EXPIRED/CANCELLED, and degrades to a
+"pago pendiente de confirmación manual" state when the gateway is not
+configured or unreachable. Order history lives at `/pedidos`.
+
+## Local end-to-end simulation (no gateway needed)
+
+1. Run the API with `MOCK_AUTH_ENABLED=true`, empty `MIBI_KEY_ID`/`MIBI_SECRET_KEY`
+   (forces the manual provider — no real charges) and `MIBI_WEBHOOK_SECRET=whsec_sim`.
+2. Checkout normally (storefront or `mock:<clerkId>` token). The order lands
+   `pending/pending` with no charge.
+3. Insert a fake charge for the order:
+   `INSERT INTO payment_charges (order_id, reference, idempotency_key, status,
+   amount, currency, action_payload, expires_at) VALUES ('<orderId>', 'MCHSIM001',
+   'order_<n>_crypto_1', 'REQUIRES_ACTION', '13.00000000', 'USD',
+   '{"deposit_address":"0x…","amount":"13.00000000","token":"usdt",
+   "blockchain":"BEP20"}', now() + interval '5 minutes');`
+   → the storefront panel now shows the instructions.
+4. Fire a signed webhook:
+   body `{"event":"charge.succeeded","reference":"MCHSIM001","status":"SUCCEEDED",
+   "net_amount":"12.67000000", ...}`, header `X-Mibi-Signature` =
+   HMAC-SHA256(whsec_sim, raw body) hex → order flips to `paid`, panel shows
+   success, admin order detail shows the gateway card with settlement figures.
+
+## Sandbox status (2026-08-13)
+
+`https://dev.mibilletera.cu/` (sandbox per miBilletera support) does not answer
+from our network — connection times out before TLS (the user's browser got a
+403, suggesting an IP allowlist or WAF). When access is granted, point
+`MIBI_API_BASE=https://dev.mibilletera.cu` and re-run the happy path for real.
