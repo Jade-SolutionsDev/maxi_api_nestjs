@@ -59,6 +59,8 @@ follow-up GET.
         "format": "Botella 1 L",
         "measureUnit": "unidad",
         "quantity": 3,
+        "basePrice": 10,
+        "discount": 25,
         "unitPrice": 7.5,
         "lineTotal": 22.5,
         "available": 5,
@@ -73,6 +75,9 @@ follow-up GET.
 
 - `unitPrice` — the product's current discounted price (`finalPrice` in the
   catalog endpoints), recomputed from the live catalog on every read.
+- `basePrice` / `discount` — the current list price and percentage discount
+  behind `unitPrice`, for strikethrough display (`~~$10.00~~ $7.50 (−25%)`).
+  Still display-only: never compute prices client-side.
 - `lineTotal` = `unitPrice × quantity`; `subtotal` = sum of line totals.
   No taxes/shipping yet.
 - `available` — current sellable stock across all storages: physical stock

@@ -11,6 +11,10 @@ export class CartItemResponseDto {
   format: string | null;
   measureUnit: string;
   quantity: number;
+  /** Current list price before discount, for strikethrough display. */
+  basePrice: number;
+  /** Current percentage discount (0–100). */
+  discount: number;
   /** Current discounted unit price (finalPrice), recalculated on every read. */
   unitPrice: number;
   /** unitPrice * quantity, rounded to cents. */
@@ -35,6 +39,8 @@ export class CartItemResponseDto {
     dto.format = product.format;
     dto.measureUnit = product.measureUnit;
     dto.quantity = item.quantity;
+    dto.basePrice = basePrice;
+    dto.discount = discount;
     // Same formula as ProductResponseDto.fromEntity.
     dto.unitPrice = Math.round(basePrice * (1 - discount / 100) * 100) / 100;
     dto.lineTotal = Math.round(dto.unitPrice * item.quantity * 100) / 100;

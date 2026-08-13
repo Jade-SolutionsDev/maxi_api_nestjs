@@ -14,6 +14,10 @@ import {
   Repository,
 } from 'typeorm';
 import { GeographyService } from '../geography/geography.service';
+import {
+  LOCATION_REVALIDATE_TAGS,
+  RevalidationService,
+} from '../revalidation/revalidation.service';
 import { Role, User } from '../users/entities/user.entity';
 import { CreateStockLocationDto } from './dto/create-stock-location.dto';
 import { UpdateStockLocationDto } from './dto/update-stock-location.dto';
@@ -55,6 +59,7 @@ export class StockLocationsService {
     private readonly userRepository: Repository<User>,
     private readonly geographyService: GeographyService,
     private readonly dataSource: DataSource,
+    private readonly revalidationService: RevalidationService,
   ) {}
 
   async findAll(
@@ -130,6 +135,7 @@ export class StockLocationsService {
       return saved;
     });
 
+    this.revalidationService.notify(LOCATION_REVALIDATE_TAGS);
     return this.buildResponse(location);
   }
 
@@ -178,6 +184,8 @@ export class StockLocationsService {
       }
     });
 
+    this.revalidationService.notify(LOCATION_REVALIDATE_TAGS);
+
     const fresh = await this.getLocationOrThrow(id);
     return this.buildResponse(fresh);
   }
@@ -185,6 +193,7 @@ export class StockLocationsService {
   async remove(id: string): Promise<void> {
     await this.getLocationOrThrow(id);
     await this.locationRepository.softDelete(id);
+    this.revalidationService.notify(LOCATION_REVALIDATE_TAGS);
   }
 
   // ---------------- Public helpers (used by the inventory module) ----------------

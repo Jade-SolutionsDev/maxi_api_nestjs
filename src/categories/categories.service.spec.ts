@@ -8,6 +8,7 @@ import { getRepositoryToken } from '@nestjs/typeorm';
 import { ILike, IsNull, Not, Repository } from 'typeorm';
 import { Product } from '../products/entities/product.entity';
 import { Role, User } from '../users/entities/user.entity';
+import { RevalidationService } from '../revalidation/revalidation.service';
 import { CategoriesService } from './categories.service';
 import { Category } from './entities/category.entity';
 
@@ -106,6 +107,7 @@ describe('CategoriesService', () => {
             createQueryBuilder: jest.fn(),
           },
         },
+        { provide: RevalidationService, useValue: { notify: jest.fn() } },
       ],
     }).compile();
 
