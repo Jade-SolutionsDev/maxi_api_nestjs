@@ -93,7 +93,7 @@ describe('MibiPaymentService', () => {
     };
     config = {
       get: jest.fn((key: string) => {
-        if (key === 'mibi') return { webhookSecret: SECRET };
+        if (key === 'mibi') return { webhookSecret: SECRET, currency: 'USDT' };
         if (key === 'nodeEnv') return 'test';
         return undefined;
       }),
@@ -122,10 +122,22 @@ describe('MibiPaymentService', () => {
         expect.objectContaining({
           method: 'CRYPTO',
           amount: '30.00',
-          currency: 'USD',
+          currency: 'USDT',
           idempotency_key: 'order_ORD-20260001_crypto_3',
           metadata: { order_id: 'order-1' },
         }),
+      );
+    });
+
+    it('falls back to USD when no settlement currency is configured', async () => {
+      config.get.mockImplementation((key: string) =>
+        key === 'mibi' ? { webhookSecret: SECRET } : undefined,
+      );
+
+      await service.createChargeForOrder(makeOrder());
+
+      expect(client.createCharge).toHaveBeenCalledWith(
+        expect.objectContaining({ currency: 'USD' }),
       );
     });
 

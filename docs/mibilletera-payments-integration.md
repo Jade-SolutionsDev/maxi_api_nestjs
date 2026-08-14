@@ -107,12 +107,27 @@ MIBI_KEY_ID=mb_key_...          # merchant API key (scopes: charges write+read)
 MIBI_SECRET_KEY=mb_secret_...
 MIBI_WEBHOOK_SECRET=...         # HMAC secret for POST /api/webhooks/mibilletera
 MIBI_API_BASE=https://mibilletera.cu   # point at https://dev.mibilletera.cu for staging
+MIBI_CURRENCY=USD               # settlement currency of the charge (default USD)
 ```
 
 Gateway disabled (keys unset) → orders fall back to manual payments; every
 storefront payment endpoint 404s on GET (no attempt) and the admin marks
 payments by hand. The webhook URL to register with Mi Billetera:
 `https://<api-host>/api/webhooks/mibilletera`.
+
+**`MIBI_CURRENCY` must match a receiving account bound to the merchant payment
+account at Mi Billetera.** If it doesn't, charge creation fails with
+`No active receiving account is bound for currency '<X>'` (HTTP 400) — the
+order is still created (payment stays pending, retry available). Fix by asking
+Mi Billetera ops to bind a receiving account for that currency, or by setting
+`MIBI_CURRENCY` to a currency the account already supports.
+
+## Network reality (verified 2026-08-13)
+
+`mibilletera.cu` only accepts connections from **Cuban IPs** — from abroad the
+TCP connection times out. Mi Billetera support is allowlisting the production
+server IP. Local testing against the real gateway therefore requires a Cuban
+connection (no VPN).
 
 ## Storefront implementation (feat/payments-mibilletera in maxi_web_client_next)
 

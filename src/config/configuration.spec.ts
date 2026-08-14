@@ -23,6 +23,7 @@ describe('configuration', () => {
     delete process.env.MIBI_SECRET_KEY;
     delete process.env.MIBI_WEBHOOK_SECRET;
     delete process.env.MIBI_API_BASE;
+    delete process.env.MIBI_CURRENCY;
   });
 
   afterAll(() => {
@@ -107,6 +108,12 @@ describe('configuration', () => {
     expect(config.enabled).toBe(false);
     expect(config.baseUrl).toBe('https://mibilletera.cu');
     expect(config.webhookSecret).toBeUndefined();
+    expect(config.currency).toBe('USD');
+  });
+
+  it('mibi settlement currency is configurable and normalized to uppercase', () => {
+    process.env.MIBI_CURRENCY = 'usdt';
+    expect(mibiConfig().currency).toBe('USDT');
   });
 
   it('mibi enables when both keys are present', () => {

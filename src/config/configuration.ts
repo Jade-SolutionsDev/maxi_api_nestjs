@@ -40,6 +40,12 @@ export interface MibiConfig {
   secretKey: string | undefined;
   webhookSecret: string | undefined;
   baseUrl: string;
+  /**
+   * Settlement currency for charges. MUST match a receiving account bound to
+   * the merchant payment account at Mi Billetera, or charge creation fails
+   * with "No active receiving account is bound for currency '<X>'".
+   */
+  currency: string;
   /** Gateway active when both API keys are present; falls back to manual payments otherwise. */
   enabled: boolean;
 }
@@ -127,6 +133,7 @@ export const mibiConfig = (): MibiConfig => {
       /\/$/,
       '',
     ),
+    currency: (process.env.MIBI_CURRENCY ?? 'USD').toUpperCase(),
     // Never bind the live gateway in tests — e2e checkouts must not create
     // real charges just because .env carries production keys.
     enabled: !!(keyId && secretKey) && process.env.NODE_ENV !== 'test',

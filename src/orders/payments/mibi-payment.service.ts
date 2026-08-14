@@ -70,10 +70,16 @@ export class MibiPaymentService {
         where: { orderId: order.id },
       })) + 1;
 
+    // Settlement currency must match a receiving account bound to the merchant
+    // payment account — configurable because that binding is on Mi Billetera's
+    // side (MIBI_CURRENCY).
+    const currency =
+      this.configService.get<MibiConfig>('mibi')?.currency ?? 'USD';
+
     const data = await this.mibiClient.createCharge({
       method: 'CRYPTO',
       amount: Number(order.total).toFixed(2),
-      currency: 'USD',
+      currency,
       description: `Orden ${order.orderNumber ?? order.id}`,
       idempotency_key: `order_${order.orderNumber ?? order.id}_crypto_${attempt}`,
       metadata: { order_id: order.id },
