@@ -19,6 +19,9 @@ export const PRODUCT_REVALIDATE_TAGS = [
   'product-list',
 ];
 
+/** Storefront cache tag invalidated by CMS writes (pages, banners, settings…). */
+export const CMS_REVALIDATE_TAGS = ['cms'];
+
 /**
  * Pings the storefront's POST /api/revalidate so its cached data ('use cache'
  * tags) refreshes right after an admin write instead of waiting out the TTL.

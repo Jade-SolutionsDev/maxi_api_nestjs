@@ -8,6 +8,7 @@ import configuration, { databaseConfig } from './config/configuration';
 import { AuthModule } from './auth/auth.module';
 import { CartModule } from './cart/cart.module';
 import { CategoriesModule } from './categories/categories.module';
+import { CmsModule } from './cms/cms.module';
 import { ClientsModule } from './clients/clients.module';
 import { AuthGuard } from './common/guards/auth.guard';
 import { RolesGuard } from './common/guards/roles.guard';
@@ -48,6 +49,7 @@ import { WebhooksModule } from './webhooks/webhooks.module';
     ClientsModule,
     AuthModule,
     CategoriesModule,
+    CmsModule,
     ProductsModule,
     CartModule,
     GeographyModule,

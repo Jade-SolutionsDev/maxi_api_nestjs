@@ -2,6 +2,7 @@ import {
   BadRequestException,
   Controller,
   Post,
+  Query,
   UploadedFile,
   UseInterceptors,
 } from '@nestjs/common';
@@ -44,6 +45,7 @@ export class UploadsController {
   )
   async uploadImage(
     @UploadedFile() file: Express.Multer.File | undefined,
+    @Query('prefix') prefix?: string,
   ): Promise<{ url: string }> {
     if (!file) {
       throw new BadRequestException('file is required');
@@ -51,10 +53,12 @@ export class UploadsController {
     if (file.size > MAX_IMAGE_SIZE_BYTES) {
       throw new BadRequestException('Image exceeds the 2MB limit');
     }
-    return this.storageService.uploadImage(
-      file.buffer,
-      file.mimetype,
-      'taxonomy',
-    );
+    // Storage folder allowlist: an arbitrary prefix would let a client write
+    // anywhere in the bucket namespace. Default keeps the historical folder.
+    const folder = prefix ?? 'taxonomy';
+    if (!['taxonomy', 'cms'].includes(folder)) {
+      throw new BadRequestException(`Unsupported prefix "${prefix}"`);
+    }
+    return this.storageService.uploadImage(file.buffer, file.mimetype, folder);
   }
 }
