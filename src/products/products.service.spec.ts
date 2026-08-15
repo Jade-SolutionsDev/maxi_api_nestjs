@@ -10,6 +10,7 @@ import { CategoriesService } from '../categories/categories.service';
 import { Category } from '../categories/entities/category.entity';
 import { ProductResponseDto } from './dto/product-response.dto';
 import { Product } from './entities/product.entity';
+import { RevalidationService } from '../revalidation/revalidation.service';
 import { ProductsService } from './products.service';
 
 function makeChildCategory(overrides: Partial<Category> = {}): Category {
@@ -75,6 +76,7 @@ describe('ProductsService', () => {
           },
         },
         { provide: CategoriesService, useValue: categoriesService },
+        { provide: RevalidationService, useValue: { notify: jest.fn() } },
       ],
     }).compile();
 

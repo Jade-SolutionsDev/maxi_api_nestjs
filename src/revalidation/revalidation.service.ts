@@ -9,6 +9,17 @@ export const TAXONOMY_REVALIDATE_TAGS = ['taxonomy', 'taxonomy-tree'];
 export const LOCATION_REVALIDATE_TAGS = ['location-catalog'];
 
 /**
+ * Storefront cache tags invalidated by admin product writes. Product changes
+ * reach beyond product lists: a category is publicly "valid" only while it has
+ * at least one active in-stock product, so the taxonomy payloads shift too.
+ */
+export const PRODUCT_REVALIDATE_TAGS = [
+  'taxonomy',
+  'taxonomy-tree',
+  'product-list',
+];
+
+/**
  * Pings the storefront's POST /api/revalidate so its cached data ('use cache'
  * tags) refreshes right after an admin write instead of waiting out the TTL.
  *

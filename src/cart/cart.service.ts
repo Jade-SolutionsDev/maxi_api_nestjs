@@ -5,7 +5,7 @@ import {
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
-import { ProductsService } from '../products/products.service';
+import { ProductsService, StorefrontArea } from '../products/products.service';
 import { CartItemResponseDto, CartResponseDto } from './dto/cart-response.dto';
 import { CartItem } from './entities/cart-item.entity';
 
@@ -20,7 +20,10 @@ export class CartService {
     private readonly productsService: ProductsService,
   ) {}
 
-  async getCart(clientId: string): Promise<CartResponseDto> {
+  async getCart(
+    clientId: string,
+    area: StorefrontArea = {},
+  ): Promise<CartResponseDto> {
     // withDeleted: soft-deleted products must still load so their lines show
     // as isAvailable=false instead of silently vanishing.
     const items = await this.cartItemRepository.find({
@@ -30,8 +33,9 @@ export class CartService {
       order: { createdAt: 'ASC' },
     });
     const present = items.filter((i) => i.product);
-    const stock = await this.productsService.availableFor(
+    const stock = await this.productsService.availableForArea(
       present.map((i) => i.productId),
+      area,
     );
     return CartResponseDto.fromItems(
       present.map((i) =>
@@ -45,13 +49,14 @@ export class CartService {
     clientId: string,
     productId: string,
     quantity: number,
+    area: StorefrontArea = {},
   ): Promise<CartResponseDto> {
     await this.assertActiveProduct(productId);
     const existing = await this.cartItemRepository.findOne({
       where: { clientId, productId },
     });
     const newQuantity = (existing?.quantity ?? 0) + quantity;
-    await this.assertStock(productId, newQuantity);
+    await this.assertStock(productId, newQuantity, area);
 
     await this.cartItemRepository.save(
       existing
@@ -62,7 +67,7 @@ export class CartService {
             quantity: newQuantity,
           }),
     );
-    return this.getCart(clientId);
+    return this.getCart(clientId, area);
   }
 
   /** Sets the absolute line quantity. */
@@ -70,27 +75,32 @@ export class CartService {
     clientId: string,
     productId: string,
     quantity: number,
+    area: StorefrontArea = {},
   ): Promise<CartResponseDto> {
     const item = await this.findItemOrThrow(clientId, productId);
     await this.assertActiveProduct(productId);
-    await this.assertStock(productId, quantity);
+    await this.assertStock(productId, quantity, area);
     item.quantity = quantity;
     await this.cartItemRepository.save(item);
-    return this.getCart(clientId);
+    return this.getCart(clientId, area);
   }
 
   async removeItem(
     clientId: string,
     productId: string,
+    area: StorefrontArea = {},
   ): Promise<CartResponseDto> {
     const item = await this.findItemOrThrow(clientId, productId);
     await this.cartItemRepository.remove(item);
-    return this.getCart(clientId);
+    return this.getCart(clientId, area);
   }
 
-  async clear(clientId: string): Promise<CartResponseDto> {
+  async clear(
+    clientId: string,
+    area: StorefrontArea = {},
+  ): Promise<CartResponseDto> {
     await this.cartItemRepository.delete({ clientId });
-    return this.getCart(clientId);
+    return this.getCart(clientId, area);
   }
 
   // ---------------- Internal helpers ----------------
@@ -122,9 +132,13 @@ export class CartService {
   private async assertStock(
     productId: string,
     requested: number,
+    area: StorefrontArea = {},
   ): Promise<void> {
     // Net of pending-order reservations — reserved stock is not sellable.
-    const amounts = await this.productsService.availableFor([productId]);
+    const amounts = await this.productsService.availableForArea(
+      [productId],
+      area,
+    );
     const available = amounts.get(productId) ?? 0;
     if (requested > available) {
       // details.available lets the frontend clamp its quantity stepper.

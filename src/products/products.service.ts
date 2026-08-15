@@ -7,6 +7,10 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { slugify } from '../common/utils/catalog-ownership.utils';
 import { CategoriesService } from '../categories/categories.service';
+import {
+  PRODUCT_REVALIDATE_TAGS,
+  RevalidationService,
+} from '../revalidation/revalidation.service';
 import { CreateProductDto } from './dto/create-product.dto';
 import { UpdateProductDto } from './dto/update-product.dto';
 import { Product } from './entities/product.entity';
@@ -29,6 +33,17 @@ export interface ProductFilters {
   sortOrder?: 'asc' | 'desc';
 }
 
+/**
+ * Delivery area a storefront stock lookup is scoped to. Precedence:
+ * `locationId` (one storage) > `municipalityId`/`provinceId` (storages
+ * covering the area) > none (all active storages).
+ */
+export interface StorefrontArea {
+  locationId?: string;
+  provinceId?: string;
+  municipalityId?: string;
+}
+
 // Global catalog: no provider scoping. Every authenticated backoffice user can
 // read; writes are gated to SUPER_ADMIN/ADMIN/KARDIST at the controller.
 @Injectable()
@@ -37,6 +52,7 @@ export class ProductsService {
     @InjectRepository(Product)
     private readonly productRepository: Repository<Product>,
     private readonly categoriesService: CategoriesService,
+    private readonly revalidationService: RevalidationService,
   ) {}
 
   // ponytail: returns all matching rows (no server pagination) — matches
@@ -171,29 +187,13 @@ export class ProductsService {
   // push into SQL with a LIMIT if it ever grows.
   async findStorefront(
     filters: ProductFilters,
-    opts: {
-      locationId?: string;
-      provinceId?: string;
-      municipalityId?: string;
-      includeOutOfStock?: boolean;
-    } = {},
+    opts: StorefrontArea & { includeOutOfStock?: boolean } = {},
   ): Promise<{ product: Product; stock: number }[]> {
     const products = await this.findAll({ ...filters, isActive: true });
 
-    // null scope → sum across all active storages (no geo filter).
-    let scope: string[] | null = null;
-    if (opts.locationId) {
-      scope = [opts.locationId];
-    } else if (opts.municipalityId || opts.provinceId) {
-      scope = await this.coveringLocationIds({
-        provinceId: opts.provinceId,
-        municipalityId: opts.municipalityId,
-      });
-    }
-
-    const stock = await this.stockMap(
-      scope,
+    const stock = await this.availableForArea(
       products.map((p) => p.id),
+      opts,
     );
 
     const rows = products.map((p) => ({
@@ -202,6 +202,26 @@ export class ProductsService {
     }));
     // Full stock-filtered, sorted list; the controller paginates it.
     return opts.includeOutOfStock ? rows : rows.filter((r) => r.stock > 0);
+  }
+
+  // Sellable stock per product scoped to a delivery area (see StorefrontArea
+  // for the scope precedence). No area → global, same as availableFor.
+  async availableForArea(
+    productIds: string[],
+    area: StorefrontArea = {},
+  ): Promise<Map<string, number>> {
+    // null scope → sum across all active storages (no geo filter).
+    let scope: string[] | null = null;
+    if (area.locationId) {
+      scope = [area.locationId];
+    } else if (area.municipalityId || area.provinceId) {
+      scope = await this.coveringLocationIds({
+        provinceId: area.provinceId,
+        municipalityId: area.municipalityId,
+      });
+    }
+
+    return this.stockMap(scope, productIds);
   }
 
   // Active storages that deliver to a place. By municipality: those covering the
@@ -310,7 +330,9 @@ export class ProductsService {
       isActive: dto.isActive ?? true,
     });
 
-    return this.productRepository.save(product);
+    const saved = await this.productRepository.save(product);
+    this.revalidationService.notify(PRODUCT_REVALIDATE_TAGS);
+    return saved;
   }
 
   async update(id: string, dto: UpdateProductDto): Promise<Product> {
@@ -370,7 +392,9 @@ export class ProductsService {
       product.isActive = dto.isActive;
     }
 
-    return this.productRepository.save(product);
+    const saved = await this.productRepository.save(product);
+    this.revalidationService.notify(PRODUCT_REVALIDATE_TAGS);
+    return saved;
   }
 
   async remove(id: string): Promise<void> {
@@ -390,6 +414,7 @@ export class ProductsService {
       );
     }
     await this.productRepository.softDelete(product.id);
+    this.revalidationService.notify(PRODUCT_REVALIDATE_TAGS);
   }
 
   // ---------------- Internal helpers ----------------

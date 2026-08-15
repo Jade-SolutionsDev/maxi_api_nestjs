@@ -13,6 +13,7 @@ import {
   PaginatedDto,
 } from '../common/dto/paginated.dto';
 import { ProductResponseDto } from './dto/product-response.dto';
+import { PublicProductDetailQueryDto } from './dto/public-product-detail-query.dto';
 import { PublicProductsQueryDto } from './dto/public-products-query.dto';
 import { ProductsService } from './products.service';
 import { CategoriesService } from '../categories/categories.service';
@@ -79,10 +80,13 @@ export class PublicProductsController {
   @Get(':id')
   @ApiOperation({
     summary:
-      'Get one storefront product (available stock across storages, net of reservations)',
+      'Get one storefront product (sellable stock, optionally scoped to a delivery area)',
   })
   @ApiOkResponse({ type: ProductResponseDto })
-  async findOne(@Param('id') id: string): Promise<ProductResponseDto> {
+  async findOne(
+    @Param('id') id: string,
+    @Query() query: PublicProductDetailQueryDto,
+  ): Promise<ProductResponseDto> {
     const product = await this.productsService.findOne(id);
     const category = product.categoryId
       ? CategoryResponseDto.fromEntity(
@@ -93,7 +97,7 @@ export class PublicProductsController {
       // Inactive products are not part of the storefront catalog.
       throw new NotFoundException(`Product with id "${id}" not found`);
     }
-    const available = await this.productsService.availableFor([id]);
+    const available = await this.productsService.availableForArea([id], query);
     return ProductResponseDto.fromEntity(
       product,
       available.get(id) ?? 0,

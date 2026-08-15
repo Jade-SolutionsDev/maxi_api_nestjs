@@ -47,10 +47,10 @@ function makeItem(overrides: Partial<CartItem> = {}): CartItem {
 describe('CartService', () => {
   let service: CartService;
   let repository: jest.Mocked<Repository<CartItem>>;
-  let productsService: { findOne: jest.Mock; availableFor: jest.Mock };
+  let productsService: { findOne: jest.Mock; availableForArea: jest.Mock };
 
   beforeEach(async () => {
-    productsService = { findOne: jest.fn(), availableFor: jest.fn() };
+    productsService = { findOne: jest.fn(), availableForArea: jest.fn() };
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
@@ -72,7 +72,7 @@ describe('CartService', () => {
 
     service = module.get(CartService);
     repository = module.get(getRepositoryToken(CartItem));
-    productsService.availableFor.mockResolvedValue(new Map());
+    productsService.availableForArea.mockResolvedValue(new Map());
   });
 
   describe('getCart', () => {
@@ -83,7 +83,9 @@ describe('CartService', () => {
           product: makeProduct({ basePrice: '10.00', discount: '25.00' }),
         }),
       ]);
-      productsService.availableFor.mockResolvedValue(new Map([['prod-1', 5]]));
+      productsService.availableForArea.mockResolvedValue(
+        new Map([['prod-1', 5]]),
+      );
 
       const cart = await service.getCart('client-1');
 
@@ -96,7 +98,9 @@ describe('CartService', () => {
 
     it('flags lines whose stock dropped below the cart quantity', async () => {
       repository.find.mockResolvedValue([makeItem({ quantity: 4 })]);
-      productsService.availableFor.mockResolvedValue(new Map([['prod-1', 1]]));
+      productsService.availableForArea.mockResolvedValue(
+        new Map([['prod-1', 1]]),
+      );
 
       const cart = await service.getCart('client-1');
 
@@ -115,7 +119,7 @@ describe('CartService', () => {
           product: makeProduct({ id: 'prod-2', deletedAt: new Date() }),
         }),
       ]);
-      productsService.availableFor.mockResolvedValue(
+      productsService.availableForArea.mockResolvedValue(
         new Map([
           ['prod-1', 99],
           ['prod-2', 99],
@@ -131,7 +135,9 @@ describe('CartService', () => {
   describe('addItem', () => {
     beforeEach(() => {
       productsService.findOne.mockResolvedValue(makeProduct());
-      productsService.availableFor.mockResolvedValue(new Map([['prod-1', 10]]));
+      productsService.availableForArea.mockResolvedValue(
+        new Map([['prod-1', 10]]),
+      );
     });
 
     it('creates a new line', async () => {
@@ -181,7 +187,9 @@ describe('CartService', () => {
   describe('updateItem', () => {
     beforeEach(() => {
       productsService.findOne.mockResolvedValue(makeProduct());
-      productsService.availableFor.mockResolvedValue(new Map([['prod-1', 10]]));
+      productsService.availableForArea.mockResolvedValue(
+        new Map([['prod-1', 10]]),
+      );
     });
 
     it('sets the absolute quantity', async () => {

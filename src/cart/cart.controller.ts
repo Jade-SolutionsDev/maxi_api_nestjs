@@ -7,6 +7,7 @@ import {
   ParseUUIDPipe,
   Patch,
   Post,
+  Query,
   Req,
   UseGuards,
 } from '@nestjs/common';
@@ -23,6 +24,7 @@ import type { AuthenticatedClientRequest } from '../auth/types/authenticated-req
 import { Public } from '../common/decorators/public.decorator';
 import { CartService } from './cart.service';
 import { AddCartItemDto } from './dto/add-cart-item.dto';
+import { CartQueryDto } from './dto/cart-query.dto';
 import { CartResponseDto } from './dto/cart-response.dto';
 import { UpdateCartItemDto } from './dto/update-cart-item.dto';
 
@@ -48,8 +50,11 @@ export class CartController {
       'back with `isAvailable: false`.',
   })
   @ApiOkResponse({ type: CartResponseDto })
-  getCart(@Req() req: AuthenticatedClientRequest): Promise<CartResponseDto> {
-    return this.cartService.getCart(req.client.id);
+  getCart(
+    @Req() req: AuthenticatedClientRequest,
+    @Query() query: CartQueryDto,
+  ): Promise<CartResponseDto> {
+    return this.cartService.getCart(req.client.id, query);
   }
 
   @Post('items')
@@ -69,8 +74,14 @@ export class CartController {
   addItem(
     @Req() req: AuthenticatedClientRequest,
     @Body() dto: AddCartItemDto,
+    @Query() query: CartQueryDto,
   ): Promise<CartResponseDto> {
-    return this.cartService.addItem(req.client.id, dto.productId, dto.quantity);
+    return this.cartService.addItem(
+      req.client.id,
+      dto.productId,
+      dto.quantity,
+      query,
+    );
   }
 
   @Patch('items/:productId')
@@ -91,8 +102,14 @@ export class CartController {
     @Req() req: AuthenticatedClientRequest,
     @Param('productId', ParseUUIDPipe) productId: string,
     @Body() dto: UpdateCartItemDto,
+    @Query() query: CartQueryDto,
   ): Promise<CartResponseDto> {
-    return this.cartService.updateItem(req.client.id, productId, dto.quantity);
+    return this.cartService.updateItem(
+      req.client.id,
+      productId,
+      dto.quantity,
+      query,
+    );
   }
 
   @Delete('items/:productId')
@@ -101,14 +118,18 @@ export class CartController {
   removeItem(
     @Req() req: AuthenticatedClientRequest,
     @Param('productId', ParseUUIDPipe) productId: string,
+    @Query() query: CartQueryDto,
   ): Promise<CartResponseDto> {
-    return this.cartService.removeItem(req.client.id, productId);
+    return this.cartService.removeItem(req.client.id, productId, query);
   }
 
   @Delete()
   @ApiOperation({ summary: 'Clear the cart' })
   @ApiOkResponse({ type: CartResponseDto })
-  clear(@Req() req: AuthenticatedClientRequest): Promise<CartResponseDto> {
-    return this.cartService.clear(req.client.id);
+  clear(
+    @Req() req: AuthenticatedClientRequest,
+    @Query() query: CartQueryDto,
+  ): Promise<CartResponseDto> {
+    return this.cartService.clear(req.client.id, query);
   }
 }
