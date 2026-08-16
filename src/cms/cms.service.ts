@@ -414,6 +414,15 @@ export class CmsService {
       if (!clash) {
         return candidate;
       }
+      // A soft-deleted row is a leftover, not an owner: reclaim its slug (the
+      // same rename removePage applies) so recreating a page always lands on
+      // the canonical slug the storefront references.
+      if (clash.deletedAt) {
+        await this.pageRepository.update(clash.id, {
+          slug: `${clash.slug}-eliminada-${Date.now()}`,
+        });
+        return candidate;
+      }
       candidate = `${base}-${suffix}`;
       suffix += 1;
     }

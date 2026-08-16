@@ -161,7 +161,17 @@ async function main(): Promise<void> {
       where: { slug: page.slug },
       withDeleted: true,
     });
-    if (existing) {
+    // Repair leftovers from before slugs were freed on delete: a soft-deleted
+    // row squatting on a seed slug gets renamed so the real page can exist
+    // under its canonical slug again.
+    if (existing?.deletedAt) {
+      await pageRepo.update(existing.id, {
+        slug: `${existing.slug}-eliminada-${Date.now()}`,
+      });
+      console.log(
+        `page "${page.slug}" was soft-deleted — slug freed, recreating`,
+      );
+    } else if (existing) {
       console.log(`page "${page.slug}" already exists — skipped`);
       continue;
     }

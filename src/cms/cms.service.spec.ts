@@ -27,6 +27,7 @@ type RepoMock = {
   findOne: jest.Mock;
   create: jest.Mock;
   save: jest.Mock;
+  update: jest.Mock;
   softDelete: jest.Mock;
 };
 
@@ -35,6 +36,7 @@ const makeRepo = (): RepoMock => ({
   findOne: jest.fn(),
   create: jest.fn((input: unknown) => input),
   save: jest.fn((input: unknown) => Promise.resolve(input)),
+  update: jest.fn(),
   softDelete: jest.fn(),
 });
 
@@ -84,7 +86,7 @@ describe('CmsService', () => {
       expect(revalidation.notify).toHaveBeenCalledWith(['cms']);
     });
 
-    it('suffixes the slug when it already exists (soft-deleted included)', async () => {
+    it('suffixes the slug when an ACTIVE page already owns it', async () => {
       pageRepo.findOne
         .mockResolvedValueOnce(makePage())
         .mockResolvedValueOnce(null);
@@ -99,6 +101,26 @@ describe('CmsService', () => {
       );
       expect(pageRepo.findOne).toHaveBeenCalledWith(
         expect.objectContaining({ withDeleted: true }),
+      );
+    });
+
+    it('reclaims a slug held by a soft-deleted leftover row', async () => {
+      pageRepo.findOne.mockResolvedValueOnce(
+        makePage({ id: 'old-1', deletedAt: new Date('2026-02-01') }),
+      );
+
+      await service.createPage({
+        title: 'Política de privacidad',
+        content: 'cuerpo',
+      });
+
+      expect(pageRepo.update).toHaveBeenCalledWith('old-1', {
+        slug: expect.stringMatching(
+          /^politica-de-privacidad-eliminada-\d+$/,
+        ) as string,
+      });
+      expect(pageRepo.create).toHaveBeenCalledWith(
+        expect.objectContaining({ slug: 'politica-de-privacidad' }),
       );
     });
 
