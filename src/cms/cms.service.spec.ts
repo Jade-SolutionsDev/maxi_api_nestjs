@@ -123,13 +123,33 @@ describe('CmsService', () => {
       );
     });
 
-    it('soft-deletes and notifies on remove', async () => {
+    it('frees the slug, soft-deletes and notifies on remove', async () => {
       pageRepo.findOne.mockResolvedValue(makePage());
 
       await service.removePage('page-1');
 
+      expect(pageRepo.save).toHaveBeenCalledWith(
+        expect.objectContaining({
+          slug: expect.stringMatching(
+            /^politica-de-privacidad-eliminada-\d+$/,
+          ) as string,
+        }),
+      );
       expect(pageRepo.softDelete).toHaveBeenCalledWith('page-1');
       expect(revalidation.notify).toHaveBeenCalledWith(['cms']);
+    });
+
+    it('reuses the original slug after a delete + recreate cycle', async () => {
+      pageRepo.findOne.mockResolvedValue(null);
+
+      await service.createPage({
+        title: 'Términos y condiciones',
+        content: 'cuerpo',
+      });
+
+      expect(pageRepo.create).toHaveBeenCalledWith(
+        expect.objectContaining({ slug: 'terminos-y-condiciones' }),
+      );
     });
   });
 

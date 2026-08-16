@@ -128,8 +128,16 @@ export class CmsService {
     return saved;
   }
 
+  /**
+   * Frees the slug before soft-deleting: slug uniqueness counts soft-deleted
+   * rows, and footer legal links reference pages BY SLUG — without this,
+   * recreating a deleted page ("terminos-y-condiciones") would land on a
+   * suffixed slug ("-2") and silently break every stored reference.
+   */
   async removePage(id: string): Promise<void> {
-    await this.getPage(id);
+    const page = await this.getPage(id);
+    page.slug = `${page.slug}-eliminada-${Date.now()}`;
+    await this.pageRepository.save(page);
     await this.pageRepository.softDelete(id);
     this.revalidationService.notify(CMS_REVALIDATE_TAGS);
   }
@@ -299,6 +307,7 @@ export class CmsService {
       name: dto.name,
       role: dto.role,
       photoUrl: dto.photoUrl ?? null,
+      resume: dto.resume ?? null,
       sortOrder: dto.sortOrder ?? 0,
       isActive: dto.isActive ?? true,
     });
@@ -334,6 +343,9 @@ export class CmsService {
     }
     if (dto.photoUrl !== undefined) {
       member.photoUrl = dto.photoUrl;
+    }
+    if (dto.resume !== undefined) {
+      member.resume = dto.resume;
     }
     if (dto.sortOrder !== undefined) {
       member.sortOrder = dto.sortOrder;

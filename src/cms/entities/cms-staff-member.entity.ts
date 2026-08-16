@@ -22,6 +22,10 @@ export class CmsStaffMember {
   @Column({ name: 'photo_url', type: 'text', nullable: true })
   photoUrl: string | null;
 
+  /** Short optional bio shown next to the avatar on the About-us slider. */
+  @Column({ type: 'text', nullable: true })
+  resume: string | null;
+
   @Column({ name: 'sort_order', type: 'int', default: 0 })
   sortOrder: number;
 

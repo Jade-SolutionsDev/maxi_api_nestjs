@@ -22,6 +22,12 @@ export class CreateCmsStaffMemberDto {
   @MaxLength(2048)
   photoUrl?: string;
 
+  /** Short optional bio for the About-us slider. */
+  @IsOptional()
+  @IsString()
+  @MaxLength(500)
+  resume?: string;
+
   @IsOptional()
   @IsInt()
   @Min(0)
@@ -49,6 +55,11 @@ export class UpdateCmsStaffMemberDto {
   photoUrl?: string | null;
 
   @IsOptional()
+  @IsString()
+  @MaxLength(500)
+  resume?: string | null;
+
+  @IsOptional()
   @IsInt()
   @Min(0)
   sortOrder?: number;
@@ -63,6 +74,7 @@ export class CmsStaffMemberResponseDto {
   name: string;
   role: string;
   photoUrl: string | null;
+  resume: string | null;
   sortOrder: number;
   isActive: boolean;
   createdAt: Date;
@@ -74,6 +86,7 @@ export class CmsStaffMemberResponseDto {
     dto.name = entity.name;
     dto.role = entity.role;
     dto.photoUrl = entity.photoUrl;
+    dto.resume = entity.resume;
     dto.sortOrder = entity.sortOrder;
     dto.isActive = entity.isActive;
     dto.createdAt = entity.createdAt;
