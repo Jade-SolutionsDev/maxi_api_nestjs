@@ -54,6 +54,8 @@ export class PublicProductsController {
         q: query.q,
         categoryId: query.categoryId,
         departmentId: query.departmentId,
+        categorySlug: query.categorySlug,
+        departmentSlug: query.departmentSlug,
         minPrice: query.minPrice,
         maxPrice: query.maxPrice,
         priceField: 'finalPrice',

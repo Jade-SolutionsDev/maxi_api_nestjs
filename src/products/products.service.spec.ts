@@ -72,6 +72,7 @@ describe('ProductsService', () => {
             create: jest.fn(),
             save: jest.fn(),
             softDelete: jest.fn(),
+            createQueryBuilder: jest.fn(),
             manager: { query: jest.fn() },
           },
         },
@@ -176,6 +177,32 @@ describe('ProductsService', () => {
           basePrice: 9.99,
         }),
       ).rejects.toBeInstanceOf(ConflictException);
+    });
+  });
+
+  describe('findAll', () => {
+    it('filters by taxonomy slugs with bound params', async () => {
+      const qb = {
+        andWhere: jest.fn().mockReturnThis(),
+        orderBy: jest.fn().mockReturnThis(),
+        addOrderBy: jest.fn().mockReturnThis(),
+        getMany: jest.fn().mockResolvedValue([]),
+      };
+      repository.createQueryBuilder.mockReturnValue(qb as never);
+
+      await service.findAll({
+        categorySlug: 'bebidas',
+        departmentSlug: 'alimentos',
+      });
+
+      expect(qb.andWhere).toHaveBeenCalledWith(
+        expect.stringContaining('c.slug = :categorySlug'),
+        { categorySlug: 'bebidas' },
+      );
+      expect(qb.andWhere).toHaveBeenCalledWith(
+        expect.stringContaining('d.slug = :departmentSlug'),
+        { departmentSlug: 'alimentos' },
+      );
     });
   });
 

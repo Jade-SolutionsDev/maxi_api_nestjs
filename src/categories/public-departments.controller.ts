@@ -34,10 +34,12 @@ export class PublicDepartmentsController {
       featured: query.featured,
       sortBy: query.sortBy,
       sortOrder: query.sortOrder,
+      municipalityId: query.municipalityId,
     });
     const page = paginate(departments, query.page, query.limit);
     const counts = await this.categoriesService.countValidChildren(
       page.items.map((d) => d.id),
+      query.municipalityId,
     );
     return {
       ...page,

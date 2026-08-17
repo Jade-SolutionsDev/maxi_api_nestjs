@@ -19,6 +19,9 @@ export interface ProductFilters {
   q?: string;
   departmentId?: string;
   categoryId?: string;
+  /** Slug alternatives, used by the storefront's readable filter urls. */
+  categorySlug?: string;
+  departmentSlug?: string;
   minPrice?: number;
   maxPrice?: number;
   /**
@@ -74,6 +77,28 @@ export class ProductsService {
              AND c.parent_id = :departmentId
              AND c.deleted_at IS NULL)`,
         { departmentId: filters.departmentId },
+      );
+    }
+    // Slug variants of the taxonomy filters: what the storefront sends, so its
+    // urls read /catalog?category=bebidas instead of exposing uuids. Slugs are
+    // unique across the categories table (departments included).
+    if (filters.categorySlug) {
+      qb.andWhere(
+        `EXISTS (SELECT 1 FROM categories c
+           WHERE c.id = product.category_id
+             AND c.slug = :categorySlug
+             AND c.deleted_at IS NULL)`,
+        { categorySlug: filters.categorySlug },
+      );
+    }
+    if (filters.departmentSlug) {
+      qb.andWhere(
+        `EXISTS (SELECT 1 FROM categories c
+           JOIN categories d ON d.id = c.parent_id AND d.deleted_at IS NULL
+           WHERE c.id = product.category_id
+             AND d.slug = :departmentSlug
+             AND c.deleted_at IS NULL)`,
+        { departmentSlug: filters.departmentSlug },
       );
     }
     if (filters.q) {

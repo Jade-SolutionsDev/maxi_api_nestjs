@@ -7,6 +7,7 @@ import {
   IsOptional,
   IsString,
   IsUUID,
+  MaxLength,
   Min,
 } from 'class-validator';
 import {
@@ -31,6 +32,18 @@ export class PublicProductsQueryDto extends PaginationQueryDto {
   @IsOptional()
   @IsUUID()
   departmentId?: string;
+
+  /** Slug variant of `categoryId` (storefront urls filter by slug). */
+  @IsOptional()
+  @IsString()
+  @MaxLength(120)
+  categorySlug?: string;
+
+  /** Slug variant of `departmentId`. */
+  @IsOptional()
+  @IsString()
+  @MaxLength(120)
+  departmentSlug?: string;
 
   /**
    * Restrict to products stocked at this storage. When set, the returned

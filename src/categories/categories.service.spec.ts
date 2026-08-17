@@ -327,6 +327,32 @@ describe('CategoriesService', () => {
       );
     });
 
+    it('listPublicCategories counts sellable stock net of reservations', async () => {
+      const qb = makeQueryBuilderStub([]);
+      repository.createQueryBuilder.mockReturnValue(qb as never);
+
+      await service.listPublicCategories({});
+
+      expect(qb.andWhere).toHaveBeenCalledWith(
+        expect.stringContaining('i.quantity - i.reserved_quantity'),
+      );
+      expect(qb.andWhere).toHaveBeenCalledWith(
+        expect.stringContaining('stock_locations'),
+      );
+    });
+
+    it('listPublicCategories scopes validity to the municipality coverage', async () => {
+      const qb = makeQueryBuilderStub([]);
+      repository.createQueryBuilder.mockReturnValue(qb as never);
+
+      await service.listPublicCategories({ municipalityId: 'mun-1' });
+
+      expect(qb.andWhere).toHaveBeenCalledWith(
+        expect.stringContaining('stock_location_coverage'),
+        { municipalityId: 'mun-1' },
+      );
+    });
+
     it('listPublicCategories narrows to a department when given', async () => {
       const rows = [makeCategory({ id: 'cat-1', parentId: 'dep-1' })];
       const qb = makeQueryBuilderStub(rows);
@@ -369,6 +395,18 @@ describe('CategoriesService', () => {
       const map = await service.countValidProducts(['cat-1']);
 
       expect(map.get('cat-1')).toBe(7);
+    });
+
+    it('countValidProducts binds the municipality when scoped', async () => {
+      const qb = makeRawQueryBuilderStub([{ id: 'cat-1', count: '1' }]);
+      productRepository.createQueryBuilder.mockReturnValue(qb as never);
+
+      await service.countValidProducts(['cat-1'], 'mun-1');
+
+      expect(qb.andWhere).toHaveBeenCalledWith(
+        expect.stringContaining('stock_location_coverage'),
+        { municipalityId: 'mun-1' },
+      );
     });
 
     it('countChildren/countProducts return backoffice totals', async () => {

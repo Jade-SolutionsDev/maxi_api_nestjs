@@ -33,10 +33,12 @@ export class PublicCategoriesController {
       departmentId: query.departmentId,
       sortBy: query.sortBy,
       sortOrder: query.sortOrder,
+      municipalityId: query.municipalityId,
     });
     const page = paginate(categories, query.page, query.limit);
     const counts = await this.categoriesService.countValidProducts(
       page.items.map((c) => c.id),
+      query.municipalityId,
     );
     return {
       ...page,

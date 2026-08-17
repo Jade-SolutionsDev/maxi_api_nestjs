@@ -1,8 +1,9 @@
-import { Controller, Get, Header } from '@nestjs/common';
+import { Controller, Get, Header, Query } from '@nestjs/common';
 import { ApiOkResponse, ApiTags } from '@nestjs/swagger';
 import { TAXONOMY_CACHE } from '../common/constants/cache-control';
 import { Public } from '../common/decorators/public.decorator';
 import { CategoriesService } from './categories.service';
+import { PublicCatalogQueryDto } from './dto/public-taxonomy-query.dto';
 import {
   PublicCatalogCategoryDto,
   PublicCatalogDepartmentDto,
@@ -24,8 +25,12 @@ export class PublicCatalogController {
   @Get()
   @Header('Cache-Control', TAXONOMY_CACHE)
   @ApiOkResponse({ type: PublicCatalogDepartmentDto, isArray: true })
-  async findAll(): Promise<PublicCatalogDepartmentDto[]> {
-    const tree = await this.categoriesService.getPublicCatalog();
+  async findAll(
+    @Query() query: PublicCatalogQueryDto,
+  ): Promise<PublicCatalogDepartmentDto[]> {
+    const tree = await this.categoriesService.getPublicCatalog(
+      query.municipalityId,
+    );
     return tree.map((node) =>
       PublicCatalogDepartmentDto.from(
         node.department,

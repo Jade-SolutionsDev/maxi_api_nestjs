@@ -254,41 +254,67 @@ export class CategoriesService {
   // ---------------- Public storefront reads (active rows only) ----------------
 
   // A category is "valid" (browsable in the storefront) when it has at least
-  // one active, non-deleted product whose total inventory across locations is
-  // positive. Reused by both public list queries; `catId` is the correlated
-  // category-id column (safe: internal literals, never user input).
-  private categoryHasStockSql(catId: string): string {
+  // one active, non-deleted product with sellable stock. Reused by both public
+  // list queries; `catId` is the correlated category-id column (safe: internal
+  // literals, never user input). `withArea` scopes to the storages covering
+  // the bound :municipalityId (delivery-zone counts).
+  private categoryHasStockSql(catId: string, withArea = false): string {
     return `EXISTS (
       SELECT 1 FROM products p
       WHERE p.category_id = ${catId}
         AND p.deleted_at IS NULL
         AND p.is_active = true
-        AND ${this.productHasStockSql('p')}
+        AND ${this.productHasStockSql('p', withArea)}
     )`;
   }
 
-  // A product is purchasable when its summed inventory across locations is
-  // positive. `p` is the correlated products-table alias (internal literal).
-  private productHasStockSql(p: string): string {
+  // A product is purchasable when its sellable stock — physical minus
+  // order reservations, across ACTIVE storages — is positive: the same
+  // definition /public/products uses, so counts and listings agree. With
+  // `withArea`, only storages covering the bound :municipalityId (directly or
+  // via province-wide coverage) count; the coverage predicate mirrors
+  // ProductsService.coveringLocationIds. `p` is the correlated products-table
+  // alias (internal literal).
+  private productHasStockSql(p: string, withArea = false): string {
+    const coverage = withArea
+      ? `AND i.location_id IN (
+          SELECT cov.location_id FROM stock_location_coverage cov
+          WHERE cov.municipality_id = :municipalityId
+             OR (cov.coverage_type = 'province' AND cov.province_id = (
+                  SELECT m.province_id FROM municipalities m
+                  WHERE m.id = :municipalityId))
+        )`
+      : '';
     return `(
-      SELECT COALESCE(SUM(i.quantity), 0)
+      SELECT COALESCE(SUM(i.quantity - i.reserved_quantity), 0)
       FROM inventory i
+      JOIN stock_locations sl
+        ON sl.id = i.location_id
+       AND sl.is_active = true
+       AND sl.deleted_at IS NULL
       WHERE i.product_id = ${p}.id
+        ${coverage}
     ) > 0`;
   }
 
   /** departmentId -> number of valid child categories, for the given ids. */
   async countValidChildren(
     departmentIds: string[],
+    municipalityId?: string,
   ): Promise<Map<string, number>> {
     if (departmentIds.length === 0) return new Map();
-    const rows = await this.categoryRepository
+    const qb = this.categoryRepository
       .createQueryBuilder('c')
       .select('c.parentId', 'id')
       .addSelect('COUNT(*)', 'count')
       .where('c.parentId IN (:...ids)', { ids: departmentIds })
-      .andWhere('c.isActive = :active', { active: true })
-      .andWhere(this.categoryHasStockSql('c.id'))
+      .andWhere('c.isActive = :active', { active: true });
+    if (municipalityId) {
+      qb.andWhere(this.categoryHasStockSql('c.id', true), { municipalityId });
+    } else {
+      qb.andWhere(this.categoryHasStockSql('c.id'));
+    }
+    const rows = await qb
       .groupBy('c.parentId')
       .getRawMany<{ id: string; count: string }>();
     return new Map(rows.map((r) => [r.id, Number(r.count)]));
@@ -297,15 +323,21 @@ export class CategoriesService {
   /** categoryId -> number of valid (active, in-stock) products, for the ids. */
   async countValidProducts(
     categoryIds: string[],
+    municipalityId?: string,
   ): Promise<Map<string, number>> {
     if (categoryIds.length === 0) return new Map();
-    const rows = await this.productRepository
+    const qb = this.productRepository
       .createQueryBuilder('p')
       .select('p.categoryId', 'id')
       .addSelect('COUNT(*)', 'count')
       .where('p.categoryId IN (:...ids)', { ids: categoryIds })
-      .andWhere('p.isActive = :active', { active: true })
-      .andWhere(this.productHasStockSql('p'))
+      .andWhere('p.isActive = :active', { active: true });
+    if (municipalityId) {
+      qb.andWhere(this.productHasStockSql('p', true), { municipalityId });
+    } else {
+      qb.andWhere(this.productHasStockSql('p'));
+    }
+    const rows = await qb
       .groupBy('p.categoryId')
       .getRawMany<{ id: string; count: string }>();
     return new Map(rows.map((r) => [r.id, Number(r.count)]));
@@ -345,21 +377,27 @@ export class CategoriesService {
     featured?: boolean;
     sortBy?: PublicSortField;
     sortOrder?: 'asc' | 'desc';
+    municipalityId?: string;
   }): Promise<Category[]> {
     const qb = this.categoryRepository
       .createQueryBuilder('dep')
       .where('dep.parentId IS NULL')
-      .andWhere('dep.isActive = :active', { active: true })
-      // Valid department = has ≥1 active child category with in-stock products.
-      .andWhere(
-        `EXISTS (
+      .andWhere('dep.isActive = :active', { active: true });
+    // Valid department = has ≥1 active child category with in-stock products.
+    const validDepartmentSql = `EXISTS (
           SELECT 1 FROM categories c
           WHERE c.parent_id = dep.id
             AND c.deleted_at IS NULL
             AND c.is_active = true
-            AND ${this.categoryHasStockSql('c.id')}
-        )`,
-      );
+            AND ${this.categoryHasStockSql('c.id', Boolean(filters.municipalityId))}
+        )`;
+    if (filters.municipalityId) {
+      qb.andWhere(validDepartmentSql, {
+        municipalityId: filters.municipalityId,
+      });
+    } else {
+      qb.andWhere(validDepartmentSql);
+    }
 
     if (filters.featured) {
       qb.andWhere('dep.isFeatured = :featured', { featured: true });
@@ -383,13 +421,20 @@ export class CategoriesService {
     departmentId?: string;
     sortBy?: PublicSortField;
     sortOrder?: 'asc' | 'desc';
+    municipalityId?: string;
   }): Promise<Category[]> {
     const qb = this.categoryRepository
       .createQueryBuilder('cat')
       .where('cat.parentId IS NOT NULL')
-      .andWhere('cat.isActive = :active', { active: true })
-      // Valid category = has ≥1 active product with positive stock.
-      .andWhere(this.categoryHasStockSql('cat.id'));
+      .andWhere('cat.isActive = :active', { active: true });
+    // Valid category = has ≥1 active product with positive stock.
+    if (filters.municipalityId) {
+      qb.andWhere(this.categoryHasStockSql('cat.id', true), {
+        municipalityId: filters.municipalityId,
+      });
+    } else {
+      qb.andWhere(this.categoryHasStockSql('cat.id'));
+    }
 
     if (filters.departmentId) {
       qb.andWhere('cat.parentId = :departmentId', {
@@ -446,7 +491,7 @@ export class CategoriesService {
    * queries — the taxonomy is tiny, so returning it whole (unpaginated) is the
    * cheapest thing to cache for an always-on nav.
    */
-  async getPublicCatalog(): Promise<
+  async getPublicCatalog(municipalityId?: string): Promise<
     Array<{
       department: Category;
       productsCount: number;
@@ -454,10 +499,13 @@ export class CategoriesService {
     }>
   > {
     const [departments, categories] = await Promise.all([
-      this.listPublicDepartments({}),
-      this.listPublicCategories({}),
+      this.listPublicDepartments({ municipalityId }),
+      this.listPublicCategories({ municipalityId }),
     ]);
-    const counts = await this.countValidProducts(categories.map((c) => c.id));
+    const counts = await this.countValidProducts(
+      categories.map((c) => c.id),
+      municipalityId,
+    );
 
     const byParent = new Map<string, Category[]>();
     for (const cat of categories) {
