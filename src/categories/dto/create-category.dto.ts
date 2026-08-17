@@ -26,15 +26,15 @@ export class CreateCategoryDto {
   @IsString()
   description?: string;
 
-  @IsOptional()
   @IsString()
+  @IsNotEmpty()
   @MaxLength(2048)
-  imageDesktopUrl?: string;
+  imageDesktopUrl: string;
 
-  @IsOptional()
   @IsString()
+  @IsNotEmpty()
   @MaxLength(2048)
-  imageMobileUrl?: string;
+  imageMobileUrl: string;
 
   @IsOptional()
   sortOrder?: number;
