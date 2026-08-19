@@ -95,6 +95,7 @@ export class InvitationsService {
       baseRedirectUrl,
       dto.firstName,
       dto.lastName,
+      dto.email,
     );
 
     if (dto.organizationId) {
@@ -141,6 +142,7 @@ export class InvitationsService {
     baseUrl: string | undefined,
     firstName?: string,
     lastName?: string,
+    email?: string,
   ): string | undefined {
     if (!baseUrl) {
       return undefined;
@@ -152,6 +154,11 @@ export class InvitationsService {
     if (lastName?.trim()) {
       url.searchParams.set('lastName', lastName.trim());
     }
+    // Lets the acceptance page send the same email to the storefront-mirror
+    // endpoint (the Clerk ticket doesn't expose it to our page directly).
+    if (email?.trim()) {
+      url.searchParams.set('email', email.trim());
+    }
     return url.toString();
   }
 
@@ -162,6 +169,14 @@ export class InvitationsService {
         status: InvitationStatus.PENDING,
       },
       relations: { invitedBy: true },
+    });
+  }
+
+  /** Whether this email was ever invited (any status) — anti-abuse gate for the
+   *  public storefront-mirror endpoint, robust to the pending→accepted race. */
+  async existsByEmail(email: string): Promise<boolean> {
+    return this.invitationRepository.exists({
+      where: { email: email.toLowerCase().trim() },
     });
   }
 

@@ -30,7 +30,9 @@ export class ClientAuthService {
     if (!client) {
       throw new UnauthorizedException('Client not registered');
     }
-    if (client.deletedAt) {
+    // Soft-deleted, or gated (e.g. an admin-invite mirror still awaiting
+    // approval) — both are blocked with the same "inactive" message.
+    if (client.deletedAt || !client.isActive) {
       throw new UnauthorizedException('Account is inactive');
     }
 

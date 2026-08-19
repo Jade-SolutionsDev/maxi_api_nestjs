@@ -43,6 +43,13 @@ export class Client {
   @Column({ name: 'is_active', type: 'boolean', default: true })
   isActive: boolean;
 
+  // True while this is a customer we provisioned from an admin invitation that
+  // is still awaiting approval. Marks it as ours so approve/reject only ever
+  // touch these rows — never a real, self-registered customer. See
+  // CustomerProvisioningService.
+  @Column({ name: 'admin_invite_pending', type: 'boolean', default: false })
+  adminInvitePending: boolean;
+
   @Column({ name: 'onboarding_completed', type: 'boolean', default: false })
   onboardingCompleted: boolean;
 

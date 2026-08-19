@@ -47,5 +47,9 @@ export class CreateClientDto {
 
   @IsOptional()
   @IsBoolean()
+  adminInvitePending?: boolean;
+
+  @IsOptional()
+  @IsBoolean()
   onboardingCompleted?: boolean;
 }

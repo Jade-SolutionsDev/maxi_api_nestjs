@@ -13,6 +13,7 @@ import { Repository } from 'typeorm';
 jest.mock('@clerk/backend', () => ({
   createClerkClient: jest.fn(),
 }));
+import { CustomerProvisioningService } from '../clients/customer-provisioning.service';
 import { CreateUserDto } from './dto/create-user.dto';
 import { UpdateUserDto } from './dto/update-user.dto';
 import { Invitation } from './entities/invitation.entity';
@@ -24,6 +25,7 @@ describe('UsersService', () => {
   let repository: jest.Mocked<Repository<User>>;
   let invitationRepository: jest.Mocked<Repository<Invitation>>;
   let configService: jest.Mocked<ConfigService>;
+  let customerProvisioning: jest.Mocked<CustomerProvisioningService>;
   let qb: {
     withDeleted: jest.Mock;
     andWhere: jest.Mock;
@@ -102,6 +104,14 @@ describe('UsersService', () => {
           provide: ConfigService,
           useValue: { get: jest.fn() },
         },
+        {
+          provide: CustomerProvisioningService,
+          useValue: {
+            activateForEmail: jest.fn(),
+            revokeForEmail: jest.fn(),
+            provisionPending: jest.fn(),
+          },
+        },
       ],
     }).compile();
 
@@ -109,6 +119,7 @@ describe('UsersService', () => {
     repository = module.get(getRepositoryToken(User));
     invitationRepository = module.get(getRepositoryToken(Invitation));
     configService = module.get(ConfigService);
+    customerProvisioning = module.get(CustomerProvisioningService);
   });
 
   afterEach(() => {
@@ -291,6 +302,19 @@ describe('UsersService', () => {
 
       expect(result.isActive).toBe(true);
       expect(result.approvedAt).toBeInstanceOf(Date);
+      // Approval enables the mirrored storefront customer.
+      expect(customerProvisioning.activateForEmail).toHaveBeenCalledWith(
+        awaiting.email,
+      );
+    });
+
+    it('should NOT mirror-activate on a non-approval update', async () => {
+      repository.findOne.mockResolvedValue({ ...user }); // already approved
+      repository.save.mockImplementation((u) => Promise.resolve(u as User));
+
+      await service.update(user.id, { firstName: 'Janet' });
+
+      expect(customerProvisioning.activateForEmail).not.toHaveBeenCalled();
     });
 
     it('should preserve unset fields on a partial update (no name clobber)', async () => {
@@ -408,6 +432,25 @@ describe('UsersService', () => {
         isActive: false,
       });
       expect(repository.softDelete).toHaveBeenCalledWith(user.id);
+      // The fixture user was approved → keep their storefront customer.
+      expect(customerProvisioning.revokeForEmail).not.toHaveBeenCalled();
+    });
+
+    it('should revoke the storefront customer when rejecting a never-approved user', async () => {
+      const awaiting = { ...user, approvedAt: null };
+      repository.findOne.mockResolvedValue(awaiting);
+      repository.update.mockResolvedValue({} as never);
+      repository.softDelete.mockResolvedValue({
+        affected: 1,
+        raw: [],
+        generatedMaps: [],
+      });
+
+      await service.remove(awaiting.id);
+
+      expect(customerProvisioning.revokeForEmail).toHaveBeenCalledWith(
+        awaiting.email,
+      );
     });
 
     it('should throw NotFoundException when user does not exist', async () => {

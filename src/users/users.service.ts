@@ -3,12 +3,14 @@ import {
   ConflictException,
   ForbiddenException,
   Injectable,
+  Logger,
   NotFoundException,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { InjectRepository } from '@nestjs/typeorm';
 import { createClerkClient } from '@clerk/backend';
 import { IsNull, Repository } from 'typeorm';
+import { CustomerProvisioningService } from '../clients/customer-provisioning.service';
 import {
   buildPaginatedResponse,
   getPaginationParams,
@@ -31,13 +33,28 @@ export interface FindUsersFilter {
 
 @Injectable()
 export class UsersService {
+  private readonly logger = new Logger(UsersService.name);
+
   constructor(
     @InjectRepository(User)
     private readonly usersRepository: Repository<User>,
     @InjectRepository(Invitation)
     private readonly invitationRepository: Repository<Invitation>,
     private readonly configService: ConfigService,
+    private readonly customerProvisioning: CustomerProvisioningService,
   ) {}
+
+  /** Run a storefront-mirror side effect without ever failing the admin action. */
+  private async safeMirror(
+    fn: () => Promise<void>,
+    context: string,
+  ): Promise<void> {
+    try {
+      await fn();
+    } catch (err) {
+      this.logger.warn(`Storefront mirror (${context}) failed: ${String(err)}`);
+    }
+  }
 
   async findAll(
     filter: FindUsersFilter = {},
@@ -223,11 +240,23 @@ export class UsersService {
 
     // First activation doubles as approval — stamp it so an awaiting-approval
     // account (never approved) stays distinguishable from an admin-disabled one.
-    if (user.isActive && !user.approvedAt) {
+    const justApproved = user.isActive && !user.approvedAt;
+    if (justApproved) {
       user.approvedAt = new Date();
     }
 
-    return this.usersRepository.save(user);
+    const saved = await this.usersRepository.save(user);
+
+    // On approval, enable the storefront customer we mirrored at sign-up so the
+    // admin can also shop with the same credentials.
+    if (justApproved) {
+      await this.safeMirror(
+        () => this.customerProvisioning.activateForEmail(saved.email),
+        `activate ${saved.email ?? ''}`,
+      );
+    }
+
+    return saved;
   }
 
   /**
@@ -275,6 +304,15 @@ export class UsersService {
 
     await this.usersRepository.update(id, { isActive: false });
     await this.usersRepository.softDelete(id);
+
+    // Deleting a never-approved user is a rejection — tear down the gated
+    // storefront customer we provisioned at sign-up. Approved users keep theirs.
+    if (!user.approvedAt) {
+      await this.safeMirror(
+        () => this.customerProvisioning.revokeForEmail(user.email),
+        `revoke ${user.email ?? ''}`,
+      );
+    }
   }
 
   async restore(id: string): Promise<User> {
