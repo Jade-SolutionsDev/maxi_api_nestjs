@@ -172,14 +172,6 @@ export class InvitationsService {
     });
   }
 
-  /** Whether this email was ever invited (any status) — anti-abuse gate for the
-   *  public storefront-mirror endpoint, robust to the pending→accepted race. */
-  async existsByEmail(email: string): Promise<boolean> {
-    return this.invitationRepository.exists({
-      where: { email: email.toLowerCase().trim() },
-    });
-  }
-
   async markAccepted(invitation: Invitation): Promise<Invitation> {
     invitation.status = InvitationStatus.ACCEPTED;
     invitation.acceptedAt = new Date();

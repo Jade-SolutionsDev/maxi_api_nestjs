@@ -15,6 +15,10 @@ process.env.CLERK_WEBHOOK_SECRET = '';
 process.env.CLERK_BACKOFFICE_WEBHOOK_SECRET = '';
 process.env.CLERK_SECRET_KEY = '';
 process.env.CLERK_BACKOFFICE_SECRET_KEY = '';
+// These tests exercise the local/test unsigned-webhook path, which is now an
+// explicit opt-in (secretless verification is rejected otherwise — see
+// webhooks-require-secret.e2e-spec.ts).
+process.env.ALLOW_UNVERIFIED_WEBHOOKS = 'true';
 
 describe('WebhooksController (e2e)', () => {
   let app: INestApplication;

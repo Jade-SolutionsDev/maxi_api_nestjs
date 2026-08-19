@@ -36,4 +36,12 @@ describe('paginate', () => {
     expect(paginate([])).toMatchObject({ items: [], total: 0, totalPages: 0 });
     expect(paginate([], 1, 10)).toMatchObject({ total: 0, totalPages: 0 });
   });
+
+  it('clamps an oversized limit to the max page size', () => {
+    const big = Array.from({ length: 250 }, (_, i) => i);
+    const result = paginate(big, 1, 9_999_999);
+    expect(result.items).toHaveLength(100);
+    expect(result.limit).toBe(100);
+    expect(result.total).toBe(250);
+  });
 });

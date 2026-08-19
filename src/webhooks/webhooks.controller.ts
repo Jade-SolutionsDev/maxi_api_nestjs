@@ -15,7 +15,8 @@ interface RequestWithRawBody extends Request {
 }
 
 // Clerk's signed webhook calls carry no Bearer token; they self-authenticate
-// via signature verification inside the service.
+// via signature verification inside the service. Not strictly throttled: Clerk
+// can burst several events at once, and the signature is the real gate.
 @Public()
 @ApiTags('webhooks')
 @Controller('webhooks')

@@ -108,16 +108,19 @@ export class WebhooksService {
     headers: Record<string, string | string[] | undefined>,
     secret: string | undefined,
   ): Promise<ClerkWebhookPayload> {
-    const nodeEnv = this.configService.get<string>('nodeEnv');
-
     if (!secret) {
-      if (nodeEnv === 'production') {
+      // A deployed environment MUST verify signatures. The unsigned path exists
+      // only for local/test and must be opted into explicitly and visibly.
+      const allowUnverified = this.configService.get<boolean>(
+        'auth.allowUnverifiedWebhooks',
+      );
+      if (!allowUnverified) {
         throw new UnauthorizedException(
           'Clerk webhook secret is not configured',
         );
       }
       this.logger.warn(
-        'Skipping Clerk webhook signature verification in dev/test mode',
+        'ALLOW_UNVERIFIED_WEBHOOKS is set — skipping Clerk webhook signature verification',
       );
       try {
         return JSON.parse(rawBody) as ClerkWebhookPayload;

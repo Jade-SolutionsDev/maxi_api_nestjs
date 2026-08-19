@@ -268,13 +268,13 @@ describe('WebhooksService', () => {
       );
     });
 
-    it('should reject invalid JSON in dev mode when no secret is set', async () => {
+    it('should reject invalid JSON when unsigned webhooks are explicitly allowed', async () => {
       configService.get.mockImplementation((key: string) => {
         if (key === 'clerk.backofficeWebhookSecret') {
           return undefined;
         }
-        if (key === 'nodeEnv') {
-          return 'development';
+        if (key === 'auth.allowUnverifiedWebhooks') {
+          return true;
         }
         return undefined;
       });
@@ -282,6 +282,19 @@ describe('WebhooksService', () => {
       await expect(
         service.handleAdminWebhook('not-json', {}),
       ).rejects.toBeInstanceOf(BadRequestException);
+    });
+
+    it('should reject a secretless webhook when unsigned is not allowed', async () => {
+      configService.get.mockImplementation((key: string) => {
+        if (key === 'auth.allowUnverifiedWebhooks') {
+          return false;
+        }
+        return undefined;
+      });
+
+      await expect(
+        service.handleAdminWebhook('{"type":"user.created"}', {}),
+      ).rejects.toBeInstanceOf(UnauthorizedException);
     });
   });
 });
