@@ -27,7 +27,19 @@ Each shipped with a test that fails on `develop` and passes on the branch.
 
 Also shipped: **global rate limiting** (`@nestjs/throttler`, MxH-0066) — 120/min default, strict 6/min on the mirror route; skipped under `NODE_ENV=test` so e2e stays deterministic.
 
-Verified on a `NODE_ENV=staging` boot: `/api/docs` → 404, secretless webhook → 401, helmet header present, `x-powered-by` absent, `?limit=9999999` → 400, mirror without token → 401, oversized body → 413. Full suite: 246 unit + 29 e2e green.
+Verified on a `NODE_ENV=staging` boot: `/api/docs` → 404, secretless webhook → 401, helmet header present, `x-powered-by` absent, `?limit=9999999` → 400, mirror without token → 401, oversized body → 413.
+
+### Post-QA correction (rate limiting behind the proxy)
+
+QA found the rate limiter counted **all clients as one**: the API sits behind Traefik and `main.ts` did not set Express `trust proxy`, so `req.ip` (the throttler's key) was always the proxy's address. The 120/min and strict 6/min limits were global — a few users browsing the catalog would all start getting 429, and two invitees in the same minute collided on the mirror limit. This was the MxH-0066 acceptance criterion.
+
+Fixed by `app.set('trust proxy', trustProxyHops)` (env `TRUST_PROXY_HOPS`, **default 1** = a single Traefik). `req.ip` now resolves to the real client from `X-Forwarded-For`; the exact hop count is spoof-safe (a client cannot forge a lower `X-Forwarded-For` because Traefik appends the true socket IP that Express reads). Re-verified on staging boot: two `X-Forwarded-For` values keep **independent** buckets (A: 5→4→3→2 while B: 5→4).
+
+Also hardened while here: `ALLOW_UNVERIFIED_WEBHOOKS` is now honored **only when `NODE_ENV` is `development`/`test`** — even if the flag is left set in a deployed env, unsigned webhooks are rejected (confirmed: staging + flag set → 401). And a stale comment in `throttle.ts` claiming the strict limit covered webhooks was corrected (it never did — deliberately, so Clerk event bursts aren't dropped).
+
+**Deployment requirement:** none for the common case — the default `TRUST_PROXY_HOPS=1` matches a single Traefik in front of the API, and Traefik forwards `X-Forwarded-For` by default. **Only** if another proxy sits in front of Traefik (a CDN or cloud load balancer) set `TRUST_PROXY_HOPS` to the total number of proxies, or `req.ip` will resolve to the intermediary instead of the client.
+
+Full suite after the correction: 249 unit + 29 e2e green.
 
 ---
 
