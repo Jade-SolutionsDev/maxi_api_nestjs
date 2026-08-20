@@ -1,4 +1,4 @@
-import { BadRequestException } from '@nestjs/common';
+import { BadGatewayException, BadRequestException } from '@nestjs/common';
 import { Test, TestingModule } from '@nestjs/testing';
 import { getRepositoryToken } from '@nestjs/typeorm';
 import { Order, PaymentStatus } from '../orders/entities/order.entity';
@@ -138,6 +138,24 @@ describe('PaymentsService', () => {
         expect.anything(),
         'order_ORD-20260001_fake_3',
       );
+    });
+
+    it('reports an unreachable gateway as 502, not 500', async () => {
+      gateway.createCharge.mockRejectedValue(new Error('ECONNREFUSED'));
+
+      await expect(
+        service.createChargeForOrder(makeOrder(), gateway),
+      ).rejects.toBeInstanceOf(BadGatewayException);
+    });
+
+    it('keeps our own validation errors intact', async () => {
+      gateway.createCharge.mockRejectedValue(
+        new BadRequestException('Tropipay only settles in EUR or USD'),
+      );
+
+      await expect(
+        service.createChargeForOrder(makeOrder(), gateway),
+      ).rejects.toBeInstanceOf(BadRequestException);
     });
 
     it('stamps the provider on the charge and the reference on the order', async () => {

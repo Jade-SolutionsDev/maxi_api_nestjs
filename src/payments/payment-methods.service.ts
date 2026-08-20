@@ -124,7 +124,15 @@ export class PaymentMethodsService implements OnModuleInit {
         `"${method.code}" has no credentials configured in this environment`,
       );
     }
-    Object.assign(method, dto);
+    // Only what the caller actually sent: a validated DTO instance carries
+    // every optional field as `undefined`, and copying those blanks the entity
+    // in memory (TypeORM skips them on save, but the response would lie).
+    Object.assign(
+      method,
+      Object.fromEntries(
+        Object.entries(dto).filter(([, value]) => value !== undefined),
+      ),
+    );
     await this.methodRepository.save(method);
     return PaymentMethodResponseDto.fromEntity(
       method,

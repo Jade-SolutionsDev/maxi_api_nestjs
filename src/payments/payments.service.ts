@@ -1,5 +1,7 @@
 import {
+  BadGatewayException,
   BadRequestException,
+  HttpException,
   Injectable,
   Logger,
   NotFoundException,
@@ -87,7 +89,9 @@ export class PaymentsService {
       (await this.chargeRepository.count({ where: { orderId: order.id } })) + 1;
     const idempotencyKey = `order_${order.orderNumber ?? order.id}_${gateway.code}_${attempt}`;
 
-    const data = await gateway.createCharge(order, idempotencyKey);
+    const data = await this.callGateway(gateway.code, () =>
+      gateway.createCharge(order, idempotencyKey),
+    );
     const charge = await this.chargeRepository.save(
       this.chargeRepository.create({
         orderId: order.id,
@@ -114,7 +118,9 @@ export class PaymentsService {
       return charge;
     }
     const gateway = this.methodsService.gatewayFor(charge.provider);
-    const data = await gateway.syncCharge(charge);
+    const data = await this.callGateway(gateway.code, () =>
+      gateway.syncCharge(charge),
+    );
     Object.assign(charge, this.gatewayFields(data));
     await this.chargeRepository.save(charge);
     await this.propagateToOrder(charge);
@@ -245,6 +251,30 @@ export class PaymentsService {
       return;
     }
     await this.orderRepository.save(order);
+  }
+
+  /**
+   * A gateway that rejects us or is unreachable is a 502, not a 500: the
+   * request was fine, the upstream was not. Clients key their "try again /
+   * we'll settle it manually" copy off that. Our own validation errors
+   * (unsupported currency, already paid) keep their own status.
+   */
+  private async callGateway<T>(
+    code: string,
+    call: () => Promise<T>,
+  ): Promise<T> {
+    try {
+      return await call();
+    } catch (err) {
+      if (err instanceof HttpException) throw err;
+      this.logger.error(
+        `Gateway "${code}" call failed`,
+        err instanceof Error ? err.stack : String(err),
+      );
+      throw new BadGatewayException(
+        `Payment gateway "${code}" is unavailable right now`,
+      );
+    }
   }
 
   // Only the fields the gateway actually reported: a partial webhook event

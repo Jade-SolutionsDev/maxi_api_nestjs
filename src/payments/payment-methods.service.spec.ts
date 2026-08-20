@@ -132,5 +132,20 @@ describe('PaymentMethodsService', () => {
       expect(result.enabled).toBe(false);
       expect(result.configured).toBe(false);
     });
+
+    it('leaves fields the caller did not send alone', async () => {
+      repo.findOne.mockResolvedValue(
+        method('tropipay', { label: 'Tarjeta', icon: 'CreditCard' }),
+      );
+
+      const result = await service.update('id-tropipay', {
+        enabled: true,
+        label: undefined,
+        icon: undefined,
+      });
+
+      expect(result.label).toBe('Tarjeta');
+      expect(result.icon).toBe('CreditCard');
+    });
   });
 });

@@ -41,8 +41,10 @@ export class PaymentCharge {
   @Column({ name: 'order_id', type: 'uuid' })
   orderId: string;
 
-  // Gateway that owns this attempt (payment_methods.code).
-  @Column({ type: 'varchar', length: 32 })
+  // Gateway that owns this attempt (payment_methods.code). The default only
+  // exists to backfill rows created before multi-gateway support (all of which
+  // were Mi Billetera charges) — every write sets it explicitly.
+  @Column({ type: 'varchar', length: 32, default: 'mibilletera' })
   provider: string;
 
   // Gateway identifier — unique lookup key for webhooks and polling.
