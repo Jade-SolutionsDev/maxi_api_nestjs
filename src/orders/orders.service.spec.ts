@@ -14,8 +14,8 @@ import { Role, User } from '../users/entities/user.entity';
 import { OrderItem } from './entities/order-item.entity';
 import { Order, OrderStatus, PaymentStatus } from './entities/order.entity';
 import { OrdersService } from './orders.service';
-import { MibiPaymentService } from './payments/mibi-payment.service';
-import { PAYMENT_PROVIDER } from './payments/payment-provider.interface';
+import { PaymentMethodsService } from '../payments/payment-methods.service';
+import { PaymentsService } from '../payments/payments.service';
 
 function makeClient(): Client {
   return { id: 'client-1', defaultMunicipalityId: 'mun-1' } as Client;
@@ -76,7 +76,11 @@ describe('OrdersService', () => {
     confirmReservations: jest.Mock;
     releaseReservations: jest.Mock;
   };
-  let paymentProvider: { initiatePayment: jest.Mock };
+  let paymentsService: {
+    createChargeForOrder: jest.Mock;
+    latestChargeDto: jest.Mock;
+  };
+  let paymentMethodsService: { resolve: jest.Mock };
   let orderItemRepo: { save: jest.Mock; create: jest.Mock };
   let cartItemRepo: { delete: jest.Mock };
 
@@ -103,10 +107,12 @@ describe('OrdersService', () => {
       confirmReservations: jest.fn(),
       releaseReservations: jest.fn(),
     };
-    paymentProvider = {
-      initiatePayment: jest
-        .fn()
-        .mockResolvedValue({ status: PaymentStatus.PENDING }),
+    paymentsService = {
+      createChargeForOrder: jest.fn().mockResolvedValue({ id: 'charge-1' }),
+      latestChargeDto: jest.fn().mockResolvedValue(undefined),
+    };
+    paymentMethodsService = {
+      resolve: jest.fn().mockResolvedValue({ code: 'manual' }),
     };
 
     const manager = {
@@ -127,11 +133,8 @@ describe('OrdersService', () => {
         { provide: getRepositoryToken(Order), useValue: orderRepo },
         { provide: CartService, useValue: cartService },
         { provide: InventoryService, useValue: inventoryService },
-        { provide: PAYMENT_PROVIDER, useValue: paymentProvider },
-        {
-          provide: MibiPaymentService,
-          useValue: { latestChargeFor: jest.fn().mockResolvedValue(null) },
-        },
+        { provide: PaymentsService, useValue: paymentsService },
+        { provide: PaymentMethodsService, useValue: paymentMethodsService },
         { provide: DataSource, useValue: dataSource },
       ],
     }).compile();
@@ -170,7 +173,7 @@ describe('OrdersService', () => {
       expect(cartItemRepo.delete).toHaveBeenCalledWith({
         clientId: 'client-1',
       });
-      expect(paymentProvider.initiatePayment).toHaveBeenCalled();
+      expect(paymentsService.createChargeForOrder).toHaveBeenCalled();
       expect(result.status).toBe(OrderStatus.PENDING);
       expect(result.paymentStatus).toBe(PaymentStatus.PENDING);
     });
@@ -197,7 +200,7 @@ describe('OrdersService', () => {
     });
 
     it('survives a payment-initiation failure: order stays pending', async () => {
-      paymentProvider.initiatePayment.mockRejectedValue(
+      paymentsService.createChargeForOrder.mockRejectedValue(
         new Error('gateway down'),
       );
 

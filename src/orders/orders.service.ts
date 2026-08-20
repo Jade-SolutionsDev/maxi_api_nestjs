@@ -2,13 +2,12 @@ import {
   BadRequestException,
   ConflictException,
   ForbiddenException,
-  Inject,
   Injectable,
+  Logger,
   NotFoundException,
 } from '@nestjs/common';
-import { Logger } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { DataSource, Repository } from 'typeorm';
+import { DataSource, IsNull, Repository } from 'typeorm';
 import { CartService } from '../cart/cart.service';
 import { CartItem } from '../cart/entities/cart-item.entity';
 import { Client } from '../clients/entities/client.entity';
@@ -24,12 +23,8 @@ import { CheckoutDto } from './dto/checkout.dto';
 import { OrderResponseDto } from './dto/order-response.dto';
 import { OrderItem } from './entities/order-item.entity';
 import { Order, OrderStatus, PaymentStatus } from './entities/order.entity';
-import { PaymentChargeResponseDto } from './payments/dto/payment-charge-response.dto';
-import { MibiPaymentService } from './payments/mibi-payment.service';
-import {
-  PAYMENT_PROVIDER,
-  PaymentProvider,
-} from './payments/payment-provider.interface';
+import { PaymentMethodsService } from '../payments/payment-methods.service';
+import { PaymentsService } from '../payments/payments.service';
 
 const TRANSITIONS: Record<OrderStatus, OrderStatus[]> = {
   [OrderStatus.PENDING]: [OrderStatus.CONFIRMED, OrderStatus.CANCELLED],
@@ -66,20 +61,10 @@ export class OrdersService {
     private readonly orderRepository: Repository<Order>,
     private readonly cartService: CartService,
     private readonly inventoryService: InventoryService,
-    @Inject(PAYMENT_PROVIDER)
-    private readonly paymentProvider: PaymentProvider,
-    private readonly mibiPaymentService: MibiPaymentService,
+    private readonly paymentsService: PaymentsService,
+    private readonly paymentMethodsService: PaymentMethodsService,
     private readonly dataSource: DataSource,
   ) {}
-
-  // Latest payment attempt as a response DTO (null when none exists — e.g.
-  // manual payments or a failed checkout-time initiation).
-  private async paymentFor(
-    orderId: string,
-  ): Promise<PaymentChargeResponseDto | undefined> {
-    const charge = await this.mibiPaymentService.latestChargeFor(orderId);
-    return charge ? PaymentChargeResponseDto.fromEntity(charge) : undefined;
-  }
 
   // ---------------- Storefront ----------------
 
@@ -89,7 +74,13 @@ export class OrdersService {
   // commit: an outbound gateway call must not hold the inventory row locks,
   // and a gateway failure must not lose the order.
   async checkout(client: Client, dto: CheckoutDto): Promise<OrderResponseDto> {
-    const cart = await this.cartService.getCart(client.id);
+    // Same municipality the order ships to, so availability is judged against
+    // the zone the customer is actually buying for.
+    const deliveryMunicipalityId =
+      dto.deliveryMunicipalityId ?? client.defaultMunicipalityId ?? undefined;
+    const cart = await this.cartService.getCart(client.id, {
+      municipalityId: deliveryMunicipalityId,
+    });
     if (cart.items.length === 0) {
       throw new BadRequestException('Cart is empty');
     }
@@ -115,8 +106,7 @@ export class OrdersService {
           subtotal: cart.subtotal.toFixed(2),
           deliveryFee: '0.00',
           total: cart.subtotal.toFixed(2),
-          deliveryMunicipalityId:
-            dto.deliveryMunicipalityId ?? client.defaultMunicipalityId,
+          deliveryMunicipalityId: deliveryMunicipalityId ?? null,
           deliveryAddress: dto.deliveryAddress ?? null,
           customerNotes: dto.customerNotes ?? null,
         }),
@@ -150,17 +140,18 @@ export class OrdersService {
       return order.id;
     });
 
-    // Post-commit payment initiation. On gateway failure the order survives
-    // as pending/pending with no charge; the customer starts the attempt via
+    // Post-commit payment initiation: an outbound gateway call must not hold
+    // the inventory row locks, and a gateway failure must not lose the order —
+    // it survives unpaid and the customer retries via
     // POST /storefront/orders/:id/payment.
     try {
       const order = (await this.orderRepository.findOne({
         where: { id: orderId },
       })) as Order;
-      const initiation = await this.paymentProvider.initiatePayment(order);
-      order.paymentStatus = initiation.status;
-      order.paymentRef = initiation.ref ?? order.paymentRef;
-      await this.orderRepository.save(order);
+      const gateway = await this.paymentMethodsService.resolve(
+        dto.paymentMethod,
+      );
+      await this.paymentsService.createChargeForOrder(order, gateway);
     } catch (err) {
       this.logger.error(
         `Payment initiation failed for order ${orderId}`,
@@ -178,7 +169,9 @@ export class OrdersService {
   ): Promise<PaginatedResponse<OrderResponseDto>> {
     const params = getPaginationParams({ page, limit });
     const [orders, total] = await this.orderRepository.findAndCount({
-      where: { clientId },
+      // withDeleted below is for the product join; the orders themselves must
+      // still respect their own soft delete.
+      where: { clientId, deletedAt: IsNull() },
       relations: { items: { product: true } },
       withDeleted: true, // soft-deleted products must still render on old orders
       order: { createdAt: 'DESC' },
@@ -206,7 +199,7 @@ export class OrdersService {
       throw new NotFoundException(`Order with id "${id}" not found`);
     }
     const dto = OrderResponseDto.fromEntity(order);
-    dto.payment = await this.paymentFor(order.id);
+    dto.payment = await this.paymentsService.latestChargeDto(order.id);
     return dto;
   }
 
@@ -300,7 +293,7 @@ export class OrdersService {
       throw new NotFoundException(`Order with id "${id}" not found`);
     }
     const dto = OrderResponseDto.fromEntity(order);
-    dto.payment = await this.paymentFor(order.id);
+    dto.payment = await this.paymentsService.latestChargeDto(order.id);
     return dto;
   }
 

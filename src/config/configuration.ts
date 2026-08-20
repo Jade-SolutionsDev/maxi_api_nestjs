@@ -38,7 +38,12 @@ export interface StorageConfig {
   forcePathStyle: boolean;
 }
 
-export interface MibiConfig {
+export interface GatewayCredentials {
+  /** Credentials present in this environment. Never enable a gateway without them. */
+  configured: boolean;
+}
+
+export interface MibiConfig extends GatewayCredentials {
   keyId: string | undefined;
   secretKey: string | undefined;
   webhookSecret: string | undefined;
@@ -49,8 +54,25 @@ export interface MibiConfig {
    * with "No active receiving account is bound for currency '<X>'".
    */
   currency: string;
-  /** Gateway active when both API keys are present; falls back to manual payments otherwise. */
-  enabled: boolean;
+}
+
+export interface TropipayConfig extends GatewayCredentials {
+  clientId: string | undefined;
+  clientSecret: string | undefined;
+  /** "Development" hits tropipay-dev.herokuapp.com; "Production" the live account. */
+  serverMode: 'Development' | 'Production';
+  /** Tropipay accepts EUR and USD only — anything else 400s opaquely. */
+  currency: string;
+}
+
+export interface PaymentsConfig {
+  mibi: MibiConfig;
+  tropipay: TropipayConfig;
+  /**
+   * Public base URL of THIS api, used for gateway callbacks. Must be reachable
+   * from the gateway's servers (a tunnel in local development).
+   */
+  publicUrl: string | undefined;
 }
 
 export interface StorefrontConfig {
@@ -68,7 +90,7 @@ export interface AppConfig {
   auth: AuthConfig;
   notifications: NotificationsConfig;
   storage: StorageConfig;
-  mibi: MibiConfig;
+  payments: PaymentsConfig;
   storefront: StorefrontConfig;
   nodeEnv: string;
   /** Number of reverse proxies in front of the API (Express `trust proxy`).
@@ -140,21 +162,40 @@ export const storageConfig = (): StorageConfig => {
   };
 };
 
-export const mibiConfig = (): MibiConfig => {
+// A gateway is usable only when its credentials are present. Never in tests:
+// e2e checkouts must not create real charges just because .env carries keys.
+const isConfigured = (...keys: (string | undefined)[]): boolean =>
+  keys.every(Boolean) && process.env.NODE_ENV !== 'test';
+
+export const paymentsConfig = (): PaymentsConfig => {
   const keyId = process.env.MIBI_KEY_ID;
   const secretKey = process.env.MIBI_SECRET_KEY;
+  const clientId = process.env.TROPIPAY_CLIENT_ID;
+  const clientSecret = process.env.TROPIPAY_CLIENT_SECRET;
+
   return {
-    keyId,
-    secretKey,
-    webhookSecret: process.env.MIBI_WEBHOOK_SECRET,
-    baseUrl: (process.env.MIBI_API_BASE ?? 'https://mibilletera.cu').replace(
-      /\/$/,
-      '',
-    ),
-    currency: (process.env.MIBI_CURRENCY ?? 'USD').toUpperCase(),
-    // Never bind the live gateway in tests — e2e checkouts must not create
-    // real charges just because .env carries production keys.
-    enabled: !!(keyId && secretKey) && process.env.NODE_ENV !== 'test',
+    mibi: {
+      keyId,
+      secretKey,
+      webhookSecret: process.env.MIBI_WEBHOOK_SECRET,
+      baseUrl: (process.env.MIBI_API_BASE ?? 'https://mibilletera.cu').replace(
+        /\/$/,
+        '',
+      ),
+      currency: (process.env.MIBI_CURRENCY ?? 'USD').toUpperCase(),
+      configured: isConfigured(keyId, secretKey),
+    },
+    tropipay: {
+      clientId,
+      clientSecret,
+      serverMode:
+        process.env.TROPIPAY_ENV === 'Production'
+          ? 'Production'
+          : 'Development',
+      currency: (process.env.TROPIPAY_CURRENCY ?? 'USD').toUpperCase(),
+      configured: isConfigured(clientId, clientSecret),
+    },
+    publicUrl: process.env.PUBLIC_API_URL?.replace(/\/$/, ''),
   };
 };
 
@@ -187,7 +228,7 @@ export default (): AppConfig => ({
   auth: authConfig(),
   notifications: notificationsConfig(),
   storage: storageConfig(),
-  mibi: mibiConfig(),
+  payments: paymentsConfig(),
   storefront: storefrontConfig(),
   nodeEnv: process.env.NODE_ENV ?? 'development',
   trustProxyHops: parseInt(process.env.TRUST_PROXY_HOPS ?? '1', 10),

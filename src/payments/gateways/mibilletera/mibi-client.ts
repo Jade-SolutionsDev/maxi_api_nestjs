@@ -1,6 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { MibiConfig } from '../../config/configuration';
+import { PaymentsConfig } from '../../../config/configuration';
 
 // Shape of `data` for merchant charges (create + get share it). Only the
 // fields we consume are typed; the full body is persisted as jsonb anyway.
@@ -78,8 +78,8 @@ export class MibiClient {
     path: string,
     body?: unknown,
   ): Promise<MibiChargeData> {
-    const mibi = this.configService.get<MibiConfig>('mibi');
-    if (!mibi?.enabled) {
+    const mibi = this.configService.get<PaymentsConfig>('payments')?.mibi;
+    if (!mibi?.configured) {
       throw new MibiApiError('Mi Billetera is not configured', 0);
     }
 

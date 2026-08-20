@@ -86,13 +86,13 @@ pending → confirmed → processing → shipped → delivered
 - `delivered` / `cancelled` — terminal.
 
 `paymentStatus`: `pending | paid | failed | refunded`. Payments run through
-**Mi Billetera** (crypto charges): the checkout response includes a `payment`
-object with the deposit instructions, and the order becomes `paid` only when
-the charge reaches `SUCCEEDED` (webhook or poll). Full contract — rendering,
-polling cadence, retries — in
-[mibilletera-payments-integration.md](./mibilletera-payments-integration.md).
-When the gateway is not configured for an environment, payments fall back to
-manual back-office settlement.
+whichever gateways an admin enabled (**Tropipay** hosted card links,
+**Mi Billetera** crypto charges): the checkout response includes a `payment`
+object whose `kind` says how to render it, and the order becomes `paid` only
+when the charge reaches `SUCCEEDED` (webhook or poll). Full contract —
+method catalog, rendering, polling cadence, retries — in
+[payments-integration.md](./payments-integration.md). With no gateway enabled,
+payments fall back to manual back-office settlement.
 
 ### Cancel
 

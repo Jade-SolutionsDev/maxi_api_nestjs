@@ -1,4 +1,10 @@
-import { IsObject, IsOptional, IsString, IsUUID } from 'class-validator';
+import {
+  IsObject,
+  IsOptional,
+  IsString,
+  IsUUID,
+  MaxLength,
+} from 'class-validator';
 
 export class CheckoutDto {
   /** Municipality the order ships to (geography catalog id). */
@@ -14,4 +20,13 @@ export class CheckoutDto {
   @IsOptional()
   @IsString()
   customerNotes?: string;
+
+  /**
+   * Payment method code (see GET /storefront/payment-methods). Omitted ⇒ the
+   * first enabled method, so a single-gateway storefront needs no picker.
+   */
+  @IsOptional()
+  @IsString()
+  @MaxLength(32)
+  paymentMethod?: string;
 }

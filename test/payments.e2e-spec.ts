@@ -1,7 +1,7 @@
 import { INestApplication } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
 import { getRepositoryToken } from '@nestjs/typeorm';
-import { createHmac } from 'node:crypto';
+import { createHash, createHmac } from 'node:crypto';
 import request from 'supertest';
 import { Repository } from 'typeorm';
 import { AppModule } from '../src/app.module';
@@ -14,16 +14,29 @@ import {
 import {
   ChargeStatus,
   PaymentCharge,
-} from '../src/orders/payments/entities/payment-charge.entity';
+} from '../src/payments/entities/payment-charge.entity';
 import { configureApp } from './test-setup';
 
 const SECRET = 'whsec_e2e_test';
 process.env.MIBI_WEBHOOK_SECRET = SECRET;
 
+// Tropipay credentials are read at request time; NODE_ENV=test keeps the
+// gateway "unconfigured" (no live calls) but the signature check still runs.
+const TPP_ID = 'tpp_e2e_id';
+const TPP_SECRET = 'tpp_e2e_secret';
+process.env.TROPIPAY_CLIENT_ID = TPP_ID;
+process.env.TROPIPAY_CLIENT_SECRET = TPP_SECRET;
+
 const sign = (body: string, secret = SECRET) =>
   createHmac('sha256', secret).update(body).digest('hex');
 
-describe('Mi Billetera webhook (e2e)', () => {
+// sha256(bankOrderCode + clientId + clientSecret + originalCurrencyAmount)
+const tropipaySignature = (bankOrderCode: string, amount: string) =>
+  createHash('sha256')
+    .update(bankOrderCode + TPP_ID + TPP_SECRET + amount)
+    .digest('hex');
+
+describe('payment webhooks (e2e)', () => {
   let app: INestApplication;
   let clients: Repository<Client>;
   let orders: Repository<Order>;
@@ -65,8 +78,9 @@ describe('Mi Billetera webhook (e2e)', () => {
     await charges.save(
       charges.create({
         orderId: order.id,
+        provider: 'mibilletera',
         reference: 'MCHE2E123',
-        idempotencyKey: 'order_test_crypto_1',
+        idempotencyKey: 'order_test_mibilletera_1',
         status: ChargeStatus.REQUIRES_ACTION,
         amount: '30.00000000',
         currency: 'USD',
@@ -99,7 +113,7 @@ describe('Mi Billetera webhook (e2e)', () => {
   it('rejects an invalid signature with 401', async () => {
     const body = event();
     await request(app.getHttpServer())
-      .post('/api/webhooks/mibilletera')
+      .post('/api/webhooks/payments/mibilletera')
       .set('Content-Type', 'application/json')
       .set('X-Mibi-Signature', sign(body, 'wrong-secret'))
       .send(body)
@@ -112,7 +126,7 @@ describe('Mi Billetera webhook (e2e)', () => {
   it('applies a signed charge.succeeded: charge terminal, order paid', async () => {
     const body = event();
     const res = await request(app.getHttpServer())
-      .post('/api/webhooks/mibilletera')
+      .post('/api/webhooks/payments/mibilletera')
       .set('Content-Type', 'application/json')
       .set('X-Mibi-Signature', sign(body))
       .send(body)
@@ -132,7 +146,7 @@ describe('Mi Billetera webhook (e2e)', () => {
     const body = event();
     const post = () =>
       request(app.getHttpServer())
-        .post('/api/webhooks/mibilletera')
+        .post('/api/webhooks/payments/mibilletera')
         .set('Content-Type', 'application/json')
         .set('X-Mibi-Signature', sign(body))
         .send(body)
@@ -152,11 +166,84 @@ describe('Mi Billetera webhook (e2e)', () => {
       status: 'FAILED',
     });
     const res = await request(app.getHttpServer())
-      .post('/api/webhooks/mibilletera')
+      .post('/api/webhooks/payments/mibilletera')
       .set('Content-Type', 'application/json')
       .set('X-Mibi-Signature', sign(body))
       .send(body)
       .expect(200);
     expect(res.body.data).toEqual({ processed: false });
+  });
+
+  describe('tropipay', () => {
+    beforeEach(async () => {
+      await charges.save(
+        charges.create({
+          orderId,
+          provider: 'tropipay',
+          reference: 'order_test_tropipay_1',
+          idempotencyKey: 'order_test_tropipay_1',
+          status: ChargeStatus.REQUIRES_ACTION,
+          amount: '30.00',
+          currency: 'USD',
+          redirectUrl: 'https://tppay.me/e2e',
+        }),
+      );
+    });
+
+    const notification = (signature: string) =>
+      JSON.stringify({
+        status: 'OK',
+        data: {
+          reference: 'order_test_tropipay_1',
+          bankOrderCode: '690259220262',
+          originalCurrencyAmount: '3000',
+          signaturev2: signature,
+          ourFee: 300,
+        },
+      });
+
+    it('rejects an unsigned notification with 401', async () => {
+      await request(app.getHttpServer())
+        .post('/api/webhooks/payments/tropipay')
+        .set('Content-Type', 'application/json')
+        .send(notification('deadbeef'))
+        .expect(401);
+
+      const order = await orders.findOneByOrFail({ id: orderId });
+      expect(order.paymentStatus).toBe(PaymentStatus.PENDING);
+    });
+
+    it('applies a signed OK notification: charge succeeded, order paid', async () => {
+      const body = notification(tropipaySignature('690259220262', '3000'));
+      const res = await request(app.getHttpServer())
+        .post('/api/webhooks/payments/tropipay')
+        .set('Content-Type', 'application/json')
+        .send(body)
+        .expect(200);
+      expect(res.body.data).toEqual({ processed: true });
+
+      const charge = await charges.findOneByOrFail({
+        reference: 'order_test_tropipay_1',
+      });
+      expect(charge.status).toBe(ChargeStatus.SUCCEEDED);
+      expect(charge.feeAmount).toBe('3.00000000');
+      // The redirect link survives an event that never mentions it.
+      expect(charge.redirectUrl).toBe('https://tppay.me/e2e');
+
+      const order = await orders.findOneByOrFail({ id: orderId });
+      expect(order.paymentStatus).toBe(PaymentStatus.PAID);
+    });
+
+    it('routes by provider: a Tropipay body is not accepted as Mi Billetera', async () => {
+      const body = notification(tropipaySignature('690259220262', '3000'));
+      const res = await request(app.getHttpServer())
+        .post('/api/webhooks/payments/mibilletera')
+        .set('Content-Type', 'application/json')
+        .set('X-Mibi-Signature', sign(body))
+        .send(body)
+        .expect(200);
+      // Parsed as a Mi Billetera event, whose reference field is absent.
+      expect(res.body.data).toEqual({ processed: false });
+    });
   });
 });

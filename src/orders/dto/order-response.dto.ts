@@ -1,6 +1,6 @@
 import { Order, OrderStatus, PaymentStatus } from '../entities/order.entity';
 import { OrderItem } from '../entities/order-item.entity';
-import { PaymentChargeResponseDto } from '../payments/dto/payment-charge-response.dto';
+import { PaymentChargeResponseDto } from '../../payments/dto/payment-charge-response.dto';
 
 export class OrderItemResponseDto {
   productId: string;
@@ -42,17 +42,16 @@ export class OrderResponseDto {
   customerNotes: string | null;
   /** Present on detail responses; omitted on lists. */
   items?: OrderItemResponseDto[];
-  /** Hosted-checkout URL from the payment provider (checkout response only). */
-  redirectUrl?: string;
   /**
-   * Latest payment attempt (Mi Billetera charge) with the crypto deposit
-   * instructions. Present on detail responses; absent for manual payments.
+   * Latest payment attempt, whatever the gateway: a hosted-checkout
+   * `redirectUrl`, crypto deposit instructions, or a manual placeholder.
+   * Present on detail responses; absent when no attempt was ever created.
    */
   payment?: PaymentChargeResponseDto;
   createdAt: Date;
   updatedAt: Date;
 
-  static fromEntity(order: Order, redirectUrl?: string): OrderResponseDto {
+  static fromEntity(order: Order): OrderResponseDto {
     const dto = new OrderResponseDto();
     dto.id = order.id;
     dto.orderNumber = order.orderNumber;
@@ -71,7 +70,6 @@ export class OrderResponseDto {
     dto.deliveryAddress = order.deliveryAddress;
     dto.customerNotes = order.customerNotes;
     dto.items = order.items?.map(OrderItemResponseDto.fromEntity);
-    dto.redirectUrl = redirectUrl;
     dto.createdAt = order.createdAt;
     dto.updatedAt = order.updatedAt;
     return dto;

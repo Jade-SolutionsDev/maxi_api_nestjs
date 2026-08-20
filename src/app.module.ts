@@ -17,6 +17,7 @@ import { GeographyModule } from './geography/geography.module';
 import { HealthModule } from './health/health.module';
 import { InventoryModule } from './inventory/inventory.module';
 import { OrdersModule } from './orders/orders.module';
+import { PaymentsModule } from './payments/payments.module';
 import { PermissionGuard } from './permissions/guards/permission.guard';
 import { PermissionsModule } from './permissions/permissions.module';
 import { ProductsModule } from './products/products.module';
@@ -64,6 +65,7 @@ import { WebhooksModule } from './webhooks/webhooks.module';
     StockLocationsModule,
     InventoryModule,
     OrdersModule,
+    PaymentsModule,
     UploadsModule,
     WebhooksModule,
     PermissionsModule,

@@ -7,7 +7,8 @@ import {
   UpdateDateColumn,
 } from 'typeorm';
 
-// Mi Billetera MerchantCharge statuses (gateway-owned vocabulary).
+// Canonical charge vocabulary. Every gateway maps its own statuses into this
+// set, so orders, the admin and the storefront read one language.
 export enum ChargeStatus {
   PENDING = 'PENDING',
   REQUIRES_ACTION = 'REQUIRES_ACTION',
@@ -25,11 +26,12 @@ export const TERMINAL_CHARGE_STATUSES = [
   ChargeStatus.CANCELLED,
 ];
 
-// One payment attempt at the gateway. An order can accumulate several (an
+// One payment attempt at one gateway. An order can accumulate several (an
 // expired/failed attempt requires a NEW charge with a NEW idempotency key —
-// gateway rule), so charges are rows, not order columns. `lastPayload` keeps
-// the most recent full gateway/webhook body (doc: persist payloads for
-// support, audit and reconciliation).
+// a rule both Mi Billetera and Tropipay share), so charges are rows, not order
+// columns, and the customer may even retry with a different method.
+// `lastPayload` keeps the most recent full gateway/webhook body (persist
+// payloads for support, audit and reconciliation).
 @Entity('payment_charges')
 @Index(['orderId'])
 export class PaymentCharge {
@@ -38,6 +40,10 @@ export class PaymentCharge {
 
   @Column({ name: 'order_id', type: 'uuid' })
   orderId: string;
+
+  // Gateway that owns this attempt (payment_methods.code).
+  @Column({ type: 'varchar', length: 32 })
+  provider: string;
 
   // Gateway identifier — unique lookup key for webhooks and polling.
   @Column({ type: 'varchar', length: 64, unique: true })
@@ -79,6 +85,10 @@ export class PaymentCharge {
   // never hardcoded (the gateway decides the network).
   @Column({ name: 'action_payload', type: 'jsonb', nullable: true })
   actionPayload: Record<string, unknown> | null;
+
+  // Hosted checkout the customer must be sent to (redirect gateways).
+  @Column({ name: 'redirect_url', type: 'text', nullable: true })
+  redirectUrl: string | null;
 
   // Latest full gateway response or webhook event body.
   @Column({ name: 'last_payload', type: 'jsonb', nullable: true })

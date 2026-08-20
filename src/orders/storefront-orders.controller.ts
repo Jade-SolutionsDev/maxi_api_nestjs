@@ -27,8 +27,9 @@ import {
 import { CheckoutDto } from './dto/checkout.dto';
 import { OrderResponseDto } from './dto/order-response.dto';
 import { OrdersService } from './orders.service';
-import { PaymentChargeResponseDto } from './payments/dto/payment-charge-response.dto';
-import { MibiPaymentService } from './payments/mibi-payment.service';
+import { PaymentChargeResponseDto } from '../payments/dto/payment-charge-response.dto';
+import { StartPaymentDto } from '../payments/dto/start-payment.dto';
+import { PaymentsService } from '../payments/payments.service';
 
 // Authenticated storefront orders (same guard pattern as the cart).
 @ApiTags('storefront')
@@ -39,7 +40,7 @@ import { MibiPaymentService } from './payments/mibi-payment.service';
 export class StorefrontOrdersController {
   constructor(
     private readonly ordersService: OrdersService,
-    private readonly mibiPaymentService: MibiPaymentService,
+    private readonly paymentsService: PaymentsService,
   ) {}
 
   @Post()
@@ -92,19 +93,19 @@ export class StorefrontOrdersController {
   @ApiOperation({
     summary: 'Current payment attempt (poll while the customer pays)',
     description:
-      'Returns the latest Mi Billetera charge for the order, refreshed from ' +
-      'the gateway while non-terminal. Poll every 5–10s while the payment ' +
-      'screen is visible, 30–60s in background, and stop after `expiresAt`. ' +
-      'The order is paid ONLY when `status` is `SUCCEEDED`. 404 when no ' +
-      'attempt exists yet (use POST to start one).',
+      'Returns the latest charge for the order, refreshed from its gateway ' +
+      'while non-terminal. Poll every 5–10s while the payment screen is ' +
+      'visible, 30–60s in background, and stop after `expiresAt` when there ' +
+      'is one. The order is paid ONLY when `status` is `SUCCEEDED`. 404 when ' +
+      'no attempt exists yet (use POST to start one).',
   })
   @ApiOkResponse({ type: PaymentChargeResponseDto })
   async getPayment(
     @Req() req: AuthenticatedClientRequest,
     @Param('id', ParseUUIDPipe) id: string,
   ): Promise<PaymentChargeResponseDto> {
-    return PaymentChargeResponseDto.fromEntity(
-      await this.mibiPaymentService.getChargeForClient(req.client.id, id),
+    return this.paymentsService.toDto(
+      await this.paymentsService.getChargeForClient(req.client.id, id),
     );
   }
 
@@ -112,19 +113,24 @@ export class StorefrontOrdersController {
   @ApiOperation({
     summary: 'Start (or restart) a payment attempt',
     description:
-      'Creates a new Mi Billetera charge when the order is unpaid and the ' +
-      'previous attempt (if any) expired, failed or was cancelled — expired ' +
-      'instructions are never reused. If a live attempt exists it is ' +
-      'returned instead of stacking charges. 400 when the order is already ' +
-      'paid.',
+      'Creates a new charge when the order is unpaid and the previous attempt ' +
+      '(if any) expired, failed or was cancelled — expired instructions and ' +
+      'spent links are never reused. A live attempt with the SAME method is ' +
+      'returned instead of stacking charges; passing a different `method` ' +
+      'always starts a fresh attempt. 400 when the order is already paid.',
   })
   @ApiCreatedResponse({ type: PaymentChargeResponseDto })
   async createPayment(
     @Req() req: AuthenticatedClientRequest,
     @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: StartPaymentDto,
   ): Promise<PaymentChargeResponseDto> {
-    return PaymentChargeResponseDto.fromEntity(
-      await this.mibiPaymentService.createChargeForClient(req.client.id, id),
+    return this.paymentsService.toDto(
+      await this.paymentsService.createChargeForClient(
+        req.client.id,
+        id,
+        dto.method,
+      ),
     );
   }
 
