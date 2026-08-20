@@ -1,6 +1,9 @@
 import { Transform } from 'class-transformer';
-import { IsInt, IsOptional, Min } from 'class-validator';
+import { IsInt, IsOptional, Max, Min } from 'class-validator';
 import { toOptionalNumber } from './query-transforms';
+
+/** Hard ceiling on how many rows a single public page may request. */
+export const MAX_PAGE_LIMIT = 100;
 
 /** Shared page/limit query params for paginated public list endpoints. */
 export class PaginationQueryDto {
@@ -16,5 +19,6 @@ export class PaginationQueryDto {
   @Transform(toOptionalNumber)
   @IsInt()
   @Min(1)
+  @Max(MAX_PAGE_LIMIT)
   limit?: number;
 }

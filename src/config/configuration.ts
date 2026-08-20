@@ -18,6 +18,9 @@ export interface CorsConfig {
 
 export interface AuthConfig {
   mockEnabled: boolean;
+  /** Escape hatch for LOCAL/TEST only: accept Clerk webhooks with no signature
+   *  when the secret is unset. Never set this in a deployed environment. */
+  allowUnverifiedWebhooks: boolean;
 }
 
 export interface NotificationsConfig {
@@ -77,6 +80,7 @@ export const clerkConfig = (): ClerkConfig => ({
 
 export const authConfig = (): AuthConfig => ({
   mockEnabled: process.env.MOCK_AUTH_ENABLED === 'true',
+  allowUnverifiedWebhooks: process.env.ALLOW_UNVERIFIED_WEBHOOKS === 'true',
 });
 
 export const notificationsConfig = (): NotificationsConfig => ({

@@ -1,6 +1,7 @@
 import { Logger, ValidationPipe } from '@nestjs/common';
 import { NestFactory } from '@nestjs/core';
 import { json } from 'express';
+import helmet from 'helmet';
 import { IncomingMessage, ServerResponse } from 'http';
 import { DataSource } from 'typeorm';
 import { AppModule } from './app.module';
@@ -9,7 +10,11 @@ import { ResponseInterceptor } from './common/interceptors/response.interceptor'
 import { ConfigService } from '@nestjs/config';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import { CorsConfig } from './config/configuration';
+import { shouldExposeDocs } from './config/swagger.util';
 import { Role, User } from './users/entities/user.entity';
+
+/** Explicit JSON body ceiling (Express's default is 100kb, chosen by nobody). */
+const JSON_BODY_LIMIT = '1mb';
 
 interface RequestWithRawBody extends IncomingMessage {
   rawBody?: string;
@@ -19,10 +24,15 @@ async function bootstrap() {
   const app = await NestFactory.create(AppModule, { bodyParser: false });
   const configService = app.get(ConfigService);
 
+  // Security headers. The API must be safe on its own, not rely on a proxy.
+  // helmet() also strips X-Powered-By (its hidePoweredBy default).
+  app.use(helmet());
+
   // Capture the raw body so Clerk webhook signature verification can use the
-  // exact bytes that were sent by Clerk.
+  // exact bytes that were sent by Clerk. Explicit size limit (see constant).
   app.use(
     json({
+      limit: JSON_BODY_LIMIT,
       verify: (
         req: IncomingMessage,
         _res: ServerResponse<IncomingMessage>,
@@ -45,12 +55,9 @@ async function bootstrap() {
 
   app.setGlobalPrefix('api');
 
-  // Swagger UI at /api/docs (JSON at /api/docs-json). Off in production —
-  // set SWAGGER_ENABLED=true to expose it there deliberately.
-  if (
-    configService.get<string>('nodeEnv') !== 'production' ||
-    process.env.SWAGGER_ENABLED === 'true'
-  ) {
+  // Swagger UI at /api/docs (JSON at /api/docs-json). Local development ONLY —
+  // staging and production return 404 (the full API map is not for deployed envs).
+  if (shouldExposeDocs(configService.get<string>('nodeEnv'))) {
     const swaggerConfig = new DocumentBuilder()
       .setTitle('MaxiHabana API')
       .setDescription(

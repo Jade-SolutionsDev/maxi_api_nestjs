@@ -6,6 +6,7 @@ import {
   ApiProperty,
   getSchemaPath,
 } from '@nestjs/swagger';
+import { MAX_PAGE_LIMIT } from './pagination-query.dto';
 
 /**
  * Paginated list envelope. The global ResponseInterceptor wraps this as
@@ -54,14 +55,17 @@ export function paginate<T>(
       totalPages: total ? 1 : 0,
     };
   }
+  // Hard clamp: callers that bypass the DTO (or a future one that forgets the
+  // @Max) still cannot request an unbounded page.
+  const safeLimit = Math.min(limit, MAX_PAGE_LIMIT);
   const currentPage = page && page > 0 ? page : 1;
-  const start = (currentPage - 1) * limit;
+  const start = (currentPage - 1) * safeLimit;
   return {
-    items: all.slice(start, start + limit),
+    items: all.slice(start, start + safeLimit),
     total,
     page: currentPage,
-    limit,
-    totalPages: Math.ceil(total / limit),
+    limit: safeLimit,
+    totalPages: Math.ceil(total / safeLimit),
   };
 }
 

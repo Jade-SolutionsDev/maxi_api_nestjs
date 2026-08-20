@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { APP_GUARD } from '@nestjs/core';
+import { ThrottlerGuard, ThrottlerModule } from '@nestjs/throttler';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
@@ -28,6 +29,13 @@ import { WebhooksModule } from './webhooks/webhooks.module';
 @Module({
   imports: [
     ConfigModule.forRoot({ load: [configuration], isGlobal: true }),
+    // Global rate limiting (MxH-0066). Generous default; sensitive routes tighten
+    // it with @Throttle (see STRICT_THROTTLE). Skipped under test to keep e2e
+    // runs, which fire many requests from one IP, deterministic.
+    ThrottlerModule.forRoot({
+      throttlers: [{ ttl: 60_000, limit: 120 }],
+      skipIf: () => process.env.NODE_ENV === 'test',
+    }),
     TypeOrmModule.forRootAsync({
       imports: [ConfigModule],
       inject: [ConfigService],
@@ -63,6 +71,8 @@ import { WebhooksModule } from './webhooks/webhooks.module';
   controllers: [AppController],
   providers: [
     AppService,
+    // Rate limit first, before any auth work runs.
+    { provide: APP_GUARD, useClass: ThrottlerGuard },
     // Order matters: AuthGuard populates request.user, then RolesGuard checks the
     // enum tier, then PermissionGuard checks @RequirePermission (managed roles).
     { provide: APP_GUARD, useClass: AuthGuard },

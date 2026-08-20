@@ -1,7 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { InjectRepository } from '@nestjs/typeorm';
-import { createClerkClient } from '@clerk/backend';
+import { createClerkClient, verifyToken } from '@clerk/backend';
 import { Repository } from 'typeorm';
 import { Client } from './entities/client.entity';
 
@@ -40,6 +40,43 @@ export class CustomerProvisioningService {
       throw new Error('CLERK_SECRET_KEY is not configured');
     }
     return createClerkClient({ secretKey });
+  }
+
+  /**
+   * Proof that the mirror caller IS the invitee: verify the Bearer token against
+   * the BACKOFFICE Clerk instance (where the admin just signed up) and confirm
+   * its user's email matches the one being provisioned. This is the gate for the
+   * public mirror endpoint — it closes both the invitation-enumeration oracle
+   * and the attacker-chosen-password pre-claim. Any failure returns false; the
+   * caller rejects uniformly, so nothing distinguishes invited from not-invited.
+   */
+  async tokenOwnsEmail(token: string, claimedEmail: string): Promise<boolean> {
+    const secretKey = this.configService.get<string>(
+      'clerk.backofficeSecretKey',
+    );
+    if (!secretKey) {
+      this.logger.warn(
+        'CLERK_BACKOFFICE_SECRET_KEY is not configured; rejecting mirror call.',
+      );
+      return false;
+    }
+    try {
+      const { sub } = await verifyToken(token, { secretKey });
+      if (!sub) return false;
+      const user = await createClerkClient({ secretKey }).users.getUser(sub);
+      const primary =
+        user.emailAddresses.find((e) => e.id === user.primaryEmailAddressId) ??
+        user.emailAddresses[0];
+      const email = primary?.emailAddress?.toLowerCase();
+      return !!email && email === claimedEmail.toLowerCase();
+    } catch (err) {
+      this.logger.warn(
+        `Mirror token verification failed: ${
+          err instanceof Error ? err.message : 'unknown error'
+        }`,
+      );
+      return false;
+    }
   }
 
   /**

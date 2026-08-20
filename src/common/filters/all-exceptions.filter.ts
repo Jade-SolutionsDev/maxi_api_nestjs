@@ -24,6 +24,23 @@ export interface ErrorEnvelope {
   };
 }
 
+/**
+ * Status for a non-Nest error. Express body-parser errors (e.g. oversized body
+ * → `entity.too.large`) carry their own numeric `status`/`statusCode`; honor a
+ * valid HTTP code so an oversized request returns 413, not a misleading 500.
+ */
+function httpStatusOf(exception: unknown): number {
+  const code = (exception as { status?: unknown; statusCode?: unknown })
+    ?.status;
+  const raw =
+    typeof code === 'number'
+      ? code
+      : (exception as { statusCode?: unknown })?.statusCode;
+  return typeof raw === 'number' && raw >= 400 && raw <= 599
+    ? raw
+    : HttpStatus.INTERNAL_SERVER_ERROR;
+}
+
 @Catch()
 export class AllExceptionsFilter implements ExceptionFilter {
   private readonly logger = new Logger(AllExceptionsFilter.name);
@@ -36,7 +53,7 @@ export class AllExceptionsFilter implements ExceptionFilter {
     const status =
       exception instanceof HttpException
         ? exception.getStatus()
-        : HttpStatus.INTERNAL_SERVER_ERROR;
+        : httpStatusOf(exception);
 
     // Log unexpected server-side failures with their stack; otherwise a 500
     // (e.g. a failed S3 upload) is returned to the client but never printed.
