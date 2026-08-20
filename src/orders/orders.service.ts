@@ -6,6 +6,7 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
+import { Logger } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { DataSource, Repository } from 'typeorm';
 import { CartService } from '../cart/cart.service';
@@ -23,6 +24,8 @@ import { CheckoutDto } from './dto/checkout.dto';
 import { OrderResponseDto } from './dto/order-response.dto';
 import { OrderItem } from './entities/order-item.entity';
 import { Order, OrderStatus, PaymentStatus } from './entities/order.entity';
+import { PaymentChargeResponseDto } from './payments/dto/payment-charge-response.dto';
+import { MibiPaymentService } from './payments/mibi-payment.service';
 import {
   PAYMENT_PROVIDER,
   PaymentProvider,
@@ -37,6 +40,15 @@ const TRANSITIONS: Record<OrderStatus, OrderStatus[]> = {
   [OrderStatus.CANCELLED]: [],
 };
 
+// Legal manual payment-status moves: settle or fail a pending payment, retry
+// a failed one, refund a paid one. Webhooks bypass this (gateway is truth).
+const PAYMENT_TRANSITIONS: Record<PaymentStatus, PaymentStatus[]> = {
+  [PaymentStatus.PENDING]: [PaymentStatus.PAID, PaymentStatus.FAILED],
+  [PaymentStatus.FAILED]: [PaymentStatus.PAID, PaymentStatus.PENDING],
+  [PaymentStatus.PAID]: [PaymentStatus.REFUNDED],
+  [PaymentStatus.REFUNDED]: [],
+};
+
 // Fulfillment steps a GROCER may drive; confirm/cancel (which move stock and
 // commit the sale) and payment stay with ADMIN+.
 const GROCER_TARGETS = [
@@ -47,6 +59,8 @@ const GROCER_TARGETS = [
 
 @Injectable()
 export class OrdersService {
+  private readonly logger = new Logger(OrdersService.name);
+
   constructor(
     @InjectRepository(Order)
     private readonly orderRepository: Repository<Order>,
@@ -54,14 +68,26 @@ export class OrdersService {
     private readonly inventoryService: InventoryService,
     @Inject(PAYMENT_PROVIDER)
     private readonly paymentProvider: PaymentProvider,
+    private readonly mibiPaymentService: MibiPaymentService,
     private readonly dataSource: DataSource,
   ) {}
+
+  // Latest payment attempt as a response DTO (null when none exists — e.g.
+  // manual payments or a failed checkout-time initiation).
+  private async paymentFor(
+    orderId: string,
+  ): Promise<PaymentChargeResponseDto | undefined> {
+    const charge = await this.mibiPaymentService.latestChargeFor(orderId);
+    return charge ? PaymentChargeResponseDto.fromEntity(charge) : undefined;
+  }
 
   // ---------------- Storefront ----------------
 
   // Turns the client's cart into a pending order: snapshots names/prices from
   // the cart response (already server-computed), reserves stock per line, and
-  // clears the cart — all in one transaction.
+  // clears the cart — all in one transaction. Payment initiation runs AFTER
+  // commit: an outbound gateway call must not hold the inventory row locks,
+  // and a gateway failure must not lose the order.
   async checkout(client: Client, dto: CheckoutDto): Promise<OrderResponseDto> {
     const cart = await this.cartService.getCart(client.id);
     if (cart.items.length === 0) {
@@ -120,14 +146,27 @@ export class OrdersService {
         );
       }
 
-      const initiation = await this.paymentProvider.initiatePayment(order);
-      order.paymentStatus = initiation.status;
-      order.paymentRef = initiation.ref ?? null;
-      await orderRepo.save(order);
-
       await manager.getRepository(CartItem).delete({ clientId: client.id });
       return order.id;
     });
+
+    // Post-commit payment initiation. On gateway failure the order survives
+    // as pending/pending with no charge; the customer starts the attempt via
+    // POST /storefront/orders/:id/payment.
+    try {
+      const order = (await this.orderRepository.findOne({
+        where: { id: orderId },
+      })) as Order;
+      const initiation = await this.paymentProvider.initiatePayment(order);
+      order.paymentStatus = initiation.status;
+      order.paymentRef = initiation.ref ?? order.paymentRef;
+      await this.orderRepository.save(order);
+    } catch (err) {
+      this.logger.error(
+        `Payment initiation failed for order ${orderId}`,
+        err instanceof Error ? err.stack : String(err),
+      );
+    }
 
     return this.findOneForClient(client.id, orderId);
   }
@@ -166,7 +205,9 @@ export class OrdersService {
     if (!order || order.deletedAt) {
       throw new NotFoundException(`Order with id "${id}" not found`);
     }
-    return OrderResponseDto.fromEntity(order);
+    const dto = OrderResponseDto.fromEntity(order);
+    dto.payment = await this.paymentFor(order.id);
+    return dto;
   }
 
   // Customers may back out only while the order is pending (not yet accepted).
@@ -258,7 +299,9 @@ export class OrdersService {
     if (!order || order.deletedAt) {
       throw new NotFoundException(`Order with id "${id}" not found`);
     }
-    return OrderResponseDto.fromEntity(order);
+    const dto = OrderResponseDto.fromEntity(order);
+    dto.payment = await this.paymentFor(order.id);
+    return dto;
   }
 
   async updateStatus(
@@ -295,6 +338,8 @@ export class OrdersService {
     return this.findOneAdmin(id);
   }
 
+  // Manual override (refunds, gateway-outage corrections). Guarded so an
+  // admin can't produce nonsense like paid -> pending.
   async updatePaymentStatus(
     id: string,
     paymentStatus: PaymentStatus,
@@ -302,6 +347,11 @@ export class OrdersService {
     const order = await this.orderRepository.findOne({ where: { id } });
     if (!order) {
       throw new NotFoundException(`Order with id "${id}" not found`);
+    }
+    if (!PAYMENT_TRANSITIONS[order.paymentStatus].includes(paymentStatus)) {
+      throw new ConflictException(
+        `Cannot move payment from "${order.paymentStatus}" to "${paymentStatus}"`,
+      );
     }
     order.paymentStatus = paymentStatus;
     await this.orderRepository.save(order);

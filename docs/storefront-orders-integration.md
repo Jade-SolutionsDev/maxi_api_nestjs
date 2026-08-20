@@ -85,13 +85,14 @@ pending → confirmed → processing → shipped → delivered
   here on, only the back office can cancel.
 - `delivered` / `cancelled` — terminal.
 
-`paymentStatus`: `pending | paid | failed | refunded`. **No payment platform is
-integrated yet** — payments are settled manually by the back office, so after
-checkout the status stays `pending` until an admin marks it. The checkout
-response reserves a `redirectUrl` field: when a gateway is integrated, it will
-contain the hosted-checkout URL to send the customer to; today it is absent.
-Poll `GET /api/storefront/orders/:id` (or refetch on focus) to reflect status
-changes.
+`paymentStatus`: `pending | paid | failed | refunded`. Payments run through
+**Mi Billetera** (crypto charges): the checkout response includes a `payment`
+object with the deposit instructions, and the order becomes `paid` only when
+the charge reaches `SUCCEEDED` (webhook or poll). Full contract — rendering,
+polling cadence, retries — in
+[mibilletera-payments-integration.md](./mibilletera-payments-integration.md).
+When the gateway is not configured for an environment, payments fall back to
+manual back-office settlement.
 
 ### Cancel
 

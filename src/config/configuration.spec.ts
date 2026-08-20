@@ -3,6 +3,7 @@ import configuration, {
   clerkConfig,
   corsConfig,
   databaseConfig,
+  mibiConfig,
 } from './configuration';
 
 describe('configuration', () => {
@@ -19,6 +20,11 @@ describe('configuration', () => {
     delete process.env.CORS_ORIGINS;
     delete process.env.CORS_CREDENTIALS;
     delete process.env.NODE_ENV;
+    delete process.env.MIBI_KEY_ID;
+    delete process.env.MIBI_SECRET_KEY;
+    delete process.env.MIBI_WEBHOOK_SECRET;
+    delete process.env.MIBI_API_BASE;
+    delete process.env.MIBI_CURRENCY;
   });
 
   afterAll(() => {
@@ -120,5 +126,35 @@ describe('configuration', () => {
   it('should default CORS origins to empty in non-development', () => {
     process.env.NODE_ENV = 'production';
     expect(corsConfig().origins).toEqual([]);
+  });
+
+  it('mibi is disabled without keys and defaults to the production base URL', () => {
+    const config = mibiConfig();
+    expect(config.enabled).toBe(false);
+    expect(config.baseUrl).toBe('https://mibilletera.cu');
+    expect(config.webhookSecret).toBeUndefined();
+    expect(config.currency).toBe('USD');
+  });
+
+  it('mibi settlement currency is configurable and normalized to uppercase', () => {
+    process.env.MIBI_CURRENCY = 'usdt';
+    expect(mibiConfig().currency).toBe('USDT');
+  });
+
+  it('mibi enables when both keys are present', () => {
+    process.env.NODE_ENV = 'development';
+    process.env.MIBI_KEY_ID = 'mb_key_x';
+    process.env.MIBI_SECRET_KEY = 'mb_secret_x';
+    process.env.MIBI_API_BASE = 'https://dev.mibilletera.cu/';
+    const config = mibiConfig();
+    expect(config.enabled).toBe(true);
+    expect(config.baseUrl).toBe('https://dev.mibilletera.cu'); // trailing slash trimmed
+  });
+
+  it('mibi never enables under NODE_ENV=test (no real charges from e2e)', () => {
+    process.env.NODE_ENV = 'test';
+    process.env.MIBI_KEY_ID = 'mb_key_x';
+    process.env.MIBI_SECRET_KEY = 'mb_secret_x';
+    expect(mibiConfig().enabled).toBe(false);
   });
 });

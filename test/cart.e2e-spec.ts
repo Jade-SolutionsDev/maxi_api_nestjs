@@ -56,7 +56,13 @@ describe('Cart (e2e)', () => {
       }),
     );
     productId = product.id;
-    // 5 units of stock at one storage.
+    // 5 units of stock at one ACTIVE storage — availability only counts
+    // enabled stock_locations, so the location row must exist.
+    await cartItems.query(
+      `INSERT INTO stock_locations (id, name, is_active)
+       VALUES ('00000000-0000-0000-0000-000000000002', 'E2E Storage', true)
+       ON CONFLICT (id) DO NOTHING`,
+    );
     await cartItems.query(
       `INSERT INTO inventory (location_id, product_id, quantity)
        VALUES ('00000000-0000-0000-0000-000000000002', $1, 5)`,

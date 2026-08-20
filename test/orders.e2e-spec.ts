@@ -81,6 +81,14 @@ describe('Orders (e2e)', () => {
       }),
     );
     productId = product.id;
+    // Availability only counts enabled stock_locations — the storage row must
+    // exist and be active.
+    await clients.query(
+      `INSERT INTO stock_locations (id, name, is_active)
+       VALUES ($1, 'E2E Storage', true)
+       ON CONFLICT (id) DO NOTHING`,
+      [locationId],
+    );
     await inventory.save(
       inventory.create({ locationId, productId, quantity: 5 }),
     );

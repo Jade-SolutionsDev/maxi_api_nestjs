@@ -38,6 +38,21 @@ export interface StorageConfig {
   forcePathStyle: boolean;
 }
 
+export interface MibiConfig {
+  keyId: string | undefined;
+  secretKey: string | undefined;
+  webhookSecret: string | undefined;
+  baseUrl: string;
+  /**
+   * Settlement currency for charges. MUST match a receiving account bound to
+   * the merchant payment account at Mi Billetera, or charge creation fails
+   * with "No active receiving account is bound for currency '<X>'".
+   */
+  currency: string;
+  /** Gateway active when both API keys are present; falls back to manual payments otherwise. */
+  enabled: boolean;
+}
+
 export interface StorefrontConfig {
   /** Public base URL of the Next.js storefront (no trailing slash). */
   url: string | undefined;
@@ -53,6 +68,7 @@ export interface AppConfig {
   auth: AuthConfig;
   notifications: NotificationsConfig;
   storage: StorageConfig;
+  mibi: MibiConfig;
   storefront: StorefrontConfig;
   nodeEnv: string;
   /** Number of reverse proxies in front of the API (Express `trust proxy`).
@@ -124,6 +140,24 @@ export const storageConfig = (): StorageConfig => {
   };
 };
 
+export const mibiConfig = (): MibiConfig => {
+  const keyId = process.env.MIBI_KEY_ID;
+  const secretKey = process.env.MIBI_SECRET_KEY;
+  return {
+    keyId,
+    secretKey,
+    webhookSecret: process.env.MIBI_WEBHOOK_SECRET,
+    baseUrl: (process.env.MIBI_API_BASE ?? 'https://mibilletera.cu').replace(
+      /\/$/,
+      '',
+    ),
+    currency: (process.env.MIBI_CURRENCY ?? 'USD').toUpperCase(),
+    // Never bind the live gateway in tests — e2e checkouts must not create
+    // real charges just because .env carries production keys.
+    enabled: !!(keyId && secretKey) && process.env.NODE_ENV !== 'test',
+  };
+};
+
 export const corsConfig = (): CorsConfig => {
   const raw = process.env.CORS_ORIGINS ?? '';
   const defaultOrigins =
@@ -153,6 +187,7 @@ export default (): AppConfig => ({
   auth: authConfig(),
   notifications: notificationsConfig(),
   storage: storageConfig(),
+  mibi: mibiConfig(),
   storefront: storefrontConfig(),
   nodeEnv: process.env.NODE_ENV ?? 'development',
   trustProxyHops: parseInt(process.env.TRUST_PROXY_HOPS ?? '1', 10),
