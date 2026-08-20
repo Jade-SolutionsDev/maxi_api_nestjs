@@ -1,5 +1,6 @@
 import { Logger, ValidationPipe } from '@nestjs/common';
 import { NestFactory } from '@nestjs/core';
+import { NestExpressApplication } from '@nestjs/platform-express';
 import { json } from 'express';
 import helmet from 'helmet';
 import { IncomingMessage, ServerResponse } from 'http';
@@ -21,8 +22,15 @@ interface RequestWithRawBody extends IncomingMessage {
 }
 
 async function bootstrap() {
-  const app = await NestFactory.create(AppModule, { bodyParser: false });
+  const app = await NestFactory.create<NestExpressApplication>(AppModule, {
+    bodyParser: false,
+  });
   const configService = app.get(ConfigService);
+
+  // Trust the reverse proxy (Traefik) so req.ip is the real client from
+  // X-Forwarded-For, not the proxy's address. Without this, rate limiting keys
+  // every client to one bucket. Exact hop count is spoof-safe (MxH-0066).
+  app.set('trust proxy', configService.get<number>('trustProxyHops') ?? 1);
 
   // Security headers. The API must be safe on its own, not rely on a proxy.
   // helmet() also strips X-Powered-By (its hidePoweredBy default).

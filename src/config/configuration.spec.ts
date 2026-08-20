@@ -1,4 +1,5 @@
 import configuration, {
+  authConfig,
   clerkConfig,
   corsConfig,
   databaseConfig,
@@ -43,6 +44,30 @@ describe('configuration', () => {
   it('should read PORT from environment', () => {
     process.env.PORT = '8080';
     expect(configuration().port).toBe(8080);
+  });
+
+  it('should default trustProxyHops to 1 and read TRUST_PROXY_HOPS', () => {
+    expect(configuration().trustProxyHops).toBe(1);
+    process.env.TRUST_PROXY_HOPS = '2';
+    expect(configuration().trustProxyHops).toBe(2);
+  });
+
+  describe('allowUnverifiedWebhooks', () => {
+    it('is honored in local/test when the flag is set', () => {
+      process.env.ALLOW_UNVERIFIED_WEBHOOKS = 'true';
+      process.env.NODE_ENV = 'development';
+      expect(authConfig().allowUnverifiedWebhooks).toBe(true);
+      process.env.NODE_ENV = 'test';
+      expect(authConfig().allowUnverifiedWebhooks).toBe(true);
+    });
+
+    it('is NEVER honored in a deployed environment, even with the flag set', () => {
+      process.env.ALLOW_UNVERIFIED_WEBHOOKS = 'true';
+      for (const env of ['staging', 'production']) {
+        process.env.NODE_ENV = env;
+        expect(authConfig().allowUnverifiedWebhooks).toBe(false);
+      }
+    });
   });
 
   it('should read DATABASE_URL from environment', () => {

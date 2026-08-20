@@ -55,7 +55,18 @@ export interface AppConfig {
   storage: StorageConfig;
   storefront: StorefrontConfig;
   nodeEnv: string;
+  /** Number of reverse proxies in front of the API (Express `trust proxy`).
+   *  Makes req.ip resolve to the real client from X-Forwarded-For, so rate
+   *  limiting is per-client instead of per-proxy. Set to the exact hop count
+   *  (spoof-safe); 1 = a single Traefik. */
+  trustProxyHops: number;
 }
+
+/** True only for local/test — never a deployed environment. */
+const isLocalEnv = (): boolean => {
+  const env = process.env.NODE_ENV ?? 'development';
+  return env === 'development' || env === 'test';
+};
 
 export const databaseConfig = (): DatabaseConfig => {
   const isTest = process.env.NODE_ENV === 'test';
@@ -80,7 +91,10 @@ export const clerkConfig = (): ClerkConfig => ({
 
 export const authConfig = (): AuthConfig => ({
   mockEnabled: process.env.MOCK_AUTH_ENABLED === 'true',
-  allowUnverifiedWebhooks: process.env.ALLOW_UNVERIFIED_WEBHOOKS === 'true',
+  // The unsigned-webhook escape hatch is honored ONLY in local/test, never in a
+  // deployed environment — even if the flag is left set by mistake.
+  allowUnverifiedWebhooks:
+    isLocalEnv() && process.env.ALLOW_UNVERIFIED_WEBHOOKS === 'true',
 });
 
 export const notificationsConfig = (): NotificationsConfig => ({
@@ -141,4 +155,5 @@ export default (): AppConfig => ({
   storage: storageConfig(),
   storefront: storefrontConfig(),
   nodeEnv: process.env.NODE_ENV ?? 'development',
+  trustProxyHops: parseInt(process.env.TRUST_PROXY_HOPS ?? '1', 10),
 });
