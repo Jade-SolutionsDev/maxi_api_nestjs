@@ -32,9 +32,15 @@ import { WebhooksModule } from './webhooks/webhooks.module';
     // Global rate limiting (MxH-0066). Generous default; sensitive routes tighten
     // it with @Throttle (see STRICT_THROTTLE). Skipped under test to keep e2e
     // runs, which fire many requests from one IP, deterministic.
+    // THROTTLE_DISABLED=true is the explicit LOCAL opt-out: on one machine every
+    // app shares 127.0.0.1's bucket and dev traffic trips the limit. Deployed
+    // environments never set it, so the control stays fail-safe (default-on,
+    // no NODE_ENV dependency — the fail-open class MxH-0076 removed).
     ThrottlerModule.forRoot({
       throttlers: [{ ttl: 60_000, limit: 120 }],
-      skipIf: () => process.env.NODE_ENV === 'test',
+      skipIf: () =>
+        process.env.NODE_ENV === 'test' ||
+        process.env.THROTTLE_DISABLED === 'true',
     }),
     TypeOrmModule.forRootAsync({
       imports: [ConfigModule],
