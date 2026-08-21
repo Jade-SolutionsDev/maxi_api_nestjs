@@ -84,6 +84,12 @@ export class PaymentMethodsService implements OnModuleInit {
     }
   }
 
+  /** code -> display label, for rows that only need to name the method. */
+  async labelsByCode(): Promise<Map<string, string>> {
+    const methods = await this.methodRepository.find();
+    return new Map(methods.map((method) => [method.code, method.label]));
+  }
+
   gatewayFor(code: string): PaymentGateway {
     const gateway = this.gateways.find((g) => g.code === code);
     if (!gateway) {

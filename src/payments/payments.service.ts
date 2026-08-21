@@ -7,9 +7,10 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { In, Repository } from 'typeorm';
 import { Order, PaymentStatus } from '../orders/entities/order.entity';
 import { PaymentChargeResponseDto } from './dto/payment-charge-response.dto';
+import { OrderPaymentMethodDto } from './dto/payment-method-response.dto';
 import {
   ChargeStatus,
   PaymentCharge,
@@ -57,6 +58,33 @@ export class PaymentsService {
       charge,
       this.methodsService.gatewayFor(charge.provider).kind,
     );
+  }
+
+  /**
+   * The method each of these orders was last paid with, keyed by order id.
+   * One query for the whole page — naming the gateway must never cost a query
+   * per row. Newest attempt wins, so switching method is reflected.
+   */
+  async latestMethodsFor(
+    orderIds: string[],
+  ): Promise<Map<string, OrderPaymentMethodDto>> {
+    if (orderIds.length === 0) return new Map();
+
+    const charges = await this.chargeRepository.find({
+      where: { orderId: In(orderIds) },
+      order: { createdAt: 'DESC' },
+    });
+    const labels = await this.methodsService.labelsByCode();
+
+    const latest = new Map<string, OrderPaymentMethodDto>();
+    for (const charge of charges) {
+      if (latest.has(charge.orderId)) continue;
+      latest.set(charge.orderId, {
+        code: charge.provider,
+        label: labels.get(charge.provider) ?? charge.provider,
+      });
+    }
+    return latest;
   }
 
   toDto(charge: PaymentCharge): PaymentChargeResponseDto {

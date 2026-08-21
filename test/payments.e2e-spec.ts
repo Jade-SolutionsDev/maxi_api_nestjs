@@ -17,6 +17,10 @@ import {
 } from '../src/payments/entities/payment-charge.entity';
 import { configureApp } from './test-setup';
 
+// Mock auth backend: tokens shaped `mock:<clerkId>` authenticate as that
+// clerkId (see MockAuthProvider). Must be set before the module compiles.
+process.env.MOCK_AUTH_ENABLED = 'true';
+
 const SECRET = 'whsec_e2e_test';
 process.env.MIBI_WEBHOOK_SECRET = SECRET;
 
@@ -244,6 +248,42 @@ describe('payment webhooks (e2e)', () => {
         .expect(200);
       // Parsed as a Mi Billetera event, whose reference field is absent.
       expect(res.body.data).toEqual({ processed: false });
+    });
+  });
+
+  describe('order list', () => {
+    it('names the method each listed order was paid with', async () => {
+      const res = await request(app.getHttpServer())
+        .get('/api/storefront/orders')
+        .set('Authorization', 'Bearer mock:clerk_pay_1')
+        .expect(200);
+
+      const [order] = res.body.data.data;
+      expect(order.paymentMethod).toEqual({
+        code: 'mibilletera',
+        label: expect.any(String),
+      });
+    });
+
+    it('reports the newest attempt when the customer switched method', async () => {
+      await charges.save(
+        charges.create({
+          orderId,
+          provider: 'tropipay',
+          reference: 'switched_to_tropipay',
+          idempotencyKey: 'switched_to_tropipay',
+          status: ChargeStatus.REQUIRES_ACTION,
+          amount: '30.00',
+          currency: 'USD',
+        }),
+      );
+
+      const res = await request(app.getHttpServer())
+        .get('/api/storefront/orders')
+        .set('Authorization', 'Bearer mock:clerk_pay_1')
+        .expect(200);
+
+      expect(res.body.data.data[0].paymentMethod.code).toBe('tropipay');
     });
   });
 });

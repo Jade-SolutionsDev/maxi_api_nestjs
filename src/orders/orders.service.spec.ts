@@ -79,6 +79,7 @@ describe('OrdersService', () => {
   let paymentsService: {
     createChargeForOrder: jest.Mock;
     latestChargeDto: jest.Mock;
+    latestMethodsFor: jest.Mock;
   };
   let paymentMethodsService: { resolve: jest.Mock };
   let orderItemRepo: { save: jest.Mock; create: jest.Mock };
@@ -110,6 +111,7 @@ describe('OrdersService', () => {
     paymentsService = {
       createChargeForOrder: jest.fn().mockResolvedValue({ id: 'charge-1' }),
       latestChargeDto: jest.fn().mockResolvedValue(undefined),
+      latestMethodsFor: jest.fn().mockResolvedValue(new Map()),
     };
     paymentMethodsService = {
       resolve: jest.fn().mockResolvedValue({ code: 'manual' }),
@@ -224,6 +226,45 @@ describe('OrdersService', () => {
         ConflictException,
       );
       expect(inventoryService.reserve).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('findForClient', () => {
+    it('labels each listed order with the method it was paid with', async () => {
+      orderRepo.findAndCount.mockResolvedValue([[makeOrder()], 1]);
+      paymentsService.latestMethodsFor.mockResolvedValue(
+        new Map([
+          ['order-1', { code: 'tropipay', label: 'Tarjeta (Tropipay)' }],
+        ]),
+      );
+
+      const result = await service.findForClient('client-1');
+
+      expect(paymentsService.latestMethodsFor).toHaveBeenCalledWith([
+        'order-1',
+      ]);
+      expect(result.data[0].paymentMethod).toEqual({
+        code: 'tropipay',
+        label: 'Tarjeta (Tropipay)',
+      });
+    });
+
+    it('leaves the method undefined for an order with no attempt', async () => {
+      orderRepo.findAndCount.mockResolvedValue([[makeOrder()], 1]);
+
+      const result = await service.findForClient('client-1');
+
+      expect(result.data[0].paymentMethod).toBeUndefined();
+    });
+
+    it('excludes soft-deleted orders', async () => {
+      await service.findForClient('client-1');
+
+      expect(orderRepo.findAndCount).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: expect.objectContaining({ deletedAt: expect.anything() }),
+        }),
+      );
     });
   });
 

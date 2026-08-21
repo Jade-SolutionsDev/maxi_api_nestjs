@@ -1,4 +1,4 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import {
   type PaymentLink,
@@ -25,11 +25,31 @@ export interface TropipayMovement {
  * signature check. Everything payment-shaped lives in TropipayGateway.
  */
 @Injectable()
-export class TropipayClient {
+export class TropipayClient implements OnModuleInit {
   private readonly logger = new Logger(TropipayClient.name);
   private instance: Tropipay | null = null;
 
   constructor(private readonly configService: ConfigService) {}
+
+  /**
+   * Warm the OAuth token in the background. The login round-trip costs seconds
+   * against the gateway and the SDK caches the token, so paying it at boot
+   * keeps it off the first customer's checkout. Never awaited and never fatal:
+   * an unreachable gateway must not hold up or break startup.
+   */
+  onModuleInit(): void {
+    if (!this.config.configured) return;
+
+    void this.sdk
+      .login()
+      .catch((err: unknown) =>
+        this.logger.warn(
+          `Could not pre-authenticate with Tropipay: ${
+            err instanceof Error ? err.message : String(err)
+          }`,
+        ),
+      );
+  }
 
   get config(): TropipayConfig {
     return this.configService.get<PaymentsConfig>('payments')!.tropipay;

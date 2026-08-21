@@ -66,6 +66,21 @@ export class OrdersService {
     private readonly dataSource: DataSource,
   ) {}
 
+  // List rows carry the method name (not the whole attempt): one query for the
+  // page, so naming the gateway never costs a query per row.
+  private async withPaymentMethods(
+    orders: Order[],
+  ): Promise<OrderResponseDto[]> {
+    const methods = await this.paymentsService.latestMethodsFor(
+      orders.map((order) => order.id),
+    );
+    return orders.map((order) => {
+      const dto = OrderResponseDto.fromEntity(order);
+      dto.paymentMethod = methods.get(order.id);
+      return dto;
+    });
+  }
+
   // ---------------- Storefront ----------------
 
   // Turns the client's cart into a pending order: snapshots names/prices from
@@ -179,7 +194,7 @@ export class OrdersService {
       take: params.limit,
     });
     return buildPaginatedResponse(
-      orders.map((o) => OrderResponseDto.fromEntity(o)),
+      await this.withPaymentMethods(orders),
       total,
       params.page,
       params.limit,
@@ -200,6 +215,9 @@ export class OrdersService {
     }
     const dto = OrderResponseDto.fromEntity(order);
     dto.payment = await this.paymentsService.latestChargeDto(order.id);
+    dto.paymentMethod = (
+      await this.paymentsService.latestMethodsFor([order.id])
+    ).get(order.id);
     return dto;
   }
 
@@ -276,7 +294,7 @@ export class OrdersService {
 
     const [orders, total] = await qb.getManyAndCount();
     return buildPaginatedResponse(
-      orders.map((o) => OrderResponseDto.fromEntity(o)),
+      await this.withPaymentMethods(orders),
       total,
       page,
       limit,
@@ -294,6 +312,9 @@ export class OrdersService {
     }
     const dto = OrderResponseDto.fromEntity(order);
     dto.payment = await this.paymentsService.latestChargeDto(order.id);
+    dto.paymentMethod = (
+      await this.paymentsService.latestMethodsFor([order.id])
+    ).get(order.id);
     return dto;
   }
 

@@ -1,6 +1,7 @@
 import { Order, OrderStatus, PaymentStatus } from '../entities/order.entity';
 import { OrderItem } from '../entities/order-item.entity';
 import { PaymentChargeResponseDto } from '../../payments/dto/payment-charge-response.dto';
+import { OrderPaymentMethodDto } from '../../payments/dto/payment-method-response.dto';
 
 export class OrderItemResponseDto {
   productId: string;
@@ -48,6 +49,11 @@ export class OrderResponseDto {
    * Present on detail responses; absent when no attempt was ever created.
    */
   payment?: PaymentChargeResponseDto;
+  /**
+   * Gateway the latest attempt used, named for display. Present on lists too,
+   * where the full attempt would be far too much to carry per row.
+   */
+  paymentMethod?: OrderPaymentMethodDto;
   createdAt: Date;
   updatedAt: Date;
 

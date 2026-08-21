@@ -60,3 +60,9 @@ export class StorefrontPaymentMethodDto {
     return dto;
   }
 }
+
+/** How an order was paid, for list rows that only need to name the method. */
+export class OrderPaymentMethodDto {
+  code: string;
+  label: string;
+}
