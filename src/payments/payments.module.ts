@@ -1,6 +1,8 @@
 import { Module, forwardRef } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { AuthModule } from '../auth/auth.module';
+import { InventoryModule } from '../inventory/inventory.module';
+import { OrderItem } from '../orders/entities/order-item.entity';
 import { Order } from '../orders/entities/order.entity';
 import { PaymentCharge } from './entities/payment-charge.entity';
 import { PaymentMethod } from './entities/payment-method.entity';
@@ -9,6 +11,8 @@ import { MibiClient } from './gateways/mibilletera/mibi-client';
 import { MibilleteraGateway } from './gateways/mibilletera/mibilletera.gateway';
 import { TropipayClient } from './gateways/tropipay/tropipay-client';
 import { TropipayGateway } from './gateways/tropipay/tropipay.gateway';
+import { OrderExpiryController } from './order-expiry.controller';
+import { OrderExpiryService } from './order-expiry.service';
 import { PaymentMethodsController } from './payment-methods.controller';
 import { PaymentMethodsService } from './payment-methods.service';
 import { PAYMENT_GATEWAYS } from './payment-gateway.interface';
@@ -26,17 +30,20 @@ import { StorefrontPaymentMethodsController } from './storefront-payment-methods
  */
 @Module({
   imports: [
-    TypeOrmModule.forFeature([Order, PaymentCharge, PaymentMethod]),
+    TypeOrmModule.forFeature([Order, OrderItem, PaymentCharge, PaymentMethod]),
     forwardRef(() => AuthModule),
+    InventoryModule,
   ],
   controllers: [
     PaymentMethodsController,
     StorefrontPaymentMethodsController,
     PaymentsWebhookController,
+    OrderExpiryController,
   ],
   providers: [
     PaymentsService,
     PaymentMethodsService,
+    OrderExpiryService,
     MibiClient,
     TropipayClient,
     ManualGateway,
@@ -48,6 +55,6 @@ import { StorefrontPaymentMethodsController } from './storefront-payment-methods
       useFactory: (...gateways: unknown[]) => gateways,
     },
   ],
-  exports: [PaymentsService, PaymentMethodsService],
+  exports: [PaymentsService, PaymentMethodsService, OrderExpiryService],
 })
 export class PaymentsModule {}

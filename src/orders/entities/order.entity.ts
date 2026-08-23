@@ -23,6 +23,21 @@ export enum OrderStatus {
   CANCELLED = 'cancelled',
 }
 
+/**
+ * Why an order was cancelled. Null for an ordinary customer/admin cancellation;
+ * the two values below are set by the expiry sweep and by a payment that
+ * arrived after it (see OrderExpiryService).
+ */
+export enum CancellationReason {
+  /** Expired unpaid: the hold was released and the order closed. */
+  PAYMENT_NOT_RECEIVED = 'payment_not_received',
+  /**
+   * Paid after expiring, but the stock was gone by then. Money is in, goods
+   * cannot be served: administration must contact the customer and refund.
+   */
+  PAID_AFTER_EXPIRY_OUT_OF_STOCK = 'paid_after_expiry_out_of_stock',
+}
+
 export enum PaymentStatus {
   PENDING = 'pending',
   PAID = 'paid',
@@ -102,6 +117,16 @@ export class Order {
 
   @Column({ name: 'customer_notes', type: 'text', nullable: true })
   customerNotes: string | null;
+
+  // Only meaningful while status = cancelled. varchar rather than a pg enum so
+  // a new reason never needs a migration on a column that is purely narrative.
+  @Column({
+    name: 'cancellation_reason',
+    type: 'varchar',
+    length: 40,
+    nullable: true,
+  })
+  cancellationReason: CancellationReason | null;
 
   @OneToMany(() => OrderItem, (item) => item.order)
   items?: OrderItem[];

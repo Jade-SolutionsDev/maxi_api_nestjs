@@ -1,7 +1,19 @@
-import { BadGatewayException, BadRequestException } from '@nestjs/common';
+import {
+  BadGatewayException,
+  BadRequestException,
+  ConflictException,
+} from '@nestjs/common';
 import { Test, TestingModule } from '@nestjs/testing';
 import { getRepositoryToken } from '@nestjs/typeorm';
-import { Order, PaymentStatus } from '../orders/entities/order.entity';
+import { DataSource } from 'typeorm';
+import { InventoryService } from '../inventory/inventory.service';
+import { OrderItem } from '../orders/entities/order-item.entity';
+import {
+  CancellationReason,
+  Order,
+  OrderStatus,
+  PaymentStatus,
+} from '../orders/entities/order.entity';
 import { ChargeStatus, PaymentCharge } from './entities/payment-charge.entity';
 import {
   GatewayCharge,
@@ -98,6 +110,8 @@ describe('PaymentsService', () => {
   };
   let orderRepo: { findOne: jest.Mock; save: jest.Mock };
   let methods: { gatewayFor: jest.Mock; resolve: jest.Mock };
+  let orderItemRepo: { find: jest.Mock };
+  let inventory: { reserve: jest.Mock };
 
   beforeEach(async () => {
     gateway = new FakeGateway();
@@ -115,13 +129,29 @@ describe('PaymentsService', () => {
       gatewayFor: jest.fn().mockReturnValue(gateway),
       resolve: jest.fn().mockResolvedValue(gateway),
     };
+    orderItemRepo = {
+      find: jest
+        .fn()
+        .mockResolvedValue([{ productId: 'prod-1', quantity: 2 }]),
+    };
+    inventory = { reserve: jest.fn() };
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         PaymentsService,
         { provide: getRepositoryToken(PaymentCharge), useValue: chargeRepo },
         { provide: getRepositoryToken(Order), useValue: orderRepo },
+        { provide: getRepositoryToken(OrderItem), useValue: orderItemRepo },
         { provide: PaymentMethodsService, useValue: methods },
+        { provide: InventoryService, useValue: inventory },
+        {
+          provide: DataSource,
+          useValue: {
+            transaction: jest.fn((cb: (m: unknown) => unknown) =>
+              cb({ getRepository: () => orderRepo }),
+            ),
+          },
+        },
       ],
     }).compile();
 
@@ -347,6 +377,79 @@ describe('PaymentsService', () => {
       expect(chargeRepo.save).toHaveBeenCalledWith(
         expect.objectContaining({ redirectUrl: 'https://tppay.me/abc' }),
       );
+    });
+  });
+
+  describe('payment arriving after the order expired', () => {
+    const expiredOrder = () =>
+      makeOrder({
+        status: OrderStatus.CANCELLED,
+        cancellationReason: CancellationReason.PAYMENT_NOT_RECEIVED,
+      });
+
+    const succeed = () => {
+      gateway.parseWebhook.mockReturnValue({
+        reference: 'REF123',
+        charge: { status: ChargeStatus.SUCCEEDED, rawPayload: {} },
+      });
+      chargeRepo.findOne.mockResolvedValue(makeCharge());
+    };
+
+    it('reinstates the order when the stock is still there', async () => {
+      orderRepo.findOne.mockResolvedValue(expiredOrder());
+      succeed();
+
+      await service.handleWebhook('fake', '{}', {});
+
+      expect(inventory.reserve).toHaveBeenCalledWith(
+        expect.anything(),
+        'order-1',
+        'prod-1',
+        2,
+      );
+      expect(orderRepo.save).toHaveBeenCalledWith(
+        expect.objectContaining({
+          status: OrderStatus.PENDING,
+          paymentStatus: PaymentStatus.PAID,
+          cancellationReason: null,
+        }),
+      );
+    });
+
+    it('flags it for refund when the stock is gone', async () => {
+      orderRepo.findOne.mockResolvedValue(expiredOrder());
+      inventory.reserve.mockRejectedValue(new ConflictException('no stock'));
+      succeed();
+
+      await service.handleWebhook('fake', '{}', {});
+
+      expect(orderRepo.save).toHaveBeenCalledWith(
+        expect.objectContaining({
+          status: OrderStatus.CANCELLED,
+          paymentStatus: PaymentStatus.PAID,
+          cancellationReason:
+            CancellationReason.PAID_AFTER_EXPIRY_OUT_OF_STOCK,
+        }),
+      );
+    });
+
+    it('leaves an order cancelled for any other reason alone', async () => {
+      orderRepo.findOne.mockResolvedValue(
+        makeOrder({ status: OrderStatus.CANCELLED, cancellationReason: null }),
+      );
+      succeed();
+
+      await service.handleWebhook('fake', '{}', {});
+
+      expect(inventory.reserve).not.toHaveBeenCalled();
+    });
+
+    it('does not re-reserve for an ordinary payment on a live order', async () => {
+      succeed();
+
+      await service.handleWebhook('fake', '{}', {});
+
+      expect(inventory.reserve).not.toHaveBeenCalled();
     });
   });
 });
