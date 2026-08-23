@@ -45,8 +45,8 @@ export class OrderExpiryController {
   // Fail closed: an unset secret disables the route rather than leaving an
   // unauthenticated endpoint that cancels orders.
   private assertSecret(provided?: string): void {
-    const expected = this.configService.get<PaymentsConfig>('payments')?.expiry
-      .cronSecret;
+    const expected =
+      this.configService.get<PaymentsConfig>('payments')?.expiry.cronSecret;
     if (!expected) {
       throw new ServiceUnavailableException(
         'CRON_SECRET is not configured; the expiry sweep is disabled',

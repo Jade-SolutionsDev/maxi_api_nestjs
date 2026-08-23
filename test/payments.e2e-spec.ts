@@ -338,7 +338,10 @@ describe('payment webhooks (e2e)', () => {
 
       const res = await expire(CRON_SECRET).expect(200);
 
-      expect(res.body.data).toMatchObject({ cancelled: 1, orderIds: [orderId] });
+      expect(res.body.data).toMatchObject({
+        cancelled: 1,
+        orderIds: [orderId],
+      });
       const order = await orders.findOneByOrFail({ id: orderId });
       expect(order.status).toBe(OrderStatus.CANCELLED);
       expect(order.cancellationReason).toBe('payment_not_received');

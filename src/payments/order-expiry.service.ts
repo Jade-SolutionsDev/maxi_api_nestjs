@@ -52,7 +52,7 @@ export class OrderExpiryService {
   }
 
   async sweep(): Promise<ExpirySweepResult> {
-    const { gatewayMinutes, manualHours } = this.config;
+    const { gatewayMinutes } = this.config;
     const now = Date.now();
     // Nothing younger than the shortest window can possibly be due, so the
     // database never hands us the whole pending backlog.

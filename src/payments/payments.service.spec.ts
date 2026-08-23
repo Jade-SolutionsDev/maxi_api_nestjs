@@ -130,9 +130,7 @@ describe('PaymentsService', () => {
       resolve: jest.fn().mockResolvedValue(gateway),
     };
     orderItemRepo = {
-      find: jest
-        .fn()
-        .mockResolvedValue([{ productId: 'prod-1', quantity: 2 }]),
+      find: jest.fn().mockResolvedValue([{ productId: 'prod-1', quantity: 2 }]),
     };
     inventory = { reserve: jest.fn() };
 
@@ -427,8 +425,7 @@ describe('PaymentsService', () => {
         expect.objectContaining({
           status: OrderStatus.CANCELLED,
           paymentStatus: PaymentStatus.PAID,
-          cancellationReason:
-            CancellationReason.PAID_AFTER_EXPIRY_OUT_OF_STOCK,
+          cancellationReason: CancellationReason.PAID_AFTER_EXPIRY_OUT_OF_STOCK,
         }),
       );
     });

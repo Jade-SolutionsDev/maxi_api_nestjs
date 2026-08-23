@@ -105,7 +105,10 @@ describe('OrderExpiryService', () => {
 
   it('cancels an expired gateway order and releases its hold', async () => {
     const order = makeOrder();
-    const result = await sweepWith(order, makeCharge({ createdAt: ago(31 * MINUTE) }));
+    const result = await sweepWith(
+      order,
+      makeCharge({ createdAt: ago(31 * MINUTE) }),
+    );
 
     expect(inventory.releaseReservations).toHaveBeenCalledWith(
       expect.anything(),
@@ -115,7 +118,11 @@ describe('OrderExpiryService', () => {
       status: OrderStatus.CANCELLED,
       cancellationReason: CancellationReason.PAYMENT_NOT_RECEIVED,
     });
-    expect(result).toMatchObject({ scanned: 1, cancelled: 1, orderIds: ['order-1'] });
+    expect(result).toMatchObject({
+      scanned: 1,
+      cancelled: 1,
+      orderIds: ['order-1'],
+    });
   });
 
   it('spares a gateway order still inside its window', async () => {
@@ -135,11 +142,17 @@ describe('OrderExpiryService', () => {
 
   it('gives a manual order the long window', async () => {
     const order = makeOrder();
-    await sweepWith(order, makeCharge({ provider: 'manual', createdAt: ago(2 * HOUR) }));
+    await sweepWith(
+      order,
+      makeCharge({ provider: 'manual', createdAt: ago(2 * HOUR) }),
+    );
 
     expect(saved).toHaveLength(0);
 
-    await sweepWith(order, makeCharge({ provider: 'manual', createdAt: ago(25 * HOUR) }));
+    await sweepWith(
+      order,
+      makeCharge({ provider: 'manual', createdAt: ago(25 * HOUR) }),
+    );
 
     expect(saved[0]).toMatchObject({ status: OrderStatus.CANCELLED });
   });

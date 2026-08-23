@@ -19,6 +19,9 @@ process.env.MOCK_AUTH_ENABLED = 'true';
 const TABLES =
   'order_items, orders, inventory_reservations, cart_items, inventory, products, categories, clients, users';
 
+const CRON_SECRET = 'orders_e2e_cron';
+process.env.CRON_SECRET = CRON_SECRET;
+
 describe('Orders (e2e)', () => {
   let app: INestApplication;
   let clients: Repository<Client>;
@@ -268,5 +271,42 @@ describe('Orders (e2e)', () => {
       .expect(200);
     expect(res.body.data.meta.total).toBe(1);
     expect(res.body.data.data[0].items).toHaveLength(1);
+  });
+
+  // The expiry sweep releases holds through releaseReservations(manager, id)
+  // with no acting user. That is only safe because it touches pending orders,
+  // which can never carry a confirmed (restockable) allocation — the ledger
+  // work made that path throw when a restock has no admin behind it.
+  it('expiring an unpaid order releases its hold and returns the stock to the shop', async () => {
+    const order = await addToCartAndCheckout(3);
+
+    expect(await publicAvailability()).toBe(2);
+
+    // Both: the window runs from the newest payment attempt, and checkout
+    // just created one (the manual fallback, since no gateway is configured
+    // under NODE_ENV=test).
+    const twoDaysAgo = new Date(Date.now() - 48 * 60 * 60 * 1000);
+    await inventory.query(`UPDATE orders SET created_at = $1`, [twoDaysAgo]);
+    await inventory.query(`UPDATE payment_charges SET created_at = $1`, [
+      twoDaysAgo,
+    ]);
+
+    const res = await request(app.getHttpServer())
+      .post('/api/internal/orders/expire')
+      .set('x-cron-secret', CRON_SECRET)
+      .expect(200);
+
+    expect(res.body.data.cancelled).toBe(1);
+
+    const row = await physicalRow();
+    expect(row.reservedQuantity).toBe(0);
+    expect(row.quantity).toBe(5);
+    // Back on sale, and no phantom sale was written to the ledger.
+    expect(await publicAvailability()).toBe(5);
+    const sales = await inventory.query(
+      `SELECT count(*)::int AS n FROM inventory_operations WHERE order_id = $1`,
+      [order.id],
+    );
+    expect(sales[0].n).toBe(0);
   });
 });

@@ -227,7 +227,6 @@ export const paymentsConfig = (): PaymentsConfig => {
   };
 };
 
-
 export const corsConfig = (): CorsConfig => {
   const raw = process.env.CORS_ORIGINS ?? '';
   const defaultOrigins =
