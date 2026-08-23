@@ -2,12 +2,12 @@ import {
   BadRequestException,
   ConflictException,
   ForbiddenException,
-  Inject,
   Injectable,
+  Logger,
   NotFoundException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { DataSource, Repository } from 'typeorm';
+import { DataSource, IsNull, Repository } from 'typeorm';
 import { CartService } from '../cart/cart.service';
 import { CartItem } from '../cart/entities/cart-item.entity';
 import { Client } from '../clients/entities/client.entity';
@@ -23,10 +23,8 @@ import { CheckoutDto } from './dto/checkout.dto';
 import { OrderResponseDto } from './dto/order-response.dto';
 import { OrderItem } from './entities/order-item.entity';
 import { Order, OrderStatus, PaymentStatus } from './entities/order.entity';
-import {
-  PAYMENT_PROVIDER,
-  PaymentProvider,
-} from './payments/payment-provider.interface';
+import { PaymentMethodsService } from '../payments/payment-methods.service';
+import { PaymentsService } from '../payments/payments.service';
 
 const TRANSITIONS: Record<OrderStatus, OrderStatus[]> = {
   [OrderStatus.PENDING]: [OrderStatus.CONFIRMED, OrderStatus.CANCELLED],
@@ -35,6 +33,15 @@ const TRANSITIONS: Record<OrderStatus, OrderStatus[]> = {
   [OrderStatus.SHIPPED]: [OrderStatus.DELIVERED, OrderStatus.CANCELLED],
   [OrderStatus.DELIVERED]: [],
   [OrderStatus.CANCELLED]: [],
+};
+
+// Legal manual payment-status moves: settle or fail a pending payment, retry
+// a failed one, refund a paid one. Webhooks bypass this (gateway is truth).
+const PAYMENT_TRANSITIONS: Record<PaymentStatus, PaymentStatus[]> = {
+  [PaymentStatus.PENDING]: [PaymentStatus.PAID, PaymentStatus.FAILED],
+  [PaymentStatus.FAILED]: [PaymentStatus.PAID, PaymentStatus.PENDING],
+  [PaymentStatus.PAID]: [PaymentStatus.REFUNDED],
+  [PaymentStatus.REFUNDED]: [],
 };
 
 // Fulfillment steps a GROCER may drive; confirm/cancel (which move stock and
@@ -47,23 +54,48 @@ const GROCER_TARGETS = [
 
 @Injectable()
 export class OrdersService {
+  private readonly logger = new Logger(OrdersService.name);
+
   constructor(
     @InjectRepository(Order)
     private readonly orderRepository: Repository<Order>,
     private readonly cartService: CartService,
     private readonly inventoryService: InventoryService,
-    @Inject(PAYMENT_PROVIDER)
-    private readonly paymentProvider: PaymentProvider,
+    private readonly paymentsService: PaymentsService,
+    private readonly paymentMethodsService: PaymentMethodsService,
     private readonly dataSource: DataSource,
   ) {}
+
+  // List rows carry the method name (not the whole attempt): one query for the
+  // page, so naming the gateway never costs a query per row.
+  private async withPaymentMethods(
+    orders: Order[],
+  ): Promise<OrderResponseDto[]> {
+    const methods = await this.paymentsService.latestMethodsFor(
+      orders.map((order) => order.id),
+    );
+    return orders.map((order) => {
+      const dto = OrderResponseDto.fromEntity(order);
+      dto.paymentMethod = methods.get(order.id);
+      return dto;
+    });
+  }
 
   // ---------------- Storefront ----------------
 
   // Turns the client's cart into a pending order: snapshots names/prices from
   // the cart response (already server-computed), reserves stock per line, and
-  // clears the cart — all in one transaction.
+  // clears the cart — all in one transaction. Payment initiation runs AFTER
+  // commit: an outbound gateway call must not hold the inventory row locks,
+  // and a gateway failure must not lose the order.
   async checkout(client: Client, dto: CheckoutDto): Promise<OrderResponseDto> {
-    const cart = await this.cartService.getCart(client.id);
+    // Same municipality the order ships to, so availability is judged against
+    // the zone the customer is actually buying for.
+    const deliveryMunicipalityId =
+      dto.deliveryMunicipalityId ?? client.defaultMunicipalityId ?? undefined;
+    const cart = await this.cartService.getCart(client.id, {
+      municipalityId: deliveryMunicipalityId,
+    });
     if (cart.items.length === 0) {
       throw new BadRequestException('Cart is empty');
     }
@@ -89,8 +121,7 @@ export class OrdersService {
           subtotal: cart.subtotal.toFixed(2),
           deliveryFee: '0.00',
           total: cart.subtotal.toFixed(2),
-          deliveryMunicipalityId:
-            dto.deliveryMunicipalityId ?? client.defaultMunicipalityId,
+          deliveryMunicipalityId: deliveryMunicipalityId ?? null,
           deliveryAddress: dto.deliveryAddress ?? null,
           customerNotes: dto.customerNotes ?? null,
         }),
@@ -120,14 +151,28 @@ export class OrdersService {
         );
       }
 
-      const initiation = await this.paymentProvider.initiatePayment(order);
-      order.paymentStatus = initiation.status;
-      order.paymentRef = initiation.ref ?? null;
-      await orderRepo.save(order);
-
       await manager.getRepository(CartItem).delete({ clientId: client.id });
       return order.id;
     });
+
+    // Post-commit payment initiation: an outbound gateway call must not hold
+    // the inventory row locks, and a gateway failure must not lose the order —
+    // it survives unpaid and the customer retries via
+    // POST /storefront/orders/:id/payment.
+    try {
+      const order = (await this.orderRepository.findOne({
+        where: { id: orderId },
+      })) as Order;
+      const gateway = await this.paymentMethodsService.resolve(
+        dto.paymentMethod,
+      );
+      await this.paymentsService.createChargeForOrder(order, gateway);
+    } catch (err) {
+      this.logger.error(
+        `Payment initiation failed for order ${orderId}`,
+        err instanceof Error ? err.stack : String(err),
+      );
+    }
 
     return this.findOneForClient(client.id, orderId);
   }
@@ -139,7 +184,9 @@ export class OrdersService {
   ): Promise<PaginatedResponse<OrderResponseDto>> {
     const params = getPaginationParams({ page, limit });
     const [orders, total] = await this.orderRepository.findAndCount({
-      where: { clientId },
+      // withDeleted below is for the product join; the orders themselves must
+      // still respect their own soft delete.
+      where: { clientId, deletedAt: IsNull() },
       relations: { items: { product: true } },
       withDeleted: true, // soft-deleted products must still render on old orders
       order: { createdAt: 'DESC' },
@@ -147,7 +194,7 @@ export class OrdersService {
       take: params.limit,
     });
     return buildPaginatedResponse(
-      orders.map((o) => OrderResponseDto.fromEntity(o)),
+      await this.withPaymentMethods(orders),
       total,
       params.page,
       params.limit,
@@ -166,7 +213,12 @@ export class OrdersService {
     if (!order || order.deletedAt) {
       throw new NotFoundException(`Order with id "${id}" not found`);
     }
-    return OrderResponseDto.fromEntity(order);
+    const dto = OrderResponseDto.fromEntity(order);
+    dto.payment = await this.paymentsService.latestChargeDto(order.id);
+    dto.paymentMethod = (
+      await this.paymentsService.latestMethodsFor([order.id])
+    ).get(order.id);
+    return dto;
   }
 
   // Customers may back out only while the order is pending (not yet accepted).
@@ -242,7 +294,7 @@ export class OrdersService {
 
     const [orders, total] = await qb.getManyAndCount();
     return buildPaginatedResponse(
-      orders.map((o) => OrderResponseDto.fromEntity(o)),
+      await this.withPaymentMethods(orders),
       total,
       page,
       limit,
@@ -258,7 +310,12 @@ export class OrdersService {
     if (!order || order.deletedAt) {
       throw new NotFoundException(`Order with id "${id}" not found`);
     }
-    return OrderResponseDto.fromEntity(order);
+    const dto = OrderResponseDto.fromEntity(order);
+    dto.payment = await this.paymentsService.latestChargeDto(order.id);
+    dto.paymentMethod = (
+      await this.paymentsService.latestMethodsFor([order.id])
+    ).get(order.id);
+    return dto;
   }
 
   async updateStatus(
@@ -295,6 +352,8 @@ export class OrdersService {
     return this.findOneAdmin(id);
   }
 
+  // Manual override (refunds, gateway-outage corrections). Guarded so an
+  // admin can't produce nonsense like paid -> pending.
   async updatePaymentStatus(
     id: string,
     paymentStatus: PaymentStatus,
@@ -302,6 +361,11 @@ export class OrdersService {
     const order = await this.orderRepository.findOne({ where: { id } });
     if (!order) {
       throw new NotFoundException(`Order with id "${id}" not found`);
+    }
+    if (!PAYMENT_TRANSITIONS[order.paymentStatus].includes(paymentStatus)) {
+      throw new ConflictException(
+        `Cannot move payment from "${order.paymentStatus}" to "${paymentStatus}"`,
+      );
     }
     order.paymentStatus = paymentStatus;
     await this.orderRepository.save(order);

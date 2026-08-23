@@ -3,6 +3,7 @@ import configuration, {
   clerkConfig,
   corsConfig,
   databaseConfig,
+  paymentsConfig,
 } from './configuration';
 
 describe('configuration', () => {
@@ -19,6 +20,16 @@ describe('configuration', () => {
     delete process.env.CORS_ORIGINS;
     delete process.env.CORS_CREDENTIALS;
     delete process.env.NODE_ENV;
+    delete process.env.MIBI_KEY_ID;
+    delete process.env.MIBI_SECRET_KEY;
+    delete process.env.MIBI_WEBHOOK_SECRET;
+    delete process.env.MIBI_API_BASE;
+    delete process.env.MIBI_CURRENCY;
+    delete process.env.TROPIPAY_CLIENT_ID;
+    delete process.env.TROPIPAY_CLIENT_SECRET;
+    delete process.env.TROPIPAY_ENV;
+    delete process.env.TROPIPAY_CURRENCY;
+    delete process.env.PUBLIC_API_URL;
   });
 
   afterAll(() => {
@@ -120,5 +131,63 @@ describe('configuration', () => {
   it('should default CORS origins to empty in non-development', () => {
     process.env.NODE_ENV = 'production';
     expect(corsConfig().origins).toEqual([]);
+  });
+
+  it('mibi is unconfigured without keys and defaults to the production base URL', () => {
+    const config = paymentsConfig().mibi;
+    expect(config.configured).toBe(false);
+    expect(config.baseUrl).toBe('https://mibilletera.cu');
+    expect(config.webhookSecret).toBeUndefined();
+    expect(config.currency).toBe('USD');
+  });
+
+  it('mibi settlement currency is configurable and normalized to uppercase', () => {
+    process.env.MIBI_CURRENCY = 'usdt';
+    expect(paymentsConfig().mibi.currency).toBe('USDT');
+  });
+
+  it('mibi is configured when both keys are present', () => {
+    process.env.NODE_ENV = 'development';
+    process.env.MIBI_KEY_ID = 'mb_key_x';
+    process.env.MIBI_SECRET_KEY = 'mb_secret_x';
+    process.env.MIBI_API_BASE = 'https://dev.mibilletera.cu/';
+    const config = paymentsConfig().mibi;
+    expect(config.configured).toBe(true);
+    expect(config.baseUrl).toBe('https://dev.mibilletera.cu'); // trailing slash trimmed
+  });
+
+  it('tropipay is unconfigured without keys and defaults to the sandbox', () => {
+    const config = paymentsConfig().tropipay;
+    expect(config.configured).toBe(false);
+    expect(config.serverMode).toBe('Development');
+    expect(config.currency).toBe('USD');
+  });
+
+  it('tropipay is configured when both credentials are present', () => {
+    process.env.NODE_ENV = 'development';
+    process.env.TROPIPAY_CLIENT_ID = 'tpp_id';
+    process.env.TROPIPAY_CLIENT_SECRET = 'tpp_secret';
+    process.env.TROPIPAY_ENV = 'Production';
+    process.env.TROPIPAY_CURRENCY = 'eur';
+    const config = paymentsConfig().tropipay;
+    expect(config.configured).toBe(true);
+    expect(config.serverMode).toBe('Production');
+    expect(config.currency).toBe('EUR');
+  });
+
+  it('no gateway is ever configured under NODE_ENV=test (no real charges from e2e)', () => {
+    process.env.NODE_ENV = 'test';
+    process.env.MIBI_KEY_ID = 'mb_key_x';
+    process.env.MIBI_SECRET_KEY = 'mb_secret_x';
+    process.env.TROPIPAY_CLIENT_ID = 'tpp_id';
+    process.env.TROPIPAY_CLIENT_SECRET = 'tpp_secret';
+    const config = paymentsConfig();
+    expect(config.mibi.configured).toBe(false);
+    expect(config.tropipay.configured).toBe(false);
+  });
+
+  it('strips a trailing slash from the public callback base URL', () => {
+    process.env.PUBLIC_API_URL = 'https://api.example.com/';
+    expect(paymentsConfig().publicUrl).toBe('https://api.example.com');
   });
 });

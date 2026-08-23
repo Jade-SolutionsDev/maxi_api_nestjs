@@ -14,7 +14,8 @@ import { Role, User } from '../users/entities/user.entity';
 import { OrderItem } from './entities/order-item.entity';
 import { Order, OrderStatus, PaymentStatus } from './entities/order.entity';
 import { OrdersService } from './orders.service';
-import { PAYMENT_PROVIDER } from './payments/payment-provider.interface';
+import { PaymentMethodsService } from '../payments/payment-methods.service';
+import { PaymentsService } from '../payments/payments.service';
 
 function makeClient(): Client {
   return { id: 'client-1', defaultMunicipalityId: 'mun-1' } as Client;
@@ -75,7 +76,12 @@ describe('OrdersService', () => {
     confirmReservations: jest.Mock;
     releaseReservations: jest.Mock;
   };
-  let paymentProvider: { initiatePayment: jest.Mock };
+  let paymentsService: {
+    createChargeForOrder: jest.Mock;
+    latestChargeDto: jest.Mock;
+    latestMethodsFor: jest.Mock;
+  };
+  let paymentMethodsService: { resolve: jest.Mock };
   let orderItemRepo: { save: jest.Mock; create: jest.Mock };
   let cartItemRepo: { delete: jest.Mock };
 
@@ -102,10 +108,13 @@ describe('OrdersService', () => {
       confirmReservations: jest.fn(),
       releaseReservations: jest.fn(),
     };
-    paymentProvider = {
-      initiatePayment: jest
-        .fn()
-        .mockResolvedValue({ status: PaymentStatus.PENDING }),
+    paymentsService = {
+      createChargeForOrder: jest.fn().mockResolvedValue({ id: 'charge-1' }),
+      latestChargeDto: jest.fn().mockResolvedValue(undefined),
+      latestMethodsFor: jest.fn().mockResolvedValue(new Map()),
+    };
+    paymentMethodsService = {
+      resolve: jest.fn().mockResolvedValue({ code: 'manual' }),
     };
 
     const manager = {
@@ -126,7 +135,8 @@ describe('OrdersService', () => {
         { provide: getRepositoryToken(Order), useValue: orderRepo },
         { provide: CartService, useValue: cartService },
         { provide: InventoryService, useValue: inventoryService },
-        { provide: PAYMENT_PROVIDER, useValue: paymentProvider },
+        { provide: PaymentsService, useValue: paymentsService },
+        { provide: PaymentMethodsService, useValue: paymentMethodsService },
         { provide: DataSource, useValue: dataSource },
       ],
     }).compile();
@@ -165,7 +175,7 @@ describe('OrdersService', () => {
       expect(cartItemRepo.delete).toHaveBeenCalledWith({
         clientId: 'client-1',
       });
-      expect(paymentProvider.initiatePayment).toHaveBeenCalled();
+      expect(paymentsService.createChargeForOrder).toHaveBeenCalled();
       expect(result.status).toBe(OrderStatus.PENDING);
       expect(result.paymentStatus).toBe(PaymentStatus.PENDING);
     });
@@ -191,6 +201,20 @@ describe('OrdersService', () => {
       );
     });
 
+    it('survives a payment-initiation failure: order stays pending', async () => {
+      paymentsService.createChargeForOrder.mockRejectedValue(
+        new Error('gateway down'),
+      );
+
+      const result = await service.checkout(makeClient(), {});
+
+      // Order + reservations + cart clear all committed regardless.
+      expect(inventoryService.reserve).toHaveBeenCalled();
+      expect(cartItemRepo.delete).toHaveBeenCalled();
+      expect(result.status).toBe(OrderStatus.PENDING);
+      expect(result.paymentStatus).toBe(PaymentStatus.PENDING);
+    });
+
     it('409s when a cart line is no longer available', async () => {
       cartService.getCart.mockResolvedValue({
         items: [{ ...cartLine, isAvailable: false, available: 1 }],
@@ -202,6 +226,45 @@ describe('OrdersService', () => {
         ConflictException,
       );
       expect(inventoryService.reserve).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('findForClient', () => {
+    it('labels each listed order with the method it was paid with', async () => {
+      orderRepo.findAndCount.mockResolvedValue([[makeOrder()], 1]);
+      paymentsService.latestMethodsFor.mockResolvedValue(
+        new Map([
+          ['order-1', { code: 'tropipay', label: 'Tarjeta (Tropipay)' }],
+        ]),
+      );
+
+      const result = await service.findForClient('client-1');
+
+      expect(paymentsService.latestMethodsFor).toHaveBeenCalledWith([
+        'order-1',
+      ]);
+      expect(result.data[0].paymentMethod).toEqual({
+        code: 'tropipay',
+        label: 'Tarjeta (Tropipay)',
+      });
+    });
+
+    it('leaves the method undefined for an order with no attempt', async () => {
+      orderRepo.findAndCount.mockResolvedValue([[makeOrder()], 1]);
+
+      const result = await service.findForClient('client-1');
+
+      expect(result.data[0].paymentMethod).toBeUndefined();
+    });
+
+    it('excludes soft-deleted orders', async () => {
+      await service.findForClient('client-1');
+
+      expect(orderRepo.findAndCount).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: expect.objectContaining({ deletedAt: expect.anything() }),
+        }),
+      );
     });
   });
 
@@ -288,6 +351,42 @@ describe('OrdersService', () => {
 
       expect(orderRepo.save).toHaveBeenCalledWith(
         expect.objectContaining({ status: OrderStatus.PROCESSING }),
+      );
+    });
+  });
+
+  describe('updatePaymentStatus', () => {
+    it('settles a pending payment', async () => {
+      orderRepo.findOne
+        .mockResolvedValueOnce(makeOrder())
+        .mockResolvedValue(makeOrder({ items: [] }));
+
+      await service.updatePaymentStatus('order-1', PaymentStatus.PAID);
+
+      expect(orderRepo.save).toHaveBeenCalledWith(
+        expect.objectContaining({ paymentStatus: PaymentStatus.PAID }),
+      );
+    });
+
+    it('rejects nonsense transitions like paid -> pending', async () => {
+      orderRepo.findOne.mockResolvedValue(
+        makeOrder({ paymentStatus: PaymentStatus.PAID }),
+      );
+
+      await expect(
+        service.updatePaymentStatus('order-1', PaymentStatus.PENDING),
+      ).rejects.toBeInstanceOf(ConflictException);
+    });
+
+    it('allows refunding a paid order', async () => {
+      orderRepo.findOne
+        .mockResolvedValueOnce(makeOrder({ paymentStatus: PaymentStatus.PAID }))
+        .mockResolvedValue(makeOrder({ items: [] }));
+
+      await service.updatePaymentStatus('order-1', PaymentStatus.REFUNDED);
+
+      expect(orderRepo.save).toHaveBeenCalledWith(
+        expect.objectContaining({ paymentStatus: PaymentStatus.REFUNDED }),
       );
     });
   });
