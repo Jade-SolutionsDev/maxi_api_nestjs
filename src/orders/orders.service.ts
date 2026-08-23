@@ -340,11 +340,19 @@ export class OrdersService {
 
     await this.dataSource.transaction(async (manager) => {
       if (status === OrderStatus.CONFIRMED) {
-        // The hold becomes a physical stock decrement.
-        await this.inventoryService.confirmReservations(manager, order.id);
+        // The hold becomes a physical stock decrement, logged as an OUT sale.
+        await this.inventoryService.confirmReservations(
+          manager,
+          order.id,
+          user.id,
+        );
       } else if (status === OrderStatus.CANCELLED) {
-        // Releases holds; restocks allocations already confirmed.
-        await this.inventoryService.releaseReservations(manager, order.id);
+        // Releases holds; restocks (logged as IN) allocations already confirmed.
+        await this.inventoryService.releaseReservations(
+          manager,
+          order.id,
+          user.id,
+        );
       }
       order.status = status;
       await manager.getRepository(Order).save(order);

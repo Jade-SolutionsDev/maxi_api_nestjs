@@ -31,6 +31,7 @@
     "seed:products": "ts-node scripts/seed-products.ts",
     "seed:stock-locations": "ts-node scripts/seed-stock-locations.ts",
     "seed:inventory": "ts-node scripts/seed-inventory.ts",
+    "backfill:sale-operations": "ts-node scripts/backfill-sale-operations.ts",
     "seed:orders": "ts-node scripts/seed-orders.ts",
     "seed:cms": "ts-node scripts/seed-cms.ts"
   },

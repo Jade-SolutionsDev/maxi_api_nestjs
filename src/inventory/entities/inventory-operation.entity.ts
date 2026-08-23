@@ -16,6 +16,7 @@ export enum OperationType {
 // more items (products + quantities). Immutable once created.
 @Entity('inventory_operations')
 @Index(['locationId'])
+@Index(['orderId'])
 export class InventoryOperation {
   @PrimaryGeneratedColumn('uuid')
   id: string;
@@ -30,6 +31,12 @@ export class InventoryOperation {
   // Destination storage for TRANSFER operations; null otherwise.
   @Column({ name: 'target_location_id', type: 'uuid', nullable: true })
   targetLocationId: string | null;
+
+  // Order that drove this movement (a sale OUT or a cancellation restock IN);
+  // null for manual admin operations. Links the sale to its ledger row and
+  // discriminates sale movements from manual ones.
+  @Column({ name: 'order_id', type: 'uuid', nullable: true })
+  orderId: string | null;
 
   @Column({ type: 'varchar', length: 500, nullable: true })
   note: string | null;

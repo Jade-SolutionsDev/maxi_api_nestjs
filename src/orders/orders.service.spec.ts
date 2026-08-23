@@ -286,6 +286,7 @@ describe('OrdersService', () => {
       expect(inventoryService.confirmReservations).toHaveBeenCalledWith(
         expect.anything(),
         'order-1',
+        'user-1', // acting admin recorded on the sale ledger row
       );
     });
 
@@ -299,6 +300,7 @@ describe('OrdersService', () => {
       expect(inventoryService.releaseReservations).toHaveBeenCalledWith(
         expect.anything(),
         'order-1',
+        'user-1', // acting admin recorded on the restock ledger row
       );
     });
 

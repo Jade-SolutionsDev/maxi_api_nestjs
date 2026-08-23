@@ -90,6 +90,9 @@ export class OperationResponseDto {
   type: string;
   locationId: string;
   targetLocationId: string | null;
+  // Set when the operation was driven by an order (sale OUT / restock IN); null
+  // for manual admin operations.
+  orderId: string | null;
   note: string | null;
   createdBy: string;
   createdAt: Date;
@@ -104,6 +107,7 @@ export class OperationResponseDto {
     dto.type = operation.type;
     dto.locationId = operation.locationId;
     dto.targetLocationId = operation.targetLocationId;
+    dto.orderId = operation.orderId;
     dto.note = operation.note;
     dto.createdBy = operation.createdBy;
     dto.createdAt = operation.createdAt;

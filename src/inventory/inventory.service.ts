@@ -247,6 +247,7 @@ export class InventoryService {
       target_location_id: string | null;
       target_location_name: string | null;
       note: string | null;
+      order_id: string | null;
       created_by: string | null;
       first_name: string | null;
       last_name: string | null;
@@ -255,7 +256,7 @@ export class InventoryService {
       `SELECT o.type, oi.product_id, p.name AS product_name, oi.quantity,
               o.location_id, sl.name AS location_name,
               o.target_location_id, tl.name AS target_location_name,
-              o.note, o.created_by,
+              o.note, o.order_id, o.created_by,
               u."firstName" AS first_name, u."lastName" AS last_name,
               o.created_at
          FROM inventory_operation_items oi
@@ -312,14 +313,19 @@ export class InventoryService {
         note: o.note,
         actorId: o.created_by,
         actorName,
-        orderId: null,
+        orderId: o.order_id,
         createdAt: o.created_at,
       });
     }
 
+    // Reservations contribute only the `reserved` hold — a hold is not a
+    // physical movement. The confirm (sale OUT) and cancel-after-confirm
+    // (restock IN) are real inventory_operations now, emitted above with their
+    // orderId; re-deriving them here would double-count.
     for (const r of reservations) {
-      const base = {
-        kind: 'reservation' as const,
+      events.push({
+        kind: 'reservation',
+        type: 'reserved',
         productId: r.product_id,
         productName: r.product_name ?? '',
         quantity: Number(r.quantity),
@@ -331,13 +337,8 @@ export class InventoryService {
         actorId: null,
         actorName: null,
         orderId: r.order_id,
-      };
-      events.push({ ...base, type: 'reserved', createdAt: r.created_at });
-      if (r.status === 'confirmed') {
-        events.push({ ...base, type: 'confirmed', createdAt: r.updated_at });
-      } else if (r.status === 'cancelled') {
-        events.push({ ...base, type: 'cancelled', createdAt: r.updated_at });
-      }
+        createdAt: r.created_at,
+      });
     }
 
     events.sort(
@@ -511,11 +512,18 @@ export class InventoryService {
     }
   }
 
-  // Order confirmed: the hold becomes a physical decrement.
+  // Order confirmed: the hold becomes a physical decrement, recorded as an OUT
+  // operation in the movement ledger (so sales are reconstructable, not just
+  // the manual in/out/transfer wizard). `userId` is the confirming admin.
   async confirmReservations(
     manager: EntityManager,
     orderId: string,
+    userId: string,
   ): Promise<void> {
+    // Capture what will be confirmed BEFORE settle flips their status.
+    const toConfirm = await manager.getRepository(InventoryReservation).find({
+      where: { orderId, status: ReservationStatus.RESERVED },
+    });
     await this.settleReservations(
       manager,
       orderId,
@@ -525,14 +533,23 @@ export class InventoryService {
         row.reservedQuantity -= n;
       },
     );
+    await this.recordOrderMovement(manager, {
+      type: OperationType.OUT,
+      orderId,
+      userId,
+      reservations: toConfirm,
+    });
   }
 
   // Order cancelled: release holds; restock allocations already confirmed
-  // (cancel after confirmation). ponytail: restock assumes the goods return to
-  // the same storage they were committed from.
+  // (cancel after confirmation) and record the return as an IN operation.
+  // ponytail: restock assumes the goods return to the same storage they were
+  // committed from. `userId` is the acting admin (present whenever a restock can
+  // happen — client cancel is PENDING-only, so it has nothing to restock).
   async releaseReservations(
     manager: EntityManager,
     orderId: string,
+    userId?: string,
   ): Promise<void> {
     await this.settleReservations(
       manager,
@@ -569,6 +586,63 @@ export class InventoryService {
       }
       reservation.status = ReservationStatus.CANCELLED;
       await reservationRepo.save(reservation);
+    }
+    if (confirmed.length > 0) {
+      if (!userId) {
+        // A restock can only originate from an admin cancel, which always
+        // carries a user — guard so the non-null created_by never silently breaks.
+        throw new Error(
+          'releaseReservations: userId required to restock a confirmed order',
+        );
+      }
+      await this.recordOrderMovement(manager, {
+        type: OperationType.IN,
+        orderId,
+        userId,
+        reservations: confirmed,
+      });
+    }
+  }
+
+  // Writes the movement ledger for an order-driven stock change: one immutable
+  // InventoryOperation per storage (with its item lines), inside the caller's
+  // transaction. Mirrors createOperation's persistence, but stamped with the
+  // orderId so sales/restocks are linked and distinguishable from manual ops.
+  private async recordOrderMovement(
+    manager: EntityManager,
+    params: {
+      type: OperationType;
+      orderId: string;
+      userId: string;
+      reservations: InventoryReservation[];
+    },
+  ): Promise<void> {
+    if (params.reservations.length === 0) return;
+    // Group by storage, merging quantities per product.
+    const byLocation = new Map<string, Map<string, number>>();
+    for (const r of params.reservations) {
+      const items = byLocation.get(r.locationId) ?? new Map<string, number>();
+      items.set(r.productId, (items.get(r.productId) ?? 0) + r.quantity);
+      byLocation.set(r.locationId, items);
+    }
+    const opRepo = manager.getRepository(InventoryOperation);
+    const itemRepo = manager.getRepository(InventoryOperationItem);
+    for (const [locationId, items] of byLocation) {
+      const op = await opRepo.save(
+        opRepo.create({
+          type: params.type,
+          locationId,
+          targetLocationId: null,
+          orderId: params.orderId,
+          note: null,
+          createdBy: params.userId,
+        }),
+      );
+      await itemRepo.save(
+        [...items].map(([productId, quantity]) =>
+          itemRepo.create({ operationId: op.id, productId, quantity }),
+        ),
+      );
     }
   }
 
