@@ -23,6 +23,7 @@ import { CheckoutDto } from './dto/checkout.dto';
 import { OrderResponseDto } from './dto/order-response.dto';
 import { OrderItem } from './entities/order-item.entity';
 import { Order, OrderStatus, PaymentStatus } from './entities/order.entity';
+import { PaymentGateway } from '../payments/payment-gateway.interface';
 import { PaymentMethodsService } from '../payments/payment-methods.service';
 import { PaymentsService } from '../payments/payments.service';
 
@@ -111,6 +112,11 @@ export class OrdersService {
       });
     }
 
+    // Resolved before anything is written: an unknown or disabled method must
+    // 400 rather than silently produce an order nobody can pay. DB-only, no
+    // gateway call.
+    const gateway = await this.paymentMethodsService.resolve(dto.paymentMethod);
+
     const orderId = await this.dataSource.transaction(async (manager) => {
       const orderRepo = manager.getRepository(Order);
       const order = await orderRepo.save(
@@ -155,17 +161,26 @@ export class OrdersService {
       return order.id;
     });
 
-    // Post-commit payment initiation: an outbound gateway call must not hold
-    // the inventory row locks, and a gateway failure must not lose the order —
-    // it survives unpaid and the customer retries via
-    // POST /storefront/orders/:id/payment.
+    // Deliberately NOT awaited. Creating the attempt is a live call to the
+    // gateway — seconds, sometimes many — and the order is already committed
+    // and visible by now, so making the customer watch a spinner for it only
+    // risks them abandoning a checkout that already succeeded. The order page
+    // polls for the attempt and can start one itself if this fails.
+    void this.initiatePayment(orderId, gateway);
+
+    return this.findOneForClient(client.id, orderId);
+  }
+
+  // Background payment initiation. Never throws: a gateway failure leaves the
+  // order unpaid with no attempt, which the order page offers to retry.
+  private async initiatePayment(
+    orderId: string,
+    gateway: PaymentGateway,
+  ): Promise<void> {
     try {
       const order = (await this.orderRepository.findOne({
         where: { id: orderId },
       })) as Order;
-      const gateway = await this.paymentMethodsService.resolve(
-        dto.paymentMethod,
-      );
       await this.paymentsService.createChargeForOrder(order, gateway);
     } catch (err) {
       this.logger.error(
@@ -173,8 +188,6 @@ export class OrdersService {
         err instanceof Error ? err.stack : String(err),
       );
     }
-
-    return this.findOneForClient(client.id, orderId);
   }
 
   async findForClient(
