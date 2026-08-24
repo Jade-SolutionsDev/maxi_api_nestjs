@@ -221,4 +221,39 @@ describe('ClientAddressesService', () => {
       expect(repository.update).not.toHaveBeenCalled();
     });
   });
+
+  describe('setDefault', () => {
+    it('demotes the previous default before promoting the new one', async () => {
+      repository.findOne.mockResolvedValue(
+        makeAddress({ id: 'addr-2', isDefault: false }),
+      );
+
+      const promoted = await service.setDefault('client-1', 'addr-2');
+
+      expect(repository.update).toHaveBeenCalledWith(
+        { clientId: 'client-1', isDefault: true },
+        { isDefault: false },
+      );
+      expect(promoted.isDefault).toBe(true);
+    });
+
+    it('is a no-op on an address that is already the default', async () => {
+      repository.findOne.mockResolvedValue(
+        makeAddress({ id: 'addr-1', isDefault: true }),
+      );
+
+      const promoted = await service.setDefault('client-1', 'addr-1');
+
+      expect(repository.update).not.toHaveBeenCalled();
+      expect(promoted.isDefault).toBe(true);
+    });
+
+    it('reports another customer\u2019s address as missing', async () => {
+      repository.findOne.mockResolvedValue(null);
+
+      await expect(
+        service.setDefault('client-1', 'addr-9'),
+      ).rejects.toBeInstanceOf(NotFoundException);
+    });
+  });
 });

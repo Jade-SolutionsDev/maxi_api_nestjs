@@ -148,6 +148,17 @@ export class ClientAddressesService {
     }
   }
 
+  async setDefault(clientId: string, id: string): Promise<ClientAddress> {
+    const address = await this.findOneForClient(clientId, id);
+
+    if (address.isDefault) return address;
+
+    await this.clearDefault(clientId);
+    address.isDefault = true;
+
+    return this.addressRepository.save(address);
+  }
+
   private async clearDefault(clientId: string): Promise<void> {
     await this.addressRepository.update(
       { clientId, isDefault: true },
