@@ -1,4 +1,8 @@
-import { ConflictException, Injectable } from '@nestjs/common';
+import {
+  ConflictException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { GeographyService } from '../geography/geography.service';
@@ -17,6 +21,8 @@ export interface CreateClientAddressInput {
   contactPhone?: string;
   isDefault?: boolean;
 }
+
+export type UpdateClientAddressInput = Partial<CreateClientAddressInput>;
 
 // Saved addresses are strictly per-client: every read and every write is scoped
 // by clientId, and a row belonging to somebody else is reported as missing
@@ -69,6 +75,77 @@ export class ClientAddressesService {
         isDefault,
       }),
     );
+  }
+
+  async findOneForClient(clientId: string, id: string): Promise<ClientAddress> {
+    const address = await this.addressRepository.findOne({
+      where: { id, clientId },
+    });
+
+    // Not 403: a customer must not be able to tell somebody else's address
+    // apart from one that never existed.
+    if (!address) {
+      throw new NotFoundException(`Address with id "${id}" not found`);
+    }
+
+    return address;
+  }
+
+  async update(
+    clientId: string,
+    id: string,
+    input: UpdateClientAddressInput,
+  ): Promise<ClientAddress> {
+    const address = await this.findOneForClient(clientId, id);
+
+    if (
+      input.municipalityId &&
+      input.municipalityId !== address.municipalityId
+    ) {
+      await this.geographyService.getMunicipalityOrThrow(input.municipalityId);
+      address.municipalityId = input.municipalityId;
+    }
+
+    if (input.street !== undefined) address.street = input.street;
+    // An empty string is how the form says "clear this": it becomes null, so
+    // the column never holds a blank pretending to be a value.
+    if (input.label !== undefined) address.label = input.label || null;
+    if (input.betweenStreets !== undefined) {
+      address.betweenStreets = input.betweenStreets || null;
+    }
+    if (input.reference !== undefined) {
+      address.reference = input.reference || null;
+    }
+    if (input.contactPhone !== undefined) {
+      address.contactPhone = input.contactPhone || null;
+    }
+
+    // isDefault is deliberately ignored here: promoting an address is its own
+    // endpoint, so the invariant lives in exactly one place.
+
+    return this.addressRepository.save(address);
+  }
+
+  async remove(clientId: string, id: string): Promise<void> {
+    const address = await this.findOneForClient(clientId, id);
+
+    await this.addressRepository.softDelete(id);
+
+    if (!address.isDefault) return;
+
+    // Losing the default silently would leave the customer with addresses and
+    // nothing proposed at checkout. The newest survivor takes over.
+    const survivor = await this.addressRepository.findOne({
+      where: { clientId },
+      order: { createdAt: 'DESC' },
+    });
+
+    if (survivor) {
+      await this.addressRepository.update(
+        { id: survivor.id },
+        { isDefault: true },
+      );
+    }
   }
 
   private async clearDefault(clientId: string): Promise<void> {

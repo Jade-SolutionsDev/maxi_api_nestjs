@@ -137,4 +137,88 @@ describe('ClientAddressesService', () => {
       });
     });
   });
+
+  describe('findOneForClient', () => {
+    it('reports another customer\u2019s address as missing', async () => {
+      repository.findOne.mockResolvedValue(null);
+
+      await expect(
+        service.findOneForClient('client-1', 'addr-9'),
+      ).rejects.toBeInstanceOf(NotFoundException);
+      expect(repository.findOne).toHaveBeenCalledWith({
+        where: { id: 'addr-9', clientId: 'client-1' },
+      });
+    });
+  });
+
+  describe('update', () => {
+    it('validates a municipality only when it changes', async () => {
+      repository.findOne.mockResolvedValue(makeAddress());
+
+      await service.update('client-1', 'addr-1', { street: 'Calle 25 #10' });
+
+      expect(geography.getMunicipalityOrThrow).not.toHaveBeenCalled();
+      expect(repository.save).toHaveBeenCalledWith(
+        expect.objectContaining({ id: 'addr-1', street: 'Calle 25 #10' }),
+      );
+    });
+
+    it('leaves the default flag alone', async () => {
+      repository.findOne.mockResolvedValue(makeAddress({ isDefault: false }));
+
+      const updated = await service.update('client-1', 'addr-1', {
+        isDefault: true,
+      });
+
+      expect(updated.isDefault).toBe(false);
+    });
+
+    it('clears an optional field when it is sent empty', async () => {
+      repository.findOne.mockResolvedValue(
+        makeAddress({ reference: 'Edificio azul' }),
+      );
+
+      const updated = await service.update('client-1', 'addr-1', {
+        reference: '',
+      });
+
+      expect(updated.reference).toBeNull();
+    });
+  });
+
+  describe('remove', () => {
+    it('soft-deletes and promotes the newest survivor when the default goes', async () => {
+      repository.findOne
+        .mockResolvedValueOnce(makeAddress({ id: 'addr-1', isDefault: true }))
+        .mockResolvedValueOnce(makeAddress({ id: 'addr-2', isDefault: false }));
+
+      await service.remove('client-1', 'addr-1');
+
+      expect(repository.softDelete).toHaveBeenCalledWith('addr-1');
+      expect(repository.update).toHaveBeenCalledWith(
+        { id: 'addr-2' },
+        { isDefault: true },
+      );
+    });
+
+    it('promotes nobody when the deleted one was not the default', async () => {
+      repository.findOne.mockResolvedValueOnce(
+        makeAddress({ isDefault: false }),
+      );
+
+      await service.remove('client-1', 'addr-1');
+
+      expect(repository.update).not.toHaveBeenCalled();
+    });
+
+    it('promotes nobody when it was the last address', async () => {
+      repository.findOne
+        .mockResolvedValueOnce(makeAddress({ isDefault: true }))
+        .mockResolvedValueOnce(null);
+
+      await service.remove('client-1', 'addr-1');
+
+      expect(repository.update).not.toHaveBeenCalled();
+    });
+  });
 });
