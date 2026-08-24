@@ -6,6 +6,7 @@ import {
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { GeographyService } from '../geography/geography.service';
+import { ClientAddressResponseDto } from './dto/client-address-response.dto';
 import { ClientAddress } from './entities/client-address.entity';
 
 // A customer with more saved addresses than this is not a customer, it is a
@@ -49,7 +50,9 @@ export class ClientAddressesService {
     // Throws NotFoundException when the municipality is not in the catalog.
     await this.geographyService.getMunicipalityOrThrow(input.municipalityId);
 
-    const existing = await this.addressRepository.count({ where: { clientId } });
+    const existing = await this.addressRepository.count({
+      where: { clientId },
+    });
 
     if (existing >= MAX_ADDRESSES_PER_CLIENT) {
       throw new ConflictException(
@@ -157,6 +160,38 @@ export class ClientAddressesService {
     address.isDefault = true;
 
     return this.addressRepository.save(address);
+  }
+
+  /**
+   * Resolves municipality and province names for a batch of addresses. The
+   * catalog is ~170 rows and cached in Postgres' buffer anyway, so loading it
+   * whole beats N lookups per list.
+   */
+  async toResponse(
+    addresses: ClientAddress[],
+  ): Promise<ClientAddressResponseDto[]> {
+    const [municipalities, provinces] = await Promise.all([
+      this.geographyService.listMunicipalities(undefined, { all: true }),
+      this.geographyService.listProvinces({ all: true }),
+    ]);
+    const municipalityById = new Map(municipalities.map((m) => [m.id, m]));
+    const provinceById = new Map(provinces.map((p) => [p.id, p]));
+
+    return addresses.map((address) => {
+      const municipality = municipalityById.get(address.municipalityId);
+      return ClientAddressResponseDto.fromEntity(
+        address,
+        municipality,
+        municipality ? provinceById.get(municipality.provinceId) : undefined,
+      );
+    });
+  }
+
+  async toResponseOne(
+    address: ClientAddress,
+  ): Promise<ClientAddressResponseDto> {
+    const [dto] = await this.toResponse([address]);
+    return dto;
   }
 
   private async clearDefault(clientId: string): Promise<void> {

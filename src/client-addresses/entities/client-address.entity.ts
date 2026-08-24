@@ -48,7 +48,12 @@ export class ClientAddress {
   municipalityId: string;
 
   // Optional: when empty, the client's own phone is the one to call.
-  @Column({ name: 'contact_phone', type: 'varchar', length: 20, nullable: true })
+  @Column({
+    name: 'contact_phone',
+    type: 'varchar',
+    length: 20,
+    nullable: true,
+  })
   contactPhone: string | null;
 
   // At most one true per client among the non-deleted rows. Enforced in the

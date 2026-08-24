@@ -45,7 +45,12 @@ describe('ClientAddressesService', () => {
         code: 'CU-03-01',
       }),
       listMunicipalities: jest.fn().mockResolvedValue([
-        { id: 'mun-1', provinceId: 'prov-1', name: 'Plaza', code: 'CU-03-01' },
+        {
+          id: 'mun-1',
+          provinceId: 'prov-1',
+          name: 'Plaza',
+          code: 'CU-03-01',
+        },
       ]),
       listProvinces: jest
         .fn()
@@ -254,6 +259,37 @@ describe('ClientAddressesService', () => {
       await expect(
         service.setDefault('client-1', 'addr-9'),
       ).rejects.toBeInstanceOf(NotFoundException);
+    });
+  });
+
+  describe('toResponse', () => {
+    it('resolves municipality and province names from the catalog', async () => {
+      const [dto] = await service.toResponse([makeAddress()]);
+
+      expect(dto.municipalityName).toBe('Plaza');
+      expect(dto.provinceId).toBe('prov-1');
+      expect(dto.provinceName).toBe('La Habana');
+    });
+
+    it('loads the catalog once for the whole batch', async () => {
+      await service.toResponse([
+        makeAddress({ id: 'addr-1' }),
+        makeAddress({ id: 'addr-2' }),
+        makeAddress({ id: 'addr-3' }),
+      ]);
+
+      expect(geography.listMunicipalities).toHaveBeenCalledTimes(1);
+      expect(geography.listProvinces).toHaveBeenCalledTimes(1);
+    });
+
+    it('keeps an address readable when its municipality left the catalog', async () => {
+      geography.listMunicipalities.mockResolvedValue([]);
+
+      const [dto] = await service.toResponse([makeAddress()]);
+
+      expect(dto.municipalityName).toBe('');
+      expect(dto.provinceName).toBe('');
+      expect(dto.street).toBe('Calle 23 #456');
     });
   });
 });
