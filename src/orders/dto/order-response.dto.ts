@@ -1,4 +1,9 @@
-import { Order, OrderStatus, PaymentStatus } from '../entities/order.entity';
+import {
+  CancellationReason,
+  Order,
+  OrderStatus,
+  PaymentStatus,
+} from '../entities/order.entity';
 import { OrderItem } from '../entities/order-item.entity';
 import { PaymentChargeResponseDto } from '../../payments/dto/payment-charge-response.dto';
 import { OrderPaymentMethodDto } from '../../payments/dto/payment-method-response.dto';
@@ -54,6 +59,12 @@ export class OrderResponseDto {
    * where the full attempt would be far too much to carry per row.
    */
   paymentMethod?: OrderPaymentMethodDto;
+  /**
+   * Why a cancelled order was cancelled. `payment_not_received` = it expired
+   * unpaid; `paid_after_expiry_out_of_stock` = paid too late to be served, so a
+   * refund is owed. Null for an ordinary cancellation.
+   */
+  cancellationReason: CancellationReason | null;
   createdAt: Date;
   updatedAt: Date;
 
@@ -75,6 +86,7 @@ export class OrderResponseDto {
     dto.deliveryMunicipalityId = order.deliveryMunicipalityId;
     dto.deliveryAddress = order.deliveryAddress;
     dto.customerNotes = order.customerNotes;
+    dto.cancellationReason = order.cancellationReason;
     dto.items = order.items?.map(OrderItemResponseDto.fromEntity);
     dto.createdAt = order.createdAt;
     dto.updatedAt = order.updatedAt;

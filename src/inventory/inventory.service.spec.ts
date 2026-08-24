@@ -210,8 +210,12 @@ describe('InventoryService', () => {
         manager: { query: jest.fn().mockResolvedValue([]) },
       };
       manager = {
-        getRepository: (entity: unknown): MockRepo =>
-          entity === Inventory ? inventoryRepo : reservationRepo,
+        getRepository: (entity: unknown): MockRepo => {
+          if (entity === Inventory) return inventoryRepo;
+          if (entity === InventoryOperation) return operationRepo;
+          if (entity === InventoryOperationItem) return itemRepo;
+          return reservationRepo;
+        },
         // reserve() first fetches enabled-location ids; the mock inventoryRepo
         // ignores the where clause, so any non-empty set keeps the flow intact.
         query: jest.fn().mockResolvedValue([{ id: 'loc-A' }, { id: 'loc-B' }]),
@@ -297,14 +301,28 @@ describe('InventoryService', () => {
         quantity: 3,
         status: ReservationStatus.RESERVED,
       };
-      reservationRepo.find.mockResolvedValueOnce([reservation]);
+      // Two find(RESERVED) calls: capture-before-settle, then settle itself.
+      reservationRepo.find.mockResolvedValue([reservation]);
       inventoryRepo.findOne.mockResolvedValue(row);
 
-      await service.confirmReservations(manager as never, 'order-1');
+      await service.confirmReservations(manager as never, 'order-1', 'user-9');
 
       expect(row.quantity).toBe(2);
       expect(row.reservedQuantity).toBe(0);
       expect(reservation.status).toBe(ReservationStatus.CONFIRMED);
+      // The sale is recorded as an OUT operation in the ledger, linked to the
+      // order and attributed to the confirming admin.
+      expect(operationRepo.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          type: OperationType.OUT,
+          locationId: 'loc-A',
+          orderId: 'order-1',
+          createdBy: 'user-9',
+        }),
+      );
+      expect(itemRepo.create).toHaveBeenCalledWith(
+        expect.objectContaining({ productId: 'p-1', quantity: 3 }),
+      );
     });
 
     it('release frees held stock and restocks confirmed allocations', async () => {
@@ -334,12 +352,24 @@ describe('InventoryService', () => {
         .mockResolvedValueOnce([committed]);
       inventoryRepo.findOne.mockResolvedValue(row);
 
-      await service.releaseReservations(manager as never, 'order-1');
+      await service.releaseReservations(manager as never, 'order-1', 'user-9');
 
       expect(row.reservedQuantity).toBe(0); // hold freed
       expect(row.quantity).toBe(8); // 5 + 3 restocked
       expect(held.status).toBe(ReservationStatus.CANCELLED);
       expect(committed.status).toBe(ReservationStatus.CANCELLED);
+      // The restock of the already-confirmed allocation is recorded as an IN.
+      expect(operationRepo.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          type: OperationType.IN,
+          locationId: 'loc-A',
+          orderId: 'order-1',
+          createdBy: 'user-9',
+        }),
+      );
+      expect(itemRepo.create).toHaveBeenCalledWith(
+        expect.objectContaining({ productId: 'p-1', quantity: 3 }),
+      );
     });
   });
 
@@ -357,6 +387,7 @@ describe('InventoryService', () => {
             target_location_id: null,
             target_location_name: null,
             note: 'compra',
+            order_id: null,
             created_by: 'u-1',
             first_name: 'Ana',
             last_name: 'Pérez',
@@ -379,18 +410,44 @@ describe('InventoryService', () => {
 
       const events = await service.history({ productId: 'p-1' });
 
-      // A confirmed reservation yields reserved(created) + confirmed(updated).
-      expect(events.map((e) => e.type)).toEqual([
-        'confirmed',
-        'reserved',
-        'IN',
-      ]);
+      // The confirmed sale is a real OUT operation now, so the reservation only
+      // contributes its `reserved` hold — no synthetic `confirmed` event (that
+      // would double-count the sale). Newest first: reserved (07-21) then IN (07-20).
+      expect(events.map((e) => e.type)).toEqual(['reserved', 'IN']);
+      expect(events.some((e) => e.type === 'confirmed')).toBe(false);
       const op = events.find((e) => e.kind === 'operation');
       expect(op?.actorName).toBe('Ana Pérez');
-      expect(op?.orderId).toBeNull();
-      const confirmed = events.find((e) => e.type === 'confirmed');
-      expect(confirmed?.orderId).toBe('ord-9');
-      expect(confirmed?.actorName).toBeNull();
+      expect(op?.orderId).toBeNull(); // manual op, not order-driven
+      const reserved = events.find((e) => e.type === 'reserved');
+      expect(reserved?.orderId).toBe('ord-9');
+    });
+
+    it('maps order_id onto sale operations (order-driven OUT)', async () => {
+      inventoryRepo.manager.query
+        .mockResolvedValueOnce([
+          {
+            type: 'OUT',
+            product_id: 'p-1',
+            product_name: 'Arroz',
+            quantity: 5,
+            location_id: 'loc-A',
+            location_name: 'A',
+            target_location_id: null,
+            target_location_name: null,
+            note: null,
+            order_id: 'ord-9',
+            created_by: 'u-1',
+            first_name: 'Ana',
+            last_name: 'Pérez',
+            created_at: new Date('2026-07-22T09:00:00Z'),
+          },
+        ])
+        .mockResolvedValueOnce([]);
+
+      const events = await service.history({ productId: 'p-1' });
+      const sale = events.find((e) => e.type === 'OUT');
+      expect(sale?.orderId).toBe('ord-9');
+      expect(sale?.actorName).toBe('Ana Pérez');
     });
   });
 

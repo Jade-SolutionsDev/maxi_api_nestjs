@@ -21,6 +21,12 @@ import { configureApp } from './test-setup';
 // clerkId (see MockAuthProvider). Must be set before the module compiles.
 process.env.MOCK_AUTH_ENABLED = 'true';
 
+const CRON_SECRET = 'cron_e2e_secret';
+process.env.CRON_SECRET = CRON_SECRET;
+// A window of 0 would be rejected as non-positive; 1 minute plus a charge
+// backdated well past it is what makes an order due in a test.
+process.env.ORDER_EXPIRY_GATEWAY_MINUTES = '1';
+
 const SECRET = 'whsec_e2e_test';
 process.env.MIBI_WEBHOOK_SECRET = SECRET;
 
@@ -284,6 +290,81 @@ describe('payment webhooks (e2e)', () => {
         .expect(200);
 
       expect(res.body.data.data[0].paymentMethod.code).toBe('tropipay');
+    });
+  });
+
+  describe('expiry sweep', () => {
+    const expire = (secret?: string) => {
+      const req = request(app.getHttpServer()).post(
+        '/api/internal/orders/expire',
+      );
+      return secret ? req.set('x-cron-secret', secret) : req;
+    };
+
+    // Backdate the order and its charge past the gateway window. The timestamp
+    // comes from Node, not from Postgres `now()`: created_at is `timestamp
+    // without time zone` and this process runs in a non-UTC zone, so a
+    // db-generated value would read back hours off.
+    const age = async () => {
+      const twoHoursAgo = new Date(Date.now() - 2 * 60 * 60 * 1000);
+      await orders.query(`UPDATE orders SET created_at = $2 WHERE id = $1`, [
+        orderId,
+        twoHoursAgo,
+      ]);
+      await charges.query(
+        `UPDATE payment_charges SET created_at = $2 WHERE order_id = $1`,
+        [orderId, twoHoursAgo],
+      );
+    };
+
+    it('refuses a request with no secret', async () => {
+      await expire().expect(403);
+    });
+
+    it('refuses a wrong secret', async () => {
+      await expire('nope').expect(403);
+    });
+
+    it('leaves a fresh order alone', async () => {
+      const res = await expire(CRON_SECRET).expect(200);
+
+      expect(res.body.data.cancelled).toBe(0);
+      const order = await orders.findOneByOrFail({ id: orderId });
+      expect(order.status).toBe(OrderStatus.PENDING);
+    });
+
+    it('cancels an order past its window and names the reason', async () => {
+      await age();
+
+      const res = await expire(CRON_SECRET).expect(200);
+
+      expect(res.body.data).toMatchObject({
+        cancelled: 1,
+        orderIds: [orderId],
+      });
+      const order = await orders.findOneByOrFail({ id: orderId });
+      expect(order.status).toBe(OrderStatus.CANCELLED);
+      expect(order.cancellationReason).toBe('payment_not_received');
+    });
+
+    it('is a no-op on a second run', async () => {
+      await age();
+      await expire(CRON_SECRET).expect(200);
+
+      const res = await expire(CRON_SECRET).expect(200);
+
+      expect(res.body.data.cancelled).toBe(0);
+    });
+
+    it('spares an order whose payment is still settling', async () => {
+      await age();
+      await charges.update({ orderId }, { status: ChargeStatus.PROCESSING });
+
+      const res = await expire(CRON_SECRET).expect(200);
+
+      expect(res.body.data.cancelled).toBe(0);
+      const order = await orders.findOneByOrFail({ id: orderId });
+      expect(order.status).toBe(OrderStatus.PENDING);
     });
   });
 });

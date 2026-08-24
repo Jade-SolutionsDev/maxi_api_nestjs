@@ -1,14 +1,22 @@
 import {
   BadGatewayException,
   BadRequestException,
+  ConflictException,
   HttpException,
   Injectable,
   Logger,
   NotFoundException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { In, Repository } from 'typeorm';
-import { Order, PaymentStatus } from '../orders/entities/order.entity';
+import { DataSource, In, Repository } from 'typeorm';
+import { InventoryService } from '../inventory/inventory.service';
+import { OrderItem } from '../orders/entities/order-item.entity';
+import {
+  CancellationReason,
+  Order,
+  OrderStatus,
+  PaymentStatus,
+} from '../orders/entities/order.entity';
 import { PaymentChargeResponseDto } from './dto/payment-charge-response.dto';
 import { OrderPaymentMethodDto } from './dto/payment-method-response.dto';
 import {
@@ -37,7 +45,11 @@ export class PaymentsService {
     private readonly chargeRepository: Repository<PaymentCharge>,
     @InjectRepository(Order)
     private readonly orderRepository: Repository<Order>,
+    @InjectRepository(OrderItem)
+    private readonly orderItemRepository: Repository<OrderItem>,
     private readonly methodsService: PaymentMethodsService,
+    private readonly inventoryService: InventoryService,
+    private readonly dataSource: DataSource,
   ) {}
 
   /** Latest attempt of an order, if any (newest wins, whatever its provider). */
@@ -61,30 +73,46 @@ export class PaymentsService {
   }
 
   /**
-   * The method each of these orders was last paid with, keyed by order id.
-   * One query for the whole page — naming the gateway must never cost a query
-   * per row. Newest attempt wins, so switching method is reflected.
+   * The newest charge of each of these orders, keyed by order id. One query for
+   * the whole set — callers must never fan out into a query per order.
    */
-  async latestMethodsFor(
+  async latestChargesFor(
     orderIds: string[],
-  ): Promise<Map<string, OrderPaymentMethodDto>> {
+  ): Promise<Map<string, PaymentCharge>> {
     if (orderIds.length === 0) return new Map();
 
     const charges = await this.chargeRepository.find({
       where: { orderId: In(orderIds) },
       order: { createdAt: 'DESC' },
     });
-    const labels = await this.methodsService.labelsByCode();
 
-    const latest = new Map<string, OrderPaymentMethodDto>();
+    const latest = new Map<string, PaymentCharge>();
     for (const charge of charges) {
-      if (latest.has(charge.orderId)) continue;
-      latest.set(charge.orderId, {
-        code: charge.provider,
-        label: labels.get(charge.provider) ?? charge.provider,
-      });
+      if (!latest.has(charge.orderId)) latest.set(charge.orderId, charge);
     }
     return latest;
+  }
+
+  /**
+   * The method each of these orders was last paid with, named for display.
+   * Newest attempt wins, so switching method is reflected.
+   */
+  async latestMethodsFor(
+    orderIds: string[],
+  ): Promise<Map<string, OrderPaymentMethodDto>> {
+    const charges = await this.latestChargesFor(orderIds);
+    if (charges.size === 0) return new Map();
+
+    const labels = await this.methodsService.labelsByCode();
+    return new Map(
+      [...charges].map(([orderId, charge]) => [
+        orderId,
+        {
+          code: charge.provider,
+          label: labels.get(charge.provider) ?? charge.provider,
+        },
+      ]),
+    );
   }
 
   toDto(charge: PaymentCharge): PaymentChargeResponseDto {
@@ -279,6 +307,75 @@ export class PaymentsService {
       return;
     }
     await this.orderRepository.save(order);
+
+    if (order.paymentStatus === PaymentStatus.PAID) {
+      await this.reinstateIfExpired(order);
+    }
+  }
+
+  /**
+   * A payment that lands after the order already expired. The stock was
+   * released when it expired and may since have been sold, so the hold has to
+   * be taken again before the order can carry on — an order that cannot be
+   * served must never be silently confirmed.
+   *
+   * Stock available: back to pending, reason cleared, and it proceeds normally.
+   * Stock gone: it stays cancelled and is flagged so administration contacts
+   * the customer and refunds. Either way the money is already `paid`.
+   */
+  private async reinstateIfExpired(order: Order): Promise<void> {
+    if (
+      order.status !== OrderStatus.CANCELLED ||
+      order.cancellationReason !== CancellationReason.PAYMENT_NOT_RECEIVED
+    ) {
+      return;
+    }
+
+    const items = await this.orderItemRepository.find({
+      where: { orderId: order.id },
+    });
+
+    try {
+      await this.dataSource.transaction(async (manager) => {
+        for (const item of items) {
+          await this.inventoryService.reserve(
+            manager,
+            order.id,
+            item.productId,
+            item.quantity,
+          );
+        }
+        // The one sanctioned cancelled -> pending move: TRANSITIONS forbids it
+        // everywhere else, but here the order was only cancelled because we
+        // had not been paid, and now we have been.
+        order.status = OrderStatus.PENDING;
+        order.cancellationReason = null;
+        await manager.getRepository(Order).save(order);
+      });
+      this.logger.log(
+        `Order ${order.orderNumber ?? order.id} reinstated: payment arrived after expiry and the stock was still there`,
+      );
+      return;
+    } catch (err) {
+      if (!(err instanceof ConflictException)) {
+        // A database failure, not a stock shortage. Leave the order cancelled
+        // with its original reason; paid + cancelled still surfaces it to the
+        // admin refund queue.
+        this.logger.error(
+          `Could not reinstate order ${order.orderNumber ?? order.id} after a late payment`,
+          err instanceof Error ? err.stack : String(err),
+        );
+        return;
+      }
+    }
+
+    order.status = OrderStatus.CANCELLED;
+    order.cancellationReason =
+      CancellationReason.PAID_AFTER_EXPIRY_OUT_OF_STOCK;
+    await this.orderRepository.save(order);
+    this.logger.warn(
+      `Order ${order.orderNumber ?? order.id} was paid after expiring but the stock is gone — refund required`,
+    );
   }
 
   /**

@@ -201,6 +201,34 @@ describe('OrdersService', () => {
       );
     });
 
+    it('does not make the customer wait for the gateway', async () => {
+      // The attempt is created in the background: checkout resolves without it.
+      let release: (value: unknown) => void = () => {};
+      paymentsService.createChargeForOrder.mockReturnValue(
+        new Promise((resolve) => {
+          release = resolve;
+        }),
+      );
+
+      const result = await service.checkout(makeClient(), {});
+
+      expect(result.status).toBe(OrderStatus.PENDING);
+      expect(paymentsService.createChargeForOrder).toHaveBeenCalled();
+      release({ id: 'charge-1' });
+    });
+
+    it('rejects an unknown payment method before creating anything', async () => {
+      paymentMethodsService.resolve.mockRejectedValue(
+        new BadRequestException('nope'),
+      );
+
+      await expect(
+        service.checkout(makeClient(), { paymentMethod: 'ghost' }),
+      ).rejects.toBeInstanceOf(BadRequestException);
+      expect(orderRepo.save).not.toHaveBeenCalled();
+      expect(inventoryService.reserve).not.toHaveBeenCalled();
+    });
+
     it('survives a payment-initiation failure: order stays pending', async () => {
       paymentsService.createChargeForOrder.mockRejectedValue(
         new Error('gateway down'),
@@ -286,6 +314,7 @@ describe('OrdersService', () => {
       expect(inventoryService.confirmReservations).toHaveBeenCalledWith(
         expect.anything(),
         'order-1',
+        'user-1', // acting admin recorded on the sale ledger row
       );
     });
 
@@ -299,6 +328,7 @@ describe('OrdersService', () => {
       expect(inventoryService.releaseReservations).toHaveBeenCalledWith(
         expect.anything(),
         'order-1',
+        'user-1', // acting admin recorded on the restock ledger row
       );
     });
 

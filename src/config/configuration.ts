@@ -65,6 +65,21 @@ export interface TropipayConfig extends GatewayCredentials {
   currency: string;
 }
 
+export interface ExpiryConfig {
+  /**
+   * Minutes an unpaid gateway order keeps its stock, counted from the newest
+   * payment attempt — the customer is at the checkout page right now.
+   */
+  gatewayMinutes: number;
+  /**
+   * Hours an unpaid manual order keeps its stock. Longer: it waits on an admin
+   * marking it, not on the customer.
+   */
+  manualHours: number;
+  /** Shared secret for the scheduled sweep trigger. */
+  cronSecret: string | undefined;
+}
+
 export interface PaymentsConfig {
   mibi: MibiConfig;
   tropipay: TropipayConfig;
@@ -73,6 +88,7 @@ export interface PaymentsConfig {
    * from the gateway's servers (a tunnel in local development).
    */
   publicUrl: string | undefined;
+  expiry: ExpiryConfig;
 }
 
 export interface StorefrontConfig {
@@ -167,6 +183,13 @@ export const storageConfig = (): StorageConfig => {
 const isConfigured = (...keys: (string | undefined)[]): boolean =>
   keys.every(Boolean) && process.env.NODE_ENV !== 'test';
 
+// A malformed or non-positive window would either expire everything instantly
+// or never expire anything; fall back to the default instead.
+const positiveInt = (raw: string | undefined, fallback: number): number => {
+  const value = Number(raw);
+  return Number.isInteger(value) && value > 0 ? value : fallback;
+};
+
 export const paymentsConfig = (): PaymentsConfig => {
   const keyId = process.env.MIBI_KEY_ID;
   const secretKey = process.env.MIBI_SECRET_KEY;
@@ -196,6 +219,11 @@ export const paymentsConfig = (): PaymentsConfig => {
       configured: isConfigured(clientId, clientSecret),
     },
     publicUrl: process.env.PUBLIC_API_URL?.replace(/\/$/, ''),
+    expiry: {
+      gatewayMinutes: positiveInt(process.env.ORDER_EXPIRY_GATEWAY_MINUTES, 30),
+      manualHours: positiveInt(process.env.ORDER_EXPIRY_MANUAL_HOURS, 24),
+      cronSecret: process.env.CRON_SECRET,
+    },
   };
 };
 
