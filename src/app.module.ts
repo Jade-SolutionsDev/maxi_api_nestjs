@@ -1,5 +1,5 @@
 import { Module } from '@nestjs/common';
-import { ConfigModule, ConfigService } from '@nestjs/config';
+import { ConfigModule } from '@nestjs/config';
 import { APP_GUARD } from '@nestjs/core';
 import { ThrottlerGuard, ThrottlerModule } from '@nestjs/throttler';
 import { TypeOrmModule } from '@nestjs/typeorm';
@@ -45,22 +45,23 @@ import { WebhooksModule } from './webhooks/webhooks.module';
         process.env.THROTTLE_DISABLED === 'true',
     }),
     TypeOrmModule.forRootAsync({
-      imports: [ConfigModule],
-      inject: [ConfigService],
-      useFactory: (configService: ConfigService) => {
+      useFactory: () => {
         const { url } = databaseConfig();
-        const nodeEnv = configService.get<string>('nodeEnv');
         return {
           type: 'postgres',
           url,
           autoLoadEntities: true,
-          synchronize: nodeEnv !== 'production',
-          migrations: ['dist/database/migrations/*.js'],
-          // Production never syncs from the entities: it applies the
-          // migrations that were committed, in order, at boot. Everywhere
-          // else keeps synchronize, so day-to-day work does not need a
-          // migration per field.
-          migrationsRun: nodeEnv === 'production',
+          // No environment syncs from the entities any more. `synchronize`
+          // silently altered whatever schema it found, which is how production
+          // and development drifted apart in the first place — and it can drop
+          // columns to make the schema match. Every change now travels as a
+          // committed migration, applied in order at boot.
+          //
+          // The glob covers both runtimes: __dirname is src/ under ts-node
+          // (dev, e2e) and dist/ once compiled.
+          synchronize: false,
+          migrations: [`${__dirname}/database/migrations/*{.ts,.js}`],
+          migrationsRun: true,
           logging: false,
         };
       },
