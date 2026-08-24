@@ -10,6 +10,7 @@ import { AuthModule } from './auth/auth.module';
 import { CartModule } from './cart/cart.module';
 import { CategoriesModule } from './categories/categories.module';
 import { CmsModule } from './cms/cms.module';
+import { ClientAddressesModule } from './client-addresses/client-addresses.module';
 import { ClientsModule } from './clients/clients.module';
 import { AuthGuard } from './common/guards/auth.guard';
 import { RolesGuard } from './common/guards/roles.guard';
@@ -62,6 +63,7 @@ import { WebhooksModule } from './webhooks/webhooks.module';
     RevalidationModule,
     UsersModule,
     ClientsModule,
+    ClientAddressesModule,
     AuthModule,
     CategoriesModule,
     CmsModule,
