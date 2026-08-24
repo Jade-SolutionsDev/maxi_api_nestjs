@@ -10,6 +10,7 @@ import { AuthModule } from './auth/auth.module';
 import { CartModule } from './cart/cart.module';
 import { CategoriesModule } from './categories/categories.module';
 import { CmsModule } from './cms/cms.module';
+import { ClientAddressesModule } from './client-addresses/client-addresses.module';
 import { ClientsModule } from './clients/clients.module';
 import { AuthGuard } from './common/guards/auth.guard';
 import { RolesGuard } from './common/guards/roles.guard';
@@ -54,6 +55,12 @@ import { WebhooksModule } from './webhooks/webhooks.module';
           url,
           autoLoadEntities: true,
           synchronize: nodeEnv !== 'production',
+          migrations: ['dist/database/migrations/*.js'],
+          // Production never syncs from the entities: it applies the
+          // migrations that were committed, in order, at boot. Everywhere
+          // else keeps synchronize, so day-to-day work does not need a
+          // migration per field.
+          migrationsRun: nodeEnv === 'production',
           logging: false,
         };
       },
@@ -62,6 +69,7 @@ import { WebhooksModule } from './webhooks/webhooks.module';
     RevalidationModule,
     UsersModule,
     ClientsModule,
+    ClientAddressesModule,
     AuthModule,
     CategoriesModule,
     CmsModule,
