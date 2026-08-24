@@ -62,7 +62,8 @@ export class MibilleteraGateway extends PaymentGateway {
     idempotencyKey: string,
   ): Promise<GatewayCharge> {
     const data = await this.mibiClient.createCharge({
-      method: 'CRYPTO',
+      // WALLET or CRYPTO per store provisioning (MIBI_METHOD).
+      method: this.config.method,
       amount: Number(order.total).toFixed(2),
       // Must match a receiving account bound to the merchant payment account.
       currency: this.config.currency,

@@ -25,7 +25,7 @@ export interface MibiChargeData {
 }
 
 export interface CreateChargeBody {
-  method: 'CRYPTO';
+  method: 'CRYPTO' | 'WALLET';
   amount: string;
   currency: string;
   description?: string;

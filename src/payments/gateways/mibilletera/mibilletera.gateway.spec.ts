@@ -27,7 +27,12 @@ describe('MibilleteraGateway', () => {
   let nodeEnv: string;
 
   beforeEach(async () => {
-    mibi = { configured: true, webhookSecret: SECRET, currency: 'USDT' };
+    mibi = {
+      configured: true,
+      webhookSecret: SECRET,
+      currency: 'USDT',
+      method: 'CRYPTO',
+    };
     nodeEnv = 'test';
     client = {
       createCharge: jest.fn().mockResolvedValue({
@@ -76,6 +81,19 @@ describe('MibilleteraGateway', () => {
       deposit_address: '0xabc',
       blockchain: 'BEP20',
     });
+  });
+
+  it('sends WALLET when the store is provisioned for it (MIBI_METHOD)', async () => {
+    mibi.method = 'WALLET';
+
+    await gateway.createCharge(
+      { id: 'order-1', orderNumber: 'ORD-20260001', total: '30.00' } as Order,
+      'order_ORD-20260001_mibilletera_1',
+    );
+
+    expect(client.createCharge).toHaveBeenCalledWith(
+      expect.objectContaining({ method: 'WALLET' }),
+    );
   });
 
   it('accepts a correctly signed webhook', () => {
