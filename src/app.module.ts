@@ -55,6 +55,12 @@ import { WebhooksModule } from './webhooks/webhooks.module';
           url,
           autoLoadEntities: true,
           synchronize: nodeEnv !== 'production',
+          migrations: ['dist/database/migrations/*.js'],
+          // Production never syncs from the entities: it applies the
+          // migrations that were committed, in order, at boot. Everywhere
+          // else keeps synchronize, so day-to-day work does not need a
+          // migration per field.
+          migrationsRun: nodeEnv === 'production',
           logging: false,
         };
       },
