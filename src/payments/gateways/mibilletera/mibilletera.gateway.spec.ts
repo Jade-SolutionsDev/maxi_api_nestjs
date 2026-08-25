@@ -1,4 +1,4 @@
-import { UnauthorizedException } from '@nestjs/common';
+import { BadRequestException, UnauthorizedException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { Test, TestingModule } from '@nestjs/testing';
 import { createHmac } from 'node:crypto';
@@ -104,6 +104,30 @@ describe('MibilleteraGateway', () => {
     expect(parsed.reference).toBe('MCH123');
     expect(parsed.charge.status).toBe(ChargeStatus.SUCCEEDED);
     expect(parsed.charge.settlementAmount).toBe('29.25000000');
+  });
+
+  it('derives the status from the event name when the payload omits status', () => {
+    const eventOnly = JSON.stringify({
+      event: 'charge.expired',
+      reference: 'MCH123',
+    });
+
+    const parsed = gateway.parseWebhook(eventOnly, {
+      'x-mibi-signature': sign(eventOnly),
+    });
+
+    expect(parsed.charge.status).toBe(ChargeStatus.EXPIRED);
+  });
+
+  it('rejects a webhook with neither a status nor a known event', () => {
+    const unknown = JSON.stringify({
+      event: 'charge.mystery',
+      reference: 'MCH123',
+    });
+
+    expect(() =>
+      gateway.parseWebhook(unknown, { 'x-mibi-signature': sign(unknown) }),
+    ).toThrow(BadRequestException);
   });
 
   it('rejects an invalid signature', () => {

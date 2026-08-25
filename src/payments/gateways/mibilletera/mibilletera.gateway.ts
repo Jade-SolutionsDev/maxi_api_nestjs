@@ -24,10 +24,19 @@ import { MibiChargeData, MibiClient } from './mibi-client';
 interface MibiWebhookEvent {
   event: string;
   reference: string;
-  status: string;
+  status?: string;
   metadata?: Record<string, unknown>;
   [key: string]: unknown;
 }
+
+// The dev-panel callback contract only guarantees the event name; `status`
+// comes from the exported doc's sample and may be absent.
+const EVENT_STATUSES: Record<string, ChargeStatus> = {
+  'charge.succeeded': ChargeStatus.SUCCEEDED,
+  'charge.failed': ChargeStatus.FAILED,
+  'charge.expired': ChargeStatus.EXPIRED,
+  'charge.cancelled': ChargeStatus.CANCELLED,
+};
 
 /**
  * Mi Billetera merchant charges (CRYPTO). The gateway rule that shapes this:
@@ -93,7 +102,13 @@ export class MibilleteraGateway extends PaymentGateway {
       throw new BadRequestException('Invalid JSON webhook payload');
     }
 
-    const status = event.status as ChargeStatus;
+    const status =
+      (event.status as ChargeStatus) ?? EVENT_STATUSES[event.event];
+    if (!status) {
+      throw new BadRequestException(
+        `Unrecognized Mi Billetera webhook event "${event.event}"`,
+      );
+    }
     return {
       reference: event.reference,
       charge: {

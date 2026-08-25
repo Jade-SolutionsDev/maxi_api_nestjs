@@ -172,11 +172,12 @@ fallback, not the primary signal, so don't panic-refresh.
 ## Environment / configuration (backend, for reference)
 
 ```bash
-MIBI_KEY_ID=mb_key_...          # merchant API key (scopes: charges write+read)
+MIBI_KEY_ID=mb_key_...          # store API key (dev store keys differ from production)
 MIBI_SECRET_KEY=mb_secret_...
-MIBI_WEBHOOK_SECRET=...         # HMAC secret for POST /api/webhooks/mibilletera
+MIBI_WEBHOOK_SECRET=...         # HMAC secret for POST /api/webhooks/payments/mibilletera
 MIBI_API_BASE=https://mibilletera.cu   # point at https://dev.mibilletera.cu for staging
 MIBI_CURRENCY=USD               # settlement currency of the charge (default USD)
+MIBI_METHOD=CRYPTO              # CRYPTO or WALLET, per the store's provisioning
 ```
 
 Gateway unconfigured (keys unset) → it cannot be enabled, and with no gateway
@@ -189,7 +190,23 @@ account at Mi Billetera.** If it doesn't, charge creation fails with
 `No active receiving account is bound for currency '<X>'` (HTTP 400) — the
 order is still created (payment stays pending, retry available). Fix by asking
 Mi Billetera ops to bind a receiving account for that currency, or by setting
-`MIBI_CURRENCY` to a currency the account already supports.
+`MIBI_CURRENCY` to a currency the account already supports. The binding is
+also **method-scoped**: a store whose account serves WALLET can still reject
+CRYPTO charges with the same message — `scripts/mibi-diagnose.sh` (run from a
+network that reaches the gateway) fires the store panel's own example with
+both methods to tell the two cases apart, and `MIBI_METHOD` selects the
+provisioned one without a rebuild.
+
+**Webhook contract (confirmed against the dev store panel, 2026-08-24):**
+POST JSON, `X-Mibi-Signature` = lowercase hex HMAC-SHA256 of the exact body
+bytes — no prefix, **no timestamp** (the exported doc's "validate timestamp"
+does not apply). Any 2xx acknowledges. Delivery is not guaranteed and events
+repeat — processing is deduplicated by reference + terminal status, and
+polling stays the authoritative reconciliation. Terminal events:
+`charge.succeeded|failed|expired|cancelled`; the parser derives the status
+from the event name if the payload omits a `status` field. Local dev without
+a public URL needs no webhook at all: the storefront's polling settles the
+order on its own.
 
 ## Network reality (verified 2026-08-13)
 
