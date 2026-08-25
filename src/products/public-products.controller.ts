@@ -60,6 +60,7 @@ export class PublicProductsController {
         maxPrice: query.maxPrice,
         priceField: 'finalPrice',
         featured: query.featured,
+        onSale: query.onSale,
         sortBy: query.sortBy,
         sortOrder: query.sortOrder,
       },

@@ -31,6 +31,11 @@ export interface ProductFilters {
    */
   priceField?: 'basePrice' | 'finalPrice';
   featured?: boolean;
+  /**
+   * `true` → only discounted products, `false` → only products at list price.
+   * Omitted → no discount filter.
+   */
+  onSale?: boolean;
   isActive?: boolean;
   sortBy?: 'name' | 'price' | 'finalPrice' | 'createdAt' | 'updatedAt';
   sortOrder?: 'asc' | 'desc';
@@ -122,6 +127,12 @@ export class ProductsService {
       qb.andWhere('product.isFeatured = :featured', {
         featured: filters.featured,
       });
+    }
+    if (filters.onSale != null) {
+      // A product is "on sale" when it carries a discount percentage.
+      qb.andWhere(
+        filters.onSale ? 'product.discount > 0' : 'product.discount = 0',
+      );
     }
     if (filters.isActive != null) {
       qb.andWhere('product.isActive = :isActive', {
