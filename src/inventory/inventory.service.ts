@@ -453,12 +453,18 @@ export class InventoryService {
     orderId: string,
     productId: string,
     quantity: number,
+    locationId?: string,
   ): Promise<void> {
     const repo = manager.getRepository(Inventory);
     // Only enabled storages can fulfil an order — never reserve from a disabled
-    // or soft-deleted location.
+    // or soft-deleted location. `locationId` narrows that to a single storage:
+    // a pickup order must hold its stock on the shelf the customer walks up to,
+    // not wherever the quantity happens to be.
     const activeLocations: { id: string }[] = await manager.query(
-      `SELECT id FROM stock_locations WHERE is_active = true AND deleted_at IS NULL`,
+      locationId
+        ? `SELECT id FROM stock_locations WHERE is_active = true AND deleted_at IS NULL AND id = $1`
+        : `SELECT id FROM stock_locations WHERE is_active = true AND deleted_at IS NULL`,
+      locationId ? [locationId] : undefined,
     );
     const activeIds = activeLocations.map((l) => l.id);
     const rows =

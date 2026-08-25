@@ -22,7 +22,15 @@ import { AdminOrdersQueryDto } from './dto/admin-orders-query.dto';
 import { CheckoutDto } from './dto/checkout.dto';
 import { OrderResponseDto } from './dto/order-response.dto';
 import { OrderItem } from './entities/order-item.entity';
-import { Order, OrderStatus, PaymentStatus } from './entities/order.entity';
+import {
+  FulfillmentType,
+  Order,
+  OrderStatus,
+  PaymentStatus,
+} from './entities/order.entity';
+import { ClientAddressesService } from '../client-addresses/client-addresses.service';
+import { ClientAddress } from '../client-addresses/entities/client-address.entity';
+import { FulfillmentService } from '../fulfillment/fulfillment.service';
 import { PaymentGateway } from '../payments/payment-gateway.interface';
 import { PaymentMethodsService } from '../payments/payment-methods.service';
 import { PaymentsService } from '../payments/payments.service';
@@ -53,6 +61,16 @@ const GROCER_TARGETS = [
   OrderStatus.DELIVERED,
 ];
 
+/** What the order keeps of an address, independent of the address book. */
+const snapshotAddress = (address: ClientAddress): Record<string, unknown> => ({
+  label: address.label ?? null,
+  street: address.street,
+  betweenStreets: address.betweenStreets ?? null,
+  reference: address.reference ?? null,
+  municipalityId: address.municipalityId,
+  contactPhone: address.contactPhone ?? null,
+});
+
 @Injectable()
 export class OrdersService {
   private readonly logger = new Logger(OrdersService.name);
@@ -64,6 +82,8 @@ export class OrdersService {
     private readonly inventoryService: InventoryService,
     private readonly paymentsService: PaymentsService,
     private readonly paymentMethodsService: PaymentMethodsService,
+    private readonly fulfillmentService: FulfillmentService,
+    private readonly clientAddressesService: ClientAddressesService,
     private readonly dataSource: DataSource,
   ) {}
 
@@ -90,13 +110,31 @@ export class OrdersService {
   // commit: an outbound gateway call must not hold the inventory row locks,
   // and a gateway failure must not lose the order.
   async checkout(client: Client, dto: CheckoutDto): Promise<OrderResponseDto> {
-    // Same municipality the order ships to, so availability is judged against
-    // the zone the customer is actually buying for.
+    // Where the order is going, and how. Both are settled before anything is
+    // written: a choice the shop cannot honour must 400, not become an order
+    // nobody can fill.
+    const address = await this.resolveAddress(client, dto);
     const deliveryMunicipalityId =
-      dto.deliveryMunicipalityId ?? client.defaultMunicipalityId ?? undefined;
-    const cart = await this.cartService.getCart(client.id, {
+      address?.municipalityId ??
+      dto.deliveryMunicipalityId ??
+      client.defaultMunicipalityId ??
+      undefined;
+
+    const fulfillment = await this.fulfillmentService.resolveChoice({
+      fulfillmentType: dto.fulfillmentType,
+      deliveryOptionId: dto.deliveryOptionId,
+      pickupAddressId: dto.pickupAddressId,
       municipalityId: deliveryMunicipalityId,
     });
+
+    // Availability is judged where the goods will actually be handed over: the
+    // storage the customer collects from, or the zone we deliver to.
+    const cart = await this.cartService.getCart(
+      client.id,
+      fulfillment.pickupLocationId
+        ? { locationId: fulfillment.pickupLocationId }
+        : { municipalityId: deliveryMunicipalityId },
+    );
     if (cart.items.length === 0) {
       throw new BadRequestException('Cart is empty');
     }
@@ -117,6 +155,8 @@ export class OrdersService {
     // gateway call.
     const gateway = await this.paymentMethodsService.resolve(dto.paymentMethod);
 
+    const total = (cart.subtotal + Number(fulfillment.fee)).toFixed(2);
+
     const orderId = await this.dataSource.transaction(async (manager) => {
       const orderRepo = manager.getRepository(Order);
       const order = await orderRepo.save(
@@ -125,10 +165,20 @@ export class OrdersService {
           status: OrderStatus.PENDING,
           paymentStatus: PaymentStatus.PENDING,
           subtotal: cart.subtotal.toFixed(2),
-          deliveryFee: '0.00',
-          total: cart.subtotal.toFixed(2),
+          deliveryFee: fulfillment.fee,
+          total,
+          fulfillmentType: fulfillment.type,
+          deliveryOptionId: fulfillment.deliveryOptionId,
+          deliveryOptionLabel: fulfillment.deliveryOptionLabel,
+          pickupLocationId: fulfillment.pickupLocationId,
+          pickupAddressId: fulfillment.pickupAddressId,
+          pickupAddressSnapshot: fulfillment.pickupAddressSnapshot,
           deliveryMunicipalityId: deliveryMunicipalityId ?? null,
-          deliveryAddress: dto.deliveryAddress ?? null,
+          // A snapshot: the saved address may be edited or deleted later, the
+          // order must still say where it was going.
+          deliveryAddress: address
+            ? snapshotAddress(address)
+            : (dto.deliveryAddress ?? null),
           customerNotes: dto.customerNotes ?? null,
         }),
       );
@@ -144,6 +194,8 @@ export class OrdersService {
           order.id,
           line.productId,
           line.quantity,
+          // Pickup holds its stock in the storage the customer walks up to.
+          fulfillment.pickupLocationId ?? undefined,
         );
         await itemRepo.save(
           itemRepo.create({
@@ -169,6 +221,36 @@ export class OrdersService {
     void this.initiatePayment(orderId, gateway);
 
     return this.findOneForClient(client.id, orderId);
+  }
+
+  /**
+   * The address this order ships to: a saved one (ownership-checked), or one
+   * typed at checkout — persisted to the customer's book only if they asked.
+   * Pickup orders have none.
+   */
+  private async resolveAddress(
+    client: Client,
+    dto: CheckoutDto,
+  ): Promise<ClientAddress | null> {
+    if (dto.fulfillmentType === FulfillmentType.PICKUP) return null;
+
+    if (dto.addressId) {
+      return this.clientAddressesService.findOneForClient(
+        client.id,
+        dto.addressId,
+      );
+    }
+    if (!dto.address) return null;
+
+    if (dto.saveAddress) {
+      return this.clientAddressesService.create(client.id, dto.address);
+    }
+    // Not saved: a detached row the order snapshots and nothing else sees.
+    return {
+      ...dto.address,
+      clientId: client.id,
+      municipalityId: dto.address.municipalityId,
+    } as ClientAddress;
   }
 
   // Background payment initiation. Never throws: a gateway failure leaves the
