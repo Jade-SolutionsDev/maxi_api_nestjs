@@ -93,6 +93,12 @@ export class PublicProductsQueryDto extends PaginationQueryDto {
   @IsBoolean()
   featured?: boolean;
 
+  /** Only products carrying a discount (`false` → only products at list price). */
+  @IsOptional()
+  @Transform(toOptionalBoolean)
+  @IsBoolean()
+  onSale?: boolean;
+
   /** Include products with zero stock (default false → only in-stock). */
   @IsOptional()
   @Transform(toOptionalBoolean)

@@ -181,13 +181,15 @@ describe('ProductsService', () => {
   });
 
   describe('findAll', () => {
+    const makeFindAllQb = () => ({
+      andWhere: jest.fn().mockReturnThis(),
+      orderBy: jest.fn().mockReturnThis(),
+      addOrderBy: jest.fn().mockReturnThis(),
+      getMany: jest.fn().mockResolvedValue([]),
+    });
+
     it('filters by taxonomy slugs with bound params', async () => {
-      const qb = {
-        andWhere: jest.fn().mockReturnThis(),
-        orderBy: jest.fn().mockReturnThis(),
-        addOrderBy: jest.fn().mockReturnThis(),
-        getMany: jest.fn().mockResolvedValue([]),
-      };
+      const qb = makeFindAllQb();
       repository.createQueryBuilder.mockReturnValue(qb as never);
 
       await service.findAll({
@@ -202,6 +204,35 @@ describe('ProductsService', () => {
       expect(qb.andWhere).toHaveBeenCalledWith(
         expect.stringContaining('d.slug = :departmentSlug'),
         { departmentSlug: 'alimentos' },
+      );
+    });
+
+    it('onSale=true keeps only discounted products', async () => {
+      const qb = makeFindAllQb();
+      repository.createQueryBuilder.mockReturnValue(qb as never);
+
+      await service.findAll({ onSale: true });
+
+      expect(qb.andWhere).toHaveBeenCalledWith('product.discount > 0');
+    });
+
+    it('onSale=false keeps only products at list price', async () => {
+      const qb = makeFindAllQb();
+      repository.createQueryBuilder.mockReturnValue(qb as never);
+
+      await service.findAll({ onSale: false });
+
+      expect(qb.andWhere).toHaveBeenCalledWith('product.discount = 0');
+    });
+
+    it('omitting onSale does not filter by discount', async () => {
+      const qb = makeFindAllQb();
+      repository.createQueryBuilder.mockReturnValue(qb as never);
+
+      await service.findAll({});
+
+      expect(qb.andWhere).not.toHaveBeenCalledWith(
+        expect.stringContaining('product.discount'),
       );
     });
   });
