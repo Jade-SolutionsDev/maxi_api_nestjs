@@ -4,22 +4,9 @@ import { MigrationInterface, QueryRunner } from 'typeorm';
  * Baseline: the whole schema as of 24-ago-2026, generated with
  * `migration:generate` against an empty database and then made idempotent.
  *
- * Why idempotent: production already has these 30 tables — they were created by
- * `synchronize` before this project had migrations at all. A plain CREATE would
- * fail there. `IF NOT EXISTS` (and the DO blocks for enums and foreign keys,
- * which do not support it) let the same migration serve both an empty database
- * and one that already carries the schema, with no manual step in production.
- *
- * It also absorbs the earlier CreateClientAddresses migration, which is why
- * that file is gone: this one creates that table too.
- */
-
-/**
- * Baseline: the whole schema as of 24-ago-2026, generated with
- * `migration:generate` against an empty database and then made idempotent.
- *
- * Why idempotent: production already has these 30 tables — they were created by
- * `synchronize` before this project had migrations at all. A plain CREATE would
+ * Why idempotent: production already has these 30 tables — created by
+ * `synchronize` back when this project had no migrations at all. (The 31st,
+ * `migrations`, is TypeORM's own bookkeeping.) A plain CREATE would
  * fail there. `IF NOT EXISTS` (and the DO blocks for enums and foreign keys,
  * which do not support it) let the same migration serve both an empty database
  * and one that already carries the schema, with no manual step in production.
