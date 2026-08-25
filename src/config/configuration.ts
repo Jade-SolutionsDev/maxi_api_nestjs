@@ -98,6 +98,14 @@ export interface StorefrontConfig {
   revalidateSecret: string | undefined;
 }
 
+export interface ResendConfig {
+  apiKey: string | undefined;
+  /** Sender address for platform replies, e.g. "Maxi <soporte@maxihabana.com>". */
+  fromAddress: string | undefined;
+  /** Credentials present. Platform email replies stay disabled without this. */
+  configured: boolean;
+}
+
 export interface AppConfig {
   port: number;
   database: DatabaseConfig;
@@ -108,6 +116,7 @@ export interface AppConfig {
   storage: StorageConfig;
   payments: PaymentsConfig;
   storefront: StorefrontConfig;
+  resend: ResendConfig;
   nodeEnv: string;
   /** Number of reverse proxies in front of the API (Express `trust proxy`).
    *  Makes req.ip resolve to the real client from X-Forwarded-For, so rate
@@ -248,6 +257,16 @@ export const storefrontConfig = (): StorefrontConfig => ({
   revalidateSecret: process.env.STOREFRONT_REVALIDATE_SECRET,
 });
 
+export const resendConfig = (): ResendConfig => {
+  const apiKey = process.env.RESEND_API_KEY;
+  const fromAddress = process.env.RESEND_FROM;
+  return {
+    apiKey,
+    fromAddress,
+    configured: isConfigured(apiKey, fromAddress),
+  };
+};
+
 export default (): AppConfig => ({
   port: parseInt(process.env.PORT ?? '3000', 10),
   database: databaseConfig(),
@@ -258,6 +277,7 @@ export default (): AppConfig => ({
   storage: storageConfig(),
   payments: paymentsConfig(),
   storefront: storefrontConfig(),
+  resend: resendConfig(),
   nodeEnv: process.env.NODE_ENV ?? 'development',
   trustProxyHops: parseInt(process.env.TRUST_PROXY_HOPS ?? '1', 10),
 });

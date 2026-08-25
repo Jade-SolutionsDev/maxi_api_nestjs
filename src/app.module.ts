@@ -12,11 +12,13 @@ import { CategoriesModule } from './categories/categories.module';
 import { CmsModule } from './cms/cms.module';
 import { ClientAddressesModule } from './client-addresses/client-addresses.module';
 import { ClientsModule } from './clients/clients.module';
+import { ContactModule } from './contact/contact.module';
 import { AuthGuard } from './common/guards/auth.guard';
 import { RolesGuard } from './common/guards/roles.guard';
 import { GeographyModule } from './geography/geography.module';
 import { HealthModule } from './health/health.module';
 import { InventoryModule } from './inventory/inventory.module';
+import { NomenclatorsModule } from './nomenclators/nomenclators.module';
 import { OrdersModule } from './orders/orders.module';
 import { PaymentsModule } from './payments/payments.module';
 import { PermissionGuard } from './permissions/guards/permission.guard';
@@ -74,6 +76,8 @@ import { WebhooksModule } from './webhooks/webhooks.module';
     AuthModule,
     CategoriesModule,
     CmsModule,
+    NomenclatorsModule,
+    ContactModule,
     ProductsModule,
     CartModule,
     GeographyModule,
