@@ -44,6 +44,6 @@ export class InventoryOperation {
   @Column({ name: 'created_by', type: 'uuid' })
   createdBy: string;
 
-  @CreateDateColumn({ name: 'created_at' })
+  @CreateDateColumn({ name: 'created_at', type: 'timestamptz' })
   createdAt: Date;
 }

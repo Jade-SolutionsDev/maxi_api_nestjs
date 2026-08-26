@@ -1,3 +1,15 @@
+/**
+ * El proceso trabaja en UTC, pase lo que pase en la máquina que lo arranca.
+ *
+ * Las columnas de fecha son `timestamp without time zone` y la base guarda UTC.
+ * Al leerlas, el driver construye la fecha interpretando ese texto **en la zona
+ * del proceso**: en `America/Havana` las 14:59 UTC guardadas se convertían en
+ * las 18:59 UTC, y la administración las mostraba cuatro horas adelantadas.
+ *
+ * Tiene que ir antes de cualquier import que pueda leer la hora.
+ */
+process.env.TZ = 'UTC';
+
 import { Logger, ValidationPipe } from '@nestjs/common';
 import { NestFactory } from '@nestjs/core';
 import { NestExpressApplication } from '@nestjs/platform-express';

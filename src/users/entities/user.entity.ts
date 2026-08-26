@@ -79,18 +79,18 @@ export class User {
   // Set the first time the account is activated (= approved). Distinguishes a
   // brand-new invited user awaiting approval (null) from one an admin disabled
   // after approving (non-null). See UsersService.update / user-response.dto.
-  @Column({ name: 'approved_at', type: 'timestamp', nullable: true })
+  @Column({ name: 'approved_at', type: 'timestamptz', nullable: true })
   approvedAt: Date | null;
 
   @Column({ name: 'created_by', type: 'uuid', nullable: true })
   createdBy: string | null;
 
-  @CreateDateColumn({ name: 'created_at' })
+  @CreateDateColumn({ name: 'created_at', type: 'timestamptz' })
   createdAt: Date;
 
-  @UpdateDateColumn({ name: 'updated_at' })
+  @UpdateDateColumn({ name: 'updated_at', type: 'timestamptz' })
   updatedAt: Date;
 
-  @DeleteDateColumn({ name: 'deleted_at' })
+  @DeleteDateColumn({ name: 'deleted_at', type: 'timestamptz' })
   deletedAt: Date | null;
 }

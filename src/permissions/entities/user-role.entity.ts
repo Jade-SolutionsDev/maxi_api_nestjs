@@ -12,7 +12,7 @@ export class UserRole {
   @Column({ name: 'assigned_by', type: 'uuid', nullable: true })
   assignedBy: string | null;
 
-  @Column({ name: 'assigned_at', type: 'timestamp', default: () => 'NOW()' })
+  @Column({ name: 'assigned_at', type: 'timestamptz', default: () => 'NOW()' })
   assignedAt: Date;
 
   @ManyToOne(() => ManagedRole, { onDelete: 'CASCADE' })

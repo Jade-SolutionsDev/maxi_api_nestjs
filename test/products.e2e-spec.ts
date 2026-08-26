@@ -269,6 +269,22 @@ describe('Products (e2e)', () => {
       expect(res.body.data[0].departmentId).toBeNull();
     });
 
+    it('la fecha que devuelve es el instante real, no otro', async () => {
+      /**
+       * Las columnas de fecha no llevan zona y la base guarda UTC: si el
+       * proceso corre en `America/Havana`, el driver lee «14:59» como hora de
+       * La Habana y devuelve las 18:59 UTC. La administración mostraba cuatro
+       * horas de más — reportado en MxH-0014, MxH-0017 y MxH-0021.
+       */
+      const antes = Date.now();
+      const creado = await crear(nuevoProducto()).expect(201);
+      const despues = Date.now();
+
+      const createdAt = Date.parse(creado.body.data.createdAt);
+      expect(createdAt).toBeGreaterThanOrEqual(antes - 60_000);
+      expect(createdAt).toBeLessThanOrEqual(despues + 60_000);
+    });
+
     it('encuentra por nombre aunque la tilde no coincida', async () => {
       /**
        * En español casi todo lo buscado la lleva y casi nadie la escribe. Antes
