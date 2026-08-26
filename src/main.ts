@@ -39,6 +39,21 @@ async function bootstrap() {
   });
   const configService = app.get(ConfigService);
 
+  /**
+   * Una variable peligrosa que se ignora en silencio se queda puesta para
+   * siempre, y reaparece el día que alguien quite la guardia. Si está puesta y
+   * no se está honrando, que se sepa al arrancar.
+   */
+  if (
+    process.env.MOCK_AUTH_ENABLED === 'true' &&
+    !configService.get<boolean>('auth.mockEnabled')
+  ) {
+    new Logger('Bootstrap').warn(
+      'MOCK_AUTH_ENABLED está puesta y se ignora: la autenticación simulada solo existe en local y en pruebas. Quítala de este entorno.',
+    );
+  }
+
+
   // Trust the reverse proxy (Traefik) so req.ip is the real client from
   // X-Forwarded-For, not the proxy's address. Without this, rate limiting keys
   // every client to one bucket. Exact hop count is spoof-safe (MxH-0066).

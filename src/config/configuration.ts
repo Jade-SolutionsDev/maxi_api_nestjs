@@ -153,7 +153,11 @@ export const clerkConfig = (): ClerkConfig => ({
 });
 
 export const authConfig = (): AuthConfig => ({
-  mockEnabled: process.env.MOCK_AUTH_ENABLED === 'true',
+  // Same interlock as the unsigned-webhook hatch below: honored ONLY in
+  // local/test. `MockAuthProvider` returns `mock:<clerkId>` as an authenticated
+  // user without verifying anything, so a copied `.env` would hand production a
+  // superadmin to whoever sends the header. It must not depend on remembering.
+  mockEnabled: isLocalEnv() && process.env.MOCK_AUTH_ENABLED === 'true',
   // The unsigned-webhook escape hatch is honored ONLY in local/test, never in a
   // deployed environment — even if the flag is left set by mistake.
   allowUnverifiedWebhooks:
