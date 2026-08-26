@@ -254,19 +254,17 @@ describe('Products (e2e)', () => {
       expect(res.body.data[0].categoryId).toBe(categoryId);
 
       /**
-       * OJO — esto documenta lo que hace hoy, no lo que pide la tarjeta.
-       *
-       * `MxH-0012 Listar productos` exige que el listado muestre departamento y
-       * categoria. El servicio solo devuelve `categoryId`: `findAll` construye
-       * la consulta sin cargar la relacion, asi que `category` llega vacio y
-       * `departmentId` nulo. La administracion tiene que resolver los nombres
-       * por su cuenta contra el catalogo.
-       *
-       * Si algun dia se arregla, estas dos aserciones fallaran — y eso sera la
-       * senal de que hay que actualizarlas, no de que algo se rompio.
+       * `MxH-0012` pide que el listado muestre departamento y categoria, y por
+       * eso `findAll` carga la relacion: sin ella `departmentId` llegaba nulo y
+       * la administracion no tenia de donde sacar el departamento.
+       */
+      expect(res.body.data[0].departmentId).toBe(departmentId);
+      /**
+       * El objeto `category` no viaja en el listado, y es deliberado: la
+       * administracion ya tiene el catalogo cargado y resuelve el nombre con
+       * el id. Lo que faltaba era el departamento, que ahora si llega.
        */
       expect(res.body.data[0].category).toBeUndefined();
-      expect(res.body.data[0].departmentId).toBeNull();
     });
 
     it('la fecha que devuelve es el instante real, no otro', async () => {
