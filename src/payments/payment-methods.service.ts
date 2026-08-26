@@ -24,20 +24,20 @@ const SEED: Record<
   tropipay: {
     label: 'Tarjeta (Tropipay)',
     description:
-      'Pagá con tarjeta de crédito o débito en la pasarela segura de Tropipay.',
+      'Paga con tarjeta de crédito o débito en la pasarela segura de Tropipay.',
     icon: 'CreditCard',
     sortOrder: 10,
   },
   mibilletera: {
     label: 'Criptomonedas (Mi Billetera)',
     description:
-      'Transferí USDT desde tu billetera; te damos la dirección de depósito.',
+      'Transfiere USDT desde tu billetera; te damos la dirección de depósito.',
     icon: 'Bitcoin',
     sortOrder: 20,
   },
   manual: {
     label: 'Pago manual',
-    description: 'Coordinamos el pago con vos y lo confirmamos manualmente.',
+    description: 'Coordinamos el pago contigo y lo confirmamos manualmente.',
     icon: 'HandCoins',
     sortOrder: 90,
   },

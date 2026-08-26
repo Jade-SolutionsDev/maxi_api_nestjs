@@ -1,5 +1,6 @@
 import {
   CancellationReason,
+  FulfillmentType,
   Order,
   OrderStatus,
   PaymentStatus,
@@ -44,6 +45,13 @@ export class OrderResponseDto {
   deliveryFee: number;
   total: number;
   deliveryMunicipalityId: string | null;
+  /** How the customer gets it: delivered, or collected at a storage. */
+  fulfillmentType: FulfillmentType;
+  /** Name of the delivery option as chosen, even if it was renamed since. */
+  deliveryOptionLabel: string | null;
+  /** Where to collect, for a pickup order. */
+  pickupAddress: Record<string, unknown> | null;
+  pickupLocationId: string | null;
   deliveryAddress: Record<string, unknown> | null;
   customerNotes: string | null;
   /** Present on detail responses; omitted on lists. */
@@ -84,6 +92,10 @@ export class OrderResponseDto {
     dto.deliveryFee = Number(order.deliveryFee);
     dto.total = Number(order.total);
     dto.deliveryMunicipalityId = order.deliveryMunicipalityId;
+    dto.fulfillmentType = order.fulfillmentType;
+    dto.deliveryOptionLabel = order.deliveryOptionLabel;
+    dto.pickupAddress = order.pickupAddressSnapshot;
+    dto.pickupLocationId = order.pickupLocationId;
     dto.deliveryAddress = order.deliveryAddress;
     dto.customerNotes = order.customerNotes;
     dto.cancellationReason = order.cancellationReason;

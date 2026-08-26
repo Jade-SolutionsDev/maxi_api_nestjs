@@ -15,6 +15,7 @@ import { ClientsModule } from './clients/clients.module';
 import { ContactModule } from './contact/contact.module';
 import { AuthGuard } from './common/guards/auth.guard';
 import { RolesGuard } from './common/guards/roles.guard';
+import { FulfillmentModule } from './fulfillment/fulfillment.module';
 import { GeographyModule } from './geography/geography.module';
 import { HealthModule } from './health/health.module';
 import { InventoryModule } from './inventory/inventory.module';
@@ -81,6 +82,7 @@ import { WebhooksModule } from './webhooks/webhooks.module';
     ProductsModule,
     CartModule,
     GeographyModule,
+    FulfillmentModule,
     StockLocationsModule,
     InventoryModule,
     OrdersModule,
