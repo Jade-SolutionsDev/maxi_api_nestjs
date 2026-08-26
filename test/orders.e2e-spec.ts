@@ -305,6 +305,17 @@ describe('Orders (e2e)', () => {
 
     expect(res.body.data.cancelled).toBe(1);
 
+    /**
+     * La reserva queda marcada como caducada, no como cancelada: son dos cosas
+     * distintas y `MxH-0078` pedia poder medirlas por separado — cuanto stock
+     * retienen los pedidos que nadie paga es lo que dice si el plazo esta bien
+     * puesto.
+     */
+    const estados = await inventory.query(
+      `SELECT status, count(*)::int AS n FROM inventory_reservations GROUP BY status`,
+    );
+    expect(estados).toEqual([{ status: 'expired', n: 1 }]);
+
     const row = await physicalRow();
     expect(row.reservedQuantity).toBe(0);
     expect(row.quantity).toBe(5);
