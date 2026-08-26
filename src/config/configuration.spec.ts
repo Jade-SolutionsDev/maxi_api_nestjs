@@ -63,6 +63,30 @@ describe('configuration', () => {
     expect(configuration().trustProxyHops).toBe(2);
   });
 
+  describe('mockEnabled', () => {
+    it('is honored in local/test when the flag is set', () => {
+      process.env.MOCK_AUTH_ENABLED = 'true';
+      process.env.NODE_ENV = 'development';
+      expect(authConfig().mockEnabled).toBe(true);
+      process.env.NODE_ENV = 'test';
+      expect(authConfig().mockEnabled).toBe(true);
+    });
+
+    it('is NEVER honored in a deployed environment, even with the flag set', () => {
+      /**
+       * `MockAuthProvider` hands back `mock:<clerkId>` as an authenticated user
+       * without verifying anything. A `.env` copied from staging would give
+       * production a superadmin to anyone who sends that header, and nothing
+       * would fail loudly: the app boots fine and stays open.
+       */
+      process.env.MOCK_AUTH_ENABLED = 'true';
+      for (const env of ['staging', 'production']) {
+        process.env.NODE_ENV = env;
+        expect(authConfig().mockEnabled).toBe(false);
+      }
+    });
+  });
+
   describe('allowUnverifiedWebhooks', () => {
     it('is honored in local/test when the flag is set', () => {
       process.env.ALLOW_UNVERIFIED_WEBHOOKS = 'true';
