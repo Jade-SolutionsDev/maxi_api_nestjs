@@ -185,6 +185,8 @@ describe('ProductsService', () => {
       andWhere: jest.fn().mockReturnThis(),
       orderBy: jest.fn().mockReturnThis(),
       addOrderBy: jest.fn().mockReturnThis(),
+      // The list loads the category so the response can name the department.
+      leftJoinAndSelect: jest.fn().mockReturnThis(),
       getMany: jest.fn().mockResolvedValue([]),
     });
 
