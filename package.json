@@ -37,7 +37,8 @@
     "backfill:sale-operations": "ts-node scripts/backfill-sale-operations.ts",
     "seed:orders": "ts-node scripts/seed-orders.ts",
     "seed:cms": "ts-node scripts/seed-cms.ts",
-    "seed:contact": "ts-node scripts/seed-contact.ts"
+    "seed:contact": "ts-node scripts/seed-contact.ts",
+    "seed:fulfillment": "ts-node scripts/seed-fulfillment.ts"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1085.0",
