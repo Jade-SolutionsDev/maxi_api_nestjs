@@ -126,7 +126,7 @@ export interface AppConfig {
 }
 
 /** True only for local/test — never a deployed environment. */
-const isLocalEnv = (): boolean => {
+export const isLocalEnv = (): boolean => {
   const env = process.env.NODE_ENV ?? 'development';
   return env === 'development' || env === 'test';
 };
