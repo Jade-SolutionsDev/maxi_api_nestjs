@@ -18,6 +18,7 @@ import helmet from 'helmet';
 import { IncomingMessage, ServerResponse } from 'http';
 import { DataSource } from 'typeorm';
 import { AppModule } from './app.module';
+import { comprobarConfiguracion } from './config/startup-checks';
 import { AllExceptionsFilter } from './common/filters/all-exceptions.filter';
 import { ResponseInterceptor } from './common/interceptors/response.interceptor';
 import { ConfigService } from '@nestjs/config';
@@ -37,6 +38,8 @@ async function bootstrap() {
   const app = await NestFactory.create<NestExpressApplication>(AppModule, {
     bodyParser: false,
   });
+  comprobarConfiguracion();
+
   const configService = app.get(ConfigService);
 
   /**
