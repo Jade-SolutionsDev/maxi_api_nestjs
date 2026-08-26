@@ -557,11 +557,17 @@ export class InventoryService {
     manager: EntityManager,
     orderId: string,
     userId?: string,
+    /**
+     * Con qué se marca lo liberado. Por defecto «cancelada», que es lo que hace
+     * una persona; la caducidad pasa `EXPIRED` para poder medir aparte cuánto
+     * stock retienen los pedidos que nunca se pagan.
+     */
+    estadoFinal: ReservationStatus = ReservationStatus.CANCELLED,
   ): Promise<void> {
     await this.settleReservations(
       manager,
       orderId,
-      ReservationStatus.CANCELLED,
+      estadoFinal,
       (row, n) => {
         row.reservedQuantity -= n;
       },
@@ -591,7 +597,7 @@ export class InventoryService {
           }),
         );
       }
-      reservation.status = ReservationStatus.CANCELLED;
+      reservation.status = estadoFinal;
       await reservationRepo.save(reservation);
     }
     if (confirmed.length > 0) {
