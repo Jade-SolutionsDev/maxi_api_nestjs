@@ -1,3 +1,4 @@
+import { sinTildes } from '../common/search/accent-insensitive';
 import {
   BadRequestException,
   ConflictException,
@@ -91,7 +92,7 @@ export class UsersService {
     }
     if (filter.q) {
       qb.andWhere(
-        '(user.firstName ILIKE :q OR user.lastName ILIKE :q OR user.email ILIKE :q OR user.phone ILIKE :q OR user.businessName ILIKE :q)',
+        `(${sinTildes('user.firstName')} OR ${sinTildes('user.lastName')} OR ${sinTildes('user.email')} OR ${sinTildes('user.phone')} OR ${sinTildes('user.businessName')})`,
         { q: `%${filter.q}%` },
       );
     }

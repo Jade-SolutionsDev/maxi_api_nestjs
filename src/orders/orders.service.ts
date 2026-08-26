@@ -1,3 +1,4 @@
+import { sinTildes } from '../common/search/accent-insensitive';
 import {
   BadRequestException,
   ConflictException,
@@ -398,8 +399,8 @@ export class OrdersService {
     }
     if (query.q) {
       qb.andWhere(
-        `(order.orderNumber ILIKE :q OR client.email ILIKE :q
-          OR client.firstName ILIKE :q OR client.lastName ILIKE :q)`,
+        `(${sinTildes('order.orderNumber')} OR ${sinTildes('client.email')}
+          OR ${sinTildes('client.firstName')} OR ${sinTildes('client.lastName')})`,
         { q: `%${query.q}%` },
       );
     }
