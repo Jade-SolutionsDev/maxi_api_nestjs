@@ -300,6 +300,23 @@ describe('OrdersService', () => {
       );
     });
 
+    it('does not touch the address book when checkout fails', async () => {
+      cartService.getCart.mockResolvedValue({
+        items: [{ ...cartLine, isAvailable: false, available: 0 }],
+        totalItems: 2,
+        subtotal: 15,
+      });
+
+      await expect(
+        service.checkout(makeClient(), {
+          address: { street: 'Calle nueva', municipalityId: 'mun-9' },
+          saveAddress: true,
+        }),
+      ).rejects.toBeInstanceOf(ConflictException);
+
+      expect(clientAddressesService.create).not.toHaveBeenCalled();
+    });
+
     it('saves a new address only when the customer asked for it', async () => {
       const address = { street: 'Calle nueva', municipalityId: 'mun-9' };
 

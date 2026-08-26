@@ -218,6 +218,18 @@ export class OrdersService {
     // and visible by now, so making the customer watch a spinner for it only
     // risks them abandoning a checkout that already succeeded. The order page
     // polls for the attempt and can start one itself if this fails.
+    if (dto.saveAddress && dto.address && !dto.addressId) {
+      // After the commit, and never fatal: the order is placed either way.
+      try {
+        await this.clientAddressesService.create(client.id, dto.address);
+      } catch (err) {
+        this.logger.error(
+          `Could not save the address of order ${orderId} to the address book`,
+          err instanceof Error ? err.stack : String(err),
+        );
+      }
+    }
+
     void this.initiatePayment(orderId, gateway);
 
     return this.findOneForClient(client.id, orderId);
@@ -242,10 +254,9 @@ export class OrdersService {
     }
     if (!dto.address) return null;
 
-    if (dto.saveAddress) {
-      return this.clientAddressesService.create(client.id, dto.address);
-    }
-    // Not saved: a detached row the order snapshots and nothing else sees.
+    // Detached: the order snapshots it. Saving to the address book happens
+    // only once the order exists — a checkout that fails must not leave the
+    // customer with a new address (and a retry with a duplicate of it).
     return {
       ...dto.address,
       clientId: client.id,
