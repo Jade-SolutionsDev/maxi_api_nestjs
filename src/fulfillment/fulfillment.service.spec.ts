@@ -127,13 +127,13 @@ describe('FulfillmentService', () => {
 
     it('hides pickup entirely when the switch is off', async () => {
       settingsRepo.findOne.mockResolvedValue({
-        data: { pickupEnabled: false, supportMessage: 'Escribinos' },
+        data: { pickupEnabled: false, supportMessage: 'Escríbenos' },
       });
 
       const offer = await service.availableForClient('mun-1');
 
       expect(offer.pickupPoints).toEqual([]);
-      expect(offer.unavailableMessage).toBe('Escribinos');
+      expect(offer.unavailableMessage).toBe('Escríbenos');
     });
 
     // The state the business is in at launch, plus a storage with no address.
@@ -237,7 +237,7 @@ describe('FulfillmentService', () => {
 
     it('refuses pickup when the switch is off', async () => {
       settingsRepo.findOne.mockResolvedValue({
-        data: { pickupEnabled: false, supportMessage: 'Escribinos' },
+        data: { pickupEnabled: false, supportMessage: 'Escríbenos' },
       });
       optionRepo.find.mockResolvedValue([option()]);
 

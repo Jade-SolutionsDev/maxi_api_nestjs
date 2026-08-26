@@ -16,6 +16,7 @@ import { Order, OrderStatus, PaymentStatus } from './entities/order.entity';
 import { OrdersService } from './orders.service';
 import { ClientAddressesService } from '../client-addresses/client-addresses.service';
 import { FulfillmentService } from '../fulfillment/fulfillment.service';
+import { GeographyService } from '../geography/geography.service';
 import { PaymentMethodsService } from '../payments/payment-methods.service';
 import { PaymentsService } from '../payments/payments.service';
 
@@ -138,6 +139,14 @@ describe('OrdersService', () => {
       findOneForClient: jest.fn(),
       create: jest.fn(),
     };
+    geographyService = {
+      getMunicipalityOrThrow: jest
+        .fn()
+        .mockResolvedValue({ id: 'mun-9', name: 'Báguanos', provinceId: 'p1' }),
+      getProvinceOrThrow: jest
+        .fn()
+        .mockResolvedValue({ id: 'p1', name: 'Holguín' }),
+    };
 
     const manager = {
       getRepository: (entity: unknown) => {
@@ -161,6 +170,7 @@ describe('OrdersService', () => {
         { provide: PaymentMethodsService, useValue: paymentMethodsService },
         { provide: FulfillmentService, useValue: fulfillmentService },
         { provide: ClientAddressesService, useValue: clientAddressesService },
+        { provide: GeographyService, useValue: geographyService },
         { provide: DataSource, useValue: dataSource },
       ],
     }).compile();
@@ -295,6 +305,8 @@ describe('OrdersService', () => {
           deliveryAddress: expect.objectContaining({
             street: 'Calle 23 #456',
             municipalityId: 'mun-9',
+            municipalityName: 'Báguanos',
+            provinceName: 'Holguín',
           }),
         }),
       );

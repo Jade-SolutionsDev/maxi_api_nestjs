@@ -31,6 +31,7 @@ import {
 import { ClientAddressesService } from '../client-addresses/client-addresses.service';
 import { ClientAddress } from '../client-addresses/entities/client-address.entity';
 import { FulfillmentService } from '../fulfillment/fulfillment.service';
+import { GeographyService } from '../geography/geography.service';
 import { PaymentGateway } from '../payments/payment-gateway.interface';
 import { PaymentMethodsService } from '../payments/payment-methods.service';
 import { PaymentsService } from '../payments/payments.service';
@@ -62,12 +63,19 @@ const GROCER_TARGETS = [
 ];
 
 /** What the order keeps of an address, independent of the address book. */
-const snapshotAddress = (address: ClientAddress): Record<string, unknown> => ({
+const snapshotAddress = (
+  address: ClientAddress,
+  place: { municipality: string; province: string } | null,
+): Record<string, unknown> => ({
   label: address.label ?? null,
   street: address.street,
   betweenStreets: address.betweenStreets ?? null,
   reference: address.reference ?? null,
   municipalityId: address.municipalityId,
+  // Names too: an id tells a customer reading their own order nothing, and the
+  // catalog entry may be renamed or removed long after the order shipped.
+  municipalityName: place?.municipality ?? null,
+  provinceName: place?.province ?? null,
   contactPhone: address.contactPhone ?? null,
 });
 
@@ -84,6 +92,7 @@ export class OrdersService {
     private readonly paymentMethodsService: PaymentMethodsService,
     private readonly fulfillmentService: FulfillmentService,
     private readonly clientAddressesService: ClientAddressesService,
+    private readonly geographyService: GeographyService,
     private readonly dataSource: DataSource,
   ) {}
 
@@ -119,6 +128,8 @@ export class OrdersService {
       dto.deliveryMunicipalityId ??
       client.defaultMunicipalityId ??
       undefined;
+
+    const place = address ? await this.resolvePlace(address) : null;
 
     const fulfillment = await this.fulfillmentService.resolveChoice({
       fulfillmentType: dto.fulfillmentType,
@@ -177,7 +188,7 @@ export class OrdersService {
           // A snapshot: the saved address may be edited or deleted later, the
           // order must still say where it was going.
           deliveryAddress: address
-            ? snapshotAddress(address)
+            ? snapshotAddress(address, place)
             : (dto.deliveryAddress ?? null),
           customerNotes: dto.customerNotes ?? null,
         }),
@@ -262,6 +273,24 @@ export class OrdersService {
       clientId: client.id,
       municipalityId: dto.address.municipalityId,
     } as ClientAddress;
+  }
+
+  // Human-readable place for the order's address snapshot.
+  private async resolvePlace(
+    address: ClientAddress,
+  ): Promise<{ municipality: string; province: string } | null> {
+    try {
+      const municipality = await this.geographyService.getMunicipalityOrThrow(
+        address.municipalityId,
+      );
+      const province = await this.geographyService.getProvinceOrThrow(
+        municipality.provinceId,
+      );
+      return { municipality: municipality.name, province: province.name };
+    } catch {
+      // A municipality that left the catalog must not stop an order.
+      return null;
+    }
   }
 
   // Background payment initiation. Never throws: a gateway failure leaves the

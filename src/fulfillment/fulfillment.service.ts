@@ -32,7 +32,7 @@ import {
 export const DEFAULT_FULFILLMENT_SETTINGS: FulfillmentSettingsData = {
   pickupEnabled: true,
   supportMessage:
-    'Por el momento no podemos procesar pedidos en línea. Escribinos y coordinamos tu compra.',
+    'Por el momento no podemos procesar pedidos en línea. Escríbenos y coordinamos tu compra.',
 };
 
 /** The fulfillment decision of one checkout, already validated. */

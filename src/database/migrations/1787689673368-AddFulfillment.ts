@@ -41,7 +41,7 @@ export class AddFulfillment1787689673368 implements MigrationInterface {
     );
     // Pickup on, catalogue empty: the state the business is actually in.
     await queryRunner.query(
-      `INSERT INTO "fulfillment_settings" ("data") VALUES ('{"pickupEnabled": true, "supportMessage": "Por el momento no podemos procesar pedidos en línea. Escribinos y coordinamos tu compra."}'::jsonb)`,
+      `INSERT INTO "fulfillment_settings" ("data") VALUES ('{"pickupEnabled": true, "supportMessage": "Por el momento no podemos procesar pedidos en línea. Escríbenos y coordinamos tu compra."}'::jsonb)`,
     );
   }
 
