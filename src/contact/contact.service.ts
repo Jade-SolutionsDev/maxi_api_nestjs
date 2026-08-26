@@ -127,10 +127,18 @@ export class ContactService {
   ): Promise<PaginatedResponse<ContactMessageResponseDto>> {
     const page = query.page ?? 1;
     const limit = query.limit ?? 20;
+    const sortColumns: Record<string, string> = {
+      createdAt: 'm.createdAt',
+      status: 'm.status',
+      name: 'm.name',
+      email: 'm.email',
+    };
+    const sortColumn = sortColumns[query.sortBy ?? ''] ?? 'm.createdAt';
+    const dir = (query.sortOrder ?? 'desc').toUpperCase() as 'ASC' | 'DESC';
 
     const qb = this.messageRepository
       .createQueryBuilder('m')
-      .orderBy('m.createdAt', 'DESC')
+      .orderBy(sortColumn, dir)
       .skip((page - 1) * limit)
       .take(limit);
 

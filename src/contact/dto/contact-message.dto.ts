@@ -1,16 +1,13 @@
-import { Type } from 'class-transformer';
 import {
   IsEmail,
   IsEnum,
-  IsInt,
   IsOptional,
   IsString,
   IsUUID,
   Length,
-  Max,
   MaxLength,
-  Min,
 } from 'class-validator';
+import { PaginationQueryDto } from '../../common/dto/pagination.dto';
 import {
   ContactMessage,
   ContactMessageStatus,
@@ -55,7 +52,7 @@ export class CreateContactMessageDto {
   website?: string;
 }
 
-export class ContactMessagesQueryDto {
+export class ContactMessagesQueryDto extends PaginationQueryDto {
   @IsOptional()
   @IsString()
   @MaxLength(120)
@@ -80,19 +77,6 @@ export class ContactMessagesQueryDto {
   @IsString()
   @MaxLength(10)
   createdTo?: string;
-
-  @IsOptional()
-  @Type(() => Number)
-  @IsInt()
-  @Min(1)
-  page?: number = 1;
-
-  @IsOptional()
-  @Type(() => Number)
-  @IsInt()
-  @Min(1)
-  @Max(100)
-  limit?: number = 20;
 }
 
 export class UpdateContactMessageStatusDto {

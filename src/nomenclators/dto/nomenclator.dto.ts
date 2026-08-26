@@ -11,8 +11,14 @@ import {
   NOMENCLATOR_CATEGORIES,
   Nomenclator,
 } from '../entities/nomenclator.entity';
+import { PaginationQueryDto } from '../../common/dto/pagination.dto';
 
-export class NomenclatorsQueryDto {
+/**
+ * Extends the pagination DTO only to whitelist the page/sort params the admin
+ * data provider always sends; the endpoint returns the full (small) catalog
+ * and the client pages/sorts it.
+ */
+export class NomenclatorsQueryDto extends PaginationQueryDto {
   /** Catalog to list. */
   @IsIn(NOMENCLATOR_CATEGORIES)
   category: string;
