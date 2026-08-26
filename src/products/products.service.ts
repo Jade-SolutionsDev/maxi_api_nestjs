@@ -69,6 +69,13 @@ export class ProductsService {
   async findAll(filters: ProductFilters = {}): Promise<Product[]> {
     const qb = this.productRepository.createQueryBuilder('product');
 
+    /**
+     * La categoría viaja con el producto para que la respuesta pueda decir a
+     * qué departamento pertenece — `MxH-0012` lo pide en el listado, y sin la
+     * relación cargada `departmentId` llegaba siempre nulo.
+     */
+    qb.leftJoinAndSelect('product.category', 'category');
+
     if (filters.categoryId) {
       qb.andWhere('product.categoryId = :categoryId', {
         categoryId: filters.categoryId,
