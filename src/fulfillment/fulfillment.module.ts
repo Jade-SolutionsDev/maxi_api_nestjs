@@ -2,6 +2,7 @@ import { Module, forwardRef } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { AuthModule } from '../auth/auth.module';
 import { GeographyModule } from '../geography/geography.module';
+import { ProductsModule } from '../products/products.module';
 import { StockLocationPickupAddress } from '../stock-locations/entities/stock-location-pickup-address.entity';
 import { DeliveryOptionsController } from './delivery-options.controller';
 import { DeliveryOptionZone } from './entities/delivery-option-zone.entity';
@@ -21,6 +22,7 @@ import { StorefrontFulfillmentController } from './storefront-fulfillment.contro
     ]),
     forwardRef(() => AuthModule),
     GeographyModule,
+    ProductsModule,
   ],
   controllers: [
     DeliveryOptionsController,

@@ -264,7 +264,7 @@ export class ProductsService {
   // municipality directly, OR the whole province it belongs to (derived from the
   // municipality). By province alone: those with province-wide coverage. Disabled
   // /soft-deleted storages are excluded. Empty result → nothing is deliverable.
-  private async coveringLocationIds(area: {
+  async coveringLocationIds(area: {
     provinceId?: string;
     municipalityId?: string;
   }): Promise<string[]> {

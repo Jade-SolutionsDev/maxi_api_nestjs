@@ -6,6 +6,7 @@ import {
 import { InjectRepository } from '@nestjs/typeorm';
 import { DataSource, In, IsNull, Repository } from 'typeorm';
 import { GeographyService } from '../geography/geography.service';
+import { ProductsService } from '../products/products.service';
 import { StockLocationPickupAddress } from '../stock-locations/entities/stock-location-pickup-address.entity';
 import { FulfillmentType } from '../orders/entities/order.entity';
 import {
@@ -63,6 +64,7 @@ export class FulfillmentService {
     @InjectRepository(StockLocationPickupAddress)
     private readonly pickupRepository: Repository<StockLocationPickupAddress>,
     private readonly geographyService: GeographyService,
+    private readonly productsService: ProductsService,
     private readonly dataSource: DataSource,
   ) {}
 
@@ -243,6 +245,14 @@ export class FulfillmentService {
       // No place to judge against: only the unrestricted ones are safe to show.
       return enabled.filter((option) => !zones.get(option.id)?.length);
     }
+
+    // Offering delivery somewhere no active storage serves advertises what the
+    // shop cannot do: the customer picks it and only finds out at checkout,
+    // when availability there is zero.
+    const serving = await this.productsService.coveringLocationIds({
+      municipalityId,
+    });
+    if (serving.length === 0) return [];
 
     const municipality =
       await this.geographyService.getMunicipalityOrThrow(municipalityId);

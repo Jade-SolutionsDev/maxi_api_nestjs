@@ -3,6 +3,7 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { getRepositoryToken } from '@nestjs/typeorm';
 import { DataSource } from 'typeorm';
 import { GeographyService } from '../geography/geography.service';
+import { ProductsService } from '../products/products.service';
 import { FulfillmentType } from '../orders/entities/order.entity';
 import { StockLocationPickupAddress } from '../stock-locations/entities/stock-location-pickup-address.entity';
 import { DeliveryOptionZone } from './entities/delivery-option-zone.entity';
@@ -48,6 +49,7 @@ describe('FulfillmentService', () => {
   let settingsRepo: { findOne: jest.Mock; save: jest.Mock; create: jest.Mock };
   let pickupPoints: ReturnType<typeof point>[];
   let geography: { getMunicipalityOrThrow: jest.Mock };
+  let products: { coveringLocationIds: jest.Mock };
 
   beforeEach(async () => {
     pickupPoints = [point()];
@@ -72,6 +74,9 @@ describe('FulfillmentService', () => {
       getMunicipalityOrThrow: jest
         .fn()
         .mockResolvedValue({ id: 'mun-1', provinceId: 'prov-1' }),
+    };
+    products = {
+      coveringLocationIds: jest.fn().mockResolvedValue(['loc-1']),
     };
 
     // Chainable stub for the pickup-points query builder.
@@ -103,6 +108,7 @@ describe('FulfillmentService', () => {
           useValue: pickupRepo,
         },
         { provide: GeographyService, useValue: geography },
+        { provide: ProductsService, useValue: products },
         { provide: DataSource, useValue: { transaction: jest.fn() } },
       ],
     }).compile();
@@ -137,6 +143,17 @@ describe('FulfillmentService', () => {
       const offer = await service.availableForClient('mun-1');
 
       expect(offer.unavailableMessage).toBeTruthy();
+    });
+
+    // Advertising delivery to a place no warehouse serves sends the customer
+    // to a checkout that can only fail on availability.
+    it('offers no delivery where no active storage serves', async () => {
+      optionRepo.find.mockResolvedValue([option()]);
+      products.coveringLocationIds.mockResolvedValue([]);
+
+      const offer = await service.availableForClient('mun-1');
+
+      expect(offer.deliveryOptions).toEqual([]);
     });
 
     it('offers an option with no zones anywhere', async () => {
