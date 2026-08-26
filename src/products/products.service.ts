@@ -1,3 +1,4 @@
+import { sinTildes } from '../common/search/accent-insensitive';
 import {
   ConflictException,
   Injectable,
@@ -107,7 +108,7 @@ export class ProductsService {
       );
     }
     if (filters.q) {
-      qb.andWhere('product.name ILIKE :q', { q: `%${filters.q}%` });
+      qb.andWhere(sinTildes('product.name'), { q: `%${filters.q}%` });
     }
     const priceExpr =
       filters.priceField === 'finalPrice'

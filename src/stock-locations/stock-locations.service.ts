@@ -1,3 +1,4 @@
+import { contieneSinTildes } from '../common/search/accent-insensitive';
 import {
   BadRequestException,
   ForbiddenException,
@@ -68,7 +69,7 @@ export class StockLocationsService {
   ): Promise<StockLocationResponseDto[]> {
     const where: FindOptionsWhere<StockLocation> = {};
     if (filters.q) {
-      where.name = ILike(`%${filters.q}%`);
+      where.name = contieneSinTildes(filters.q);
     }
     if (filters.isActive != null) {
       where.isActive = filters.isActive;

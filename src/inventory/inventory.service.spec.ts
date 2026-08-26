@@ -458,7 +458,8 @@ describe('InventoryService', () => {
       await service.aggregateByProduct({ q: 'frijol' });
 
       const [sql, params] = inventoryRepo.manager.query.mock.calls[0];
-      expect(sql).toContain('p.name ILIKE');
+      // Sin tildes por los dos lados: «almacen» tiene que encontrar «Almacén».
+      expect(sql).toContain('f_unaccent(p.name) ILIKE f_unaccent(');
       expect(params).toContain('%frijol%');
     });
 
