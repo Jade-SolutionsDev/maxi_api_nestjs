@@ -54,6 +54,11 @@ describe('Contacto (e2e)', () => {
 
   beforeEach(async () => {
     await users.query(`TRUNCATE TABLE ${TABLES} CASCADE`);
+    // The nomenclators table keeps the migration-seeded motives, so it is not
+    // truncated; drop only the rows this suite creates in earlier runs.
+    await nomenclators.query(
+      `DELETE FROM nomenclators WHERE code LIKE 'reclamaciones%'`,
+    );
     await users.save(
       users.create({
         clerkId: 'clerk_admin_1',
