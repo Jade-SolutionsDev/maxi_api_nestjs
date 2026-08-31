@@ -14,6 +14,8 @@ import { ClientsService } from './clients.service';
 import { CreateClientDto } from './dto/create-client.dto';
 import { UpdateClientDto } from './dto/update-client.dto';
 import { ClientResponseDto } from './dto/client-response.dto';
+import { ListClientsQueryDto } from './dto/list-clients-query.dto';
+import type { PaginatedResponse } from '../common/dto/pagination.dto';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 
 @ApiTags('clients')
@@ -24,9 +26,27 @@ export class ClientsController {
   constructor(private readonly clientsService: ClientsService) {}
 
   @Get()
-  async findAll(): Promise<ClientResponseDto[]> {
-    const clients = await this.clientsService.findAll();
-    return clients.map(ClientResponseDto.fromEntity);
+  async findAll(
+    @Query() query: ListClientsQueryDto,
+  ): Promise<PaginatedResponse<ClientResponseDto>> {
+    const result = await this.clientsService.findAll(
+      {
+        q: query.q,
+        isActive: query.isActive,
+        ids: query.id
+          ? query.id
+              .split(',')
+              .map((id) => id.trim())
+              .filter(Boolean)
+          : undefined,
+      },
+      query,
+    );
+
+    return {
+      data: result.data.map(ClientResponseDto.fromEntity),
+      meta: result.meta,
+    };
   }
 
   @Get('lookup')
