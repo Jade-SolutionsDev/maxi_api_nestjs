@@ -29,11 +29,17 @@ const SEED: Record<
     sortOrder: 10,
   },
   mibilletera: {
-    label: 'Mi Billetera',
+    label: 'Mi Billetera — Criptomonedas',
     description:
-      'Paga desde tu app de Mi Billetera con tu saldo en USD, CUP o cripto.',
-    icon: 'Wallet',
+      'Envía USDT a la dirección que te damos; te confirmamos al recibirlo.',
+    icon: 'Bitcoin',
     sortOrder: 20,
+  },
+  'mibilletera-wallet': {
+    label: 'Mi Billetera — Saldo',
+    description: 'Paga desde tu app de Mi Billetera con el saldo de tu cuenta.',
+    icon: 'Wallet',
+    sortOrder: 30,
   },
   manual: {
     label: 'Pago manual',

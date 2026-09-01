@@ -367,4 +367,49 @@ describe('payment webhooks (e2e)', () => {
       expect(order.status).toBe(OrderStatus.PENDING);
     });
   });
+
+  describe('the wallet option', () => {
+    const WALLET_REF = 'MCH_WALLET_E2E';
+
+    beforeEach(async () => {
+      await charges.save(
+        charges.create({
+          orderId,
+          provider: 'mibilletera-wallet',
+          reference: WALLET_REF,
+          idempotencyKey: 'order_test_mibilletera-wallet_1',
+          status: ChargeStatus.REQUIRES_ACTION,
+          amount: '30.00',
+          currency: 'miUSD',
+          actionPayload: { operation_number: 'PR-90210' },
+        }),
+      );
+    });
+
+    // Mi Billetera posts every callback to the one URL registered for the
+    // account, whichever method produced the charge.
+    it('settles through the crypto route, which is the only one registered', async () => {
+      const body = JSON.stringify({
+        event: 'charge.succeeded',
+        reference: WALLET_REF,
+        status: 'SUCCEEDED',
+        net_amount: '29.25000000',
+      });
+
+      const res = await request(app.getHttpServer())
+        .post('/api/webhooks/payments/mibilletera')
+        .set('Content-Type', 'application/json')
+        .set('X-Mibi-Signature', sign(body))
+        .send(body)
+        .expect(200);
+      expect(res.body.data).toEqual({ processed: true });
+
+      const charge = await charges.findOneByOrFail({ reference: WALLET_REF });
+      expect(charge.status).toBe(ChargeStatus.SUCCEEDED);
+      expect(charge.provider).toBe('mibilletera-wallet');
+
+      const order = await orders.findOneByOrFail({ id: orderId });
+      expect(order.paymentStatus).toBe(PaymentStatus.PAID);
+    });
+  });
 });

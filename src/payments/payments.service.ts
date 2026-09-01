@@ -267,11 +267,20 @@ export class PaymentsService {
     const gateway = this.methodsService.gatewayFor(provider);
     const event = gateway.parseWebhook(rawBody, headers);
 
+    // By reference alone, not reference+provider: a gateway registers ONE
+    // notification URL, so a Mi Billetera wallet charge (provider
+    // "mibilletera-wallet") is announced on the "mibilletera" route. The column
+    // is unique, so the reference identifies the charge on its own.
     const charge = event.reference
       ? await this.chargeRepository.findOne({
-          where: { reference: event.reference, provider },
+          where: { reference: event.reference },
         })
       : null;
+    if (charge && charge.provider !== provider) {
+      this.logger.log(
+        `Webhook on the "${provider}" route settles a "${charge.provider}" charge (${charge.reference})`,
+      );
+    }
     if (!charge) {
       // 2xx anyway (controller): don't make the gateway retry a reference we
       // will never know.
