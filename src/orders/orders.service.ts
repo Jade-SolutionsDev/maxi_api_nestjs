@@ -18,6 +18,7 @@ import {
   PaginatedResponse,
 } from '../common/dto/pagination.dto';
 import { InventoryService } from '../inventory/inventory.service';
+import { ProductsService } from '../products/products.service';
 import { Role, User } from '../users/entities/user.entity';
 import { AdminOrdersQueryDto } from './dto/admin-orders-query.dto';
 import { CheckoutDto } from './dto/checkout.dto';
@@ -92,6 +93,7 @@ export class OrdersService {
     private readonly paymentsService: PaymentsService,
     private readonly paymentMethodsService: PaymentMethodsService,
     private readonly fulfillmentService: FulfillmentService,
+    private readonly productsService: ProductsService,
     private readonly clientAddressesService: ClientAddressesService,
     private readonly geographyService: GeographyService,
     private readonly dataSource: DataSource,
@@ -139,14 +141,13 @@ export class OrdersService {
       municipalityId: deliveryMunicipalityId,
     });
 
-    // Availability is judged where the goods will actually be handed over: the
-    // storage the customer collects from, or the zone we deliver to.
-    const cart = await this.cartService.getCart(
-      client.id,
-      fulfillment.pickupLocationId
-        ? { locationId: fulfillment.pickupLocationId }
-        : { municipalityId: deliveryMunicipalityId },
-    );
+    // Availability is judged across every storage covering the customer's
+    // municipality — the same stock the catalog showed. A pickup order may
+    // draw from sibling storages (the admin gets a transfer alert); pinning it
+    // to the counter's own shelf would reject carts the shop can fulfil.
+    const cart = await this.cartService.getCart(client.id, {
+      municipalityId: deliveryMunicipalityId,
+    });
     if (cart.items.length === 0) {
       throw new BadRequestException('Cart is empty');
     }
@@ -168,6 +169,19 @@ export class OrdersService {
     const gateway = await this.paymentMethodsService.resolve(dto.paymentMethod);
 
     const total = (cart.subtotal + Number(fulfillment.fee)).toFixed(2);
+
+    // Reservations stay within the storages covering the municipality; without
+    // a municipality (pickup-only client with no location) any active storage
+    // may hold the stock, as before.
+    const coveringIds = deliveryMunicipalityId
+      ? await this.productsService.coveringLocationIds({
+          municipalityId: deliveryMunicipalityId,
+        })
+      : undefined;
+    const allowedLocationIds =
+      coveringIds && fulfillment.pickupLocationId
+        ? [...new Set([...coveringIds, fulfillment.pickupLocationId])]
+        : coveringIds;
 
     const orderId = await this.dataSource.transaction(async (manager) => {
       const orderRepo = manager.getRepository(Order);
@@ -206,8 +220,12 @@ export class OrdersService {
           order.id,
           line.productId,
           line.quantity,
-          // Pickup holds its stock in the storage the customer walks up to.
-          fulfillment.pickupLocationId ?? undefined,
+          {
+            allowedLocationIds,
+            // Pickup drains the customer's counter first; overflow lands at
+            // sibling covering storages and flags the order for a transfer.
+            preferredLocationId: fulfillment.pickupLocationId ?? undefined,
+          },
         );
         await itemRepo.save(
           itemRepo.create({
@@ -412,6 +430,15 @@ export class OrdersService {
         paymentStatus: query.paymentStatus,
       });
     }
+    if (query.needsTransfer) {
+      // Pickup orders still holding RESERVED stock away from their counter —
+      // derived from the reservations so it clears itself once settled.
+      qb.andWhere(`order.fulfillment_type = 'pickup'`).andWhere(
+        `EXISTS (SELECT 1 FROM inventory_reservations r
+           WHERE r.order_id = order.id AND r.status = 'reserved'
+             AND r.location_id <> order.pickup_location_id)`,
+      );
+    }
 
     const sortColumns: Record<string, string> = {
       orderNumber: 'order.orderNumber',
@@ -451,7 +478,40 @@ export class OrdersService {
     dto.paymentMethod = (
       await this.paymentsService.latestMethodsFor([order.id])
     ).get(order.id);
+    await this.attachReservationStorages(dto, order);
     return dto;
+  }
+
+  // Where the order's stock actually sits. A pickup order still holding
+  // RESERVED stock at a storage other than its counter needs the admin to
+  // coordinate a transfer before the customer shows up.
+  private async attachReservationStorages(
+    dto: OrderResponseDto,
+    order: Order,
+  ): Promise<void> {
+    if (order.fulfillmentType !== FulfillmentType.PICKUP) return;
+
+    const rows: {
+      location_id: string;
+      name: string;
+      holds_reserved: boolean;
+    }[] = await this.orderRepository.manager.query(
+      `SELECT r.location_id, sl.name,
+              bool_or(r.status = 'reserved') AS holds_reserved
+         FROM inventory_reservations r
+         JOIN stock_locations sl ON sl.id = r.location_id
+        WHERE r.order_id = $1 AND r.status IN ('reserved', 'confirmed')
+        GROUP BY r.location_id, sl.name
+        ORDER BY sl.name`,
+      [order.id],
+    );
+    dto.reservationStorages = rows.map((row) => ({
+      locationId: row.location_id,
+      locationName: row.name,
+    }));
+    dto.needsTransfer = rows.some(
+      (row) => row.holds_reserved && row.location_id !== order.pickupLocationId,
+    );
   }
 
   async updateStatus(

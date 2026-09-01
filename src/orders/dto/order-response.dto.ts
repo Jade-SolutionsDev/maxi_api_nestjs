@@ -73,6 +73,14 @@ export class OrderResponseDto {
    * refund is owed. Null for an ordinary cancellation.
    */
   cancellationReason: CancellationReason | null;
+  /**
+   * Pickup order still holding reserved stock at a storage other than its
+   * counter: the admin must coordinate a transfer before the customer arrives.
+   * Detail responses only.
+   */
+  needsTransfer?: boolean;
+  /** Storages holding this pickup order's stock (detail responses only). */
+  reservationStorages?: { locationId: string; locationName: string }[];
   createdAt: Date;
   updatedAt: Date;
 

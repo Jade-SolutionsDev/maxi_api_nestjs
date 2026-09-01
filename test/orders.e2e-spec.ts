@@ -444,4 +444,174 @@ describe('Orders (e2e)', () => {
       expect(offer.unavailableMessage).toBeTruthy();
     });
   });
+
+  describe('coverage-scoped fulfillment', () => {
+    const otherLocationId = '8f14e45f-ceea-467a-9f8a-2b9c2f2a9b21';
+    let municipalityId: string;
+
+    beforeEach(async () => {
+      const [municipality] = await clients.query(
+        `SELECT id FROM municipalities LIMIT 1`,
+      );
+      municipalityId = municipality.id;
+
+      await clients.query(`DELETE FROM stock_location_pickup_addresses`);
+      await clients.query(`DELETE FROM stock_location_coverage`);
+      await clients.query(
+        `INSERT INTO stock_locations (id, name, is_active)
+         VALUES ($1, 'Far Warehouse', true) ON CONFLICT (id) DO NOTHING`,
+        [otherLocationId],
+      );
+      await clients.query(
+        `UPDATE stock_locations SET is_active = true, deleted_at = NULL WHERE id = $1`,
+        [otherLocationId],
+      );
+      await clients.query(
+        `INSERT INTO stock_location_pickup_addresses (location_id, label, address) VALUES
+         ($1, 'Mostrador', 'Calle 1 #2, Centro'),
+         ($2, 'Nave', 'Carretera Vieja km 3')`,
+        [locationId, otherLocationId],
+      );
+      // Only the main storage covers the customer's municipality.
+      await clients.query(
+        `INSERT INTO stock_location_coverage (location_id, coverage_type, province_id, municipality_id)
+         SELECT $1, 'municipality', m.province_id, m.id FROM municipalities m WHERE m.id = $2`,
+        [locationId, municipalityId],
+      );
+    });
+
+    afterEach(async () => {
+      await clients.query(`DELETE FROM stock_location_coverage`);
+      await clients.query(`DELETE FROM inventory WHERE location_id = $1`, [
+        otherLocationId,
+      ]);
+    });
+
+    const offerFor = async (municipality: string) => {
+      const res = await request(app.getHttpServer())
+        .get(`/api/storefront/fulfillment?municipalityId=${municipality}`)
+        .set(clientAuth)
+        .expect(200);
+      return res.body.data as {
+        pickupPoints: { id: string; locationId: string }[];
+      };
+    };
+
+    it('only offers pickup counters of storages covering the municipality', async () => {
+      const offer = await offerFor(municipalityId);
+
+      expect(offer.pickupPoints).toHaveLength(1);
+      expect(offer.pickupPoints[0].locationId).toBe(locationId);
+    });
+
+    it('multi-storage pickup succeeds and flags the order for a transfer', async () => {
+      // Second storage also covers the municipality and holds the overflow.
+      await clients.query(
+        `INSERT INTO stock_location_coverage (location_id, coverage_type, province_id, municipality_id)
+         SELECT $1, 'municipality', m.province_id, m.id FROM municipalities m WHERE m.id = $2`,
+        [otherLocationId, municipalityId],
+      );
+      await inventory.save(
+        inventory.create({
+          locationId: otherLocationId,
+          productId,
+          quantity: 50,
+        }),
+      );
+
+      const offer = await offerFor(municipalityId);
+      const counter = offer.pickupPoints.find(
+        (p) => p.locationId === locationId,
+      ) as { id: string };
+      await request(app.getHttpServer())
+        .post('/api/cart/items')
+        .set(clientAuth)
+        .send({ productId, quantity: 7 }) // main storage only holds 5
+        .expect(201);
+
+      const res = await request(app.getHttpServer())
+        .post('/api/storefront/orders')
+        .set(clientAuth)
+        .send({
+          fulfillmentType: 'pickup',
+          pickupAddressId: counter.id,
+          deliveryMunicipalityId: municipalityId,
+        })
+        .expect(201);
+      const orderId = res.body.data.id as string;
+
+      // Preference drained the counter first; the rest sits at the sibling.
+      const held = await clients.query(
+        `SELECT location_id, quantity FROM inventory_reservations WHERE order_id = $1 ORDER BY quantity DESC`,
+        [orderId],
+      );
+      expect(held).toHaveLength(2);
+      expect(held[0]).toMatchObject({ location_id: locationId, quantity: 5 });
+      expect(held[1]).toMatchObject({
+        location_id: otherLocationId,
+        quantity: 2,
+      });
+
+      const detail = await request(app.getHttpServer())
+        .get(`/api/orders/${orderId}`)
+        .set(adminAuth)
+        .expect(200);
+      expect(detail.body.data.needsTransfer).toBe(true);
+      expect(detail.body.data.reservationStorages).toHaveLength(2);
+
+      const flagged = await request(app.getHttpServer())
+        .get('/api/orders?needsTransfer=true')
+        .set(adminAuth)
+        .expect(200);
+      expect(flagged.body.data.meta.total).toBe(1);
+      expect(flagged.body.data.data[0].id).toBe(orderId);
+
+      // Confirmation settles the holds; the queue clears itself.
+      await request(app.getHttpServer())
+        .patch(`/api/orders/${orderId}/status`)
+        .set(adminAuth)
+        .send({ status: 'confirmed' })
+        .expect(200);
+      const confirmed = await request(app.getHttpServer())
+        .get(`/api/orders/${orderId}`)
+        .set(adminAuth)
+        .expect(200);
+      expect(confirmed.body.data.needsTransfer).toBe(false);
+      expect(confirmed.body.data.reservationStorages).toHaveLength(2);
+    });
+
+    it('delivery never reserves at a storage outside the coverage', async () => {
+      // Far Warehouse has plenty of stock but does NOT cover the municipality.
+      await inventory.save(
+        inventory.create({
+          locationId: otherLocationId,
+          productId,
+          quantity: 50,
+        }),
+      );
+
+      await request(app.getHttpServer())
+        .post('/api/cart/items')
+        .set(clientAuth)
+        .send({ productId, quantity: 3 })
+        .expect(201);
+      const res = await request(app.getHttpServer())
+        .post('/api/storefront/orders')
+        .set(clientAuth)
+        .send({ deliveryMunicipalityId: municipalityId })
+        .expect(201);
+
+      const held = await clients.query(
+        `SELECT location_id FROM inventory_reservations WHERE order_id = $1`,
+        [res.body.data.id],
+      );
+      expect(held).toHaveLength(1);
+      expect(held[0].location_id).toBe(locationId);
+
+      const far = await inventory.findOne({
+        where: { locationId: otherLocationId, productId },
+      });
+      expect(far?.reservedQuantity).toBe(0);
+    });
+  });
 });

@@ -454,18 +454,18 @@ export class InventoryService {
     orderId: string,
     productId: string,
     quantity: number,
-    locationId?: string,
+    opts: { allowedLocationIds?: string[]; preferredLocationId?: string } = {},
   ): Promise<void> {
     const repo = manager.getRepository(Inventory);
     // Only enabled storages can fulfil an order — never reserve from a disabled
-    // or soft-deleted location. `locationId` narrows that to a single storage:
-    // a pickup order must hold its stock on the shelf the customer walks up to,
-    // not wherever the quantity happens to be.
+    // or soft-deleted location. `allowedLocationIds` narrows that further to
+    // the storages covering the customer's municipality, so an order never
+    // holds stock somewhere the shop can't fulfil it from.
     const activeLocations: { id: string }[] = await manager.query(
-      locationId
-        ? `SELECT id FROM stock_locations WHERE is_active = true AND deleted_at IS NULL AND id = $1`
+      opts.allowedLocationIds
+        ? `SELECT id FROM stock_locations WHERE is_active = true AND deleted_at IS NULL AND id = ANY($1)`
         : `SELECT id FROM stock_locations WHERE is_active = true AND deleted_at IS NULL`,
-      locationId ? [locationId] : undefined,
+      opts.allowedLocationIds ? [opts.allowedLocationIds] : undefined,
     );
     const activeIds = activeLocations.map((l) => l.id);
     const rows =
@@ -475,10 +475,18 @@ export class InventoryService {
             where: { productId, locationId: In(activeIds) },
             lock: { mode: 'pessimistic_write' },
           });
-    rows.sort(
-      (a, b) =>
-        b.quantity - b.reservedQuantity - (a.quantity - a.reservedQuantity),
-    );
+    // Greedy by available desc; the preferred storage (the pickup counter)
+    // drains first so overflow to sibling storages is the exception.
+    rows.sort((a, b) => {
+      if (opts.preferredLocationId) {
+        const aPreferred = a.locationId === opts.preferredLocationId;
+        const bPreferred = b.locationId === opts.preferredLocationId;
+        if (aPreferred !== bPreferred) return aPreferred ? -1 : 1;
+      }
+      return (
+        b.quantity - b.reservedQuantity - (a.quantity - a.reservedQuantity)
+      );
+    });
 
     const totalAvailable = rows.reduce(
       (sum, r) => sum + (r.quantity - r.reservedQuantity),

@@ -100,6 +100,16 @@ payments fall back to manual back-office settlement.
 `pending`; `409` otherwise (show "contact support"). Cancelling releases the
 reservation, so the stock is instantly sellable again.
 
+## Fulfillment scoping (2026-09)
+
+`GET /storefront/fulfillment` returns only the pickup counters of storages
+**covering the requested municipality** (same coverage that scopes the
+catalog); without a `municipalityId` the full list is returned. Stock
+reservations also stay within the covering storages: a pickup order drains
+the chosen counter first and may overflow to sibling covering storages — the
+back office is alerted to coordinate the transfer, the customer sees nothing
+different.
+
 ## Availability semantics (cart + catalog)
 
 Since orders reserve stock, `available` everywhere in the public API

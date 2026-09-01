@@ -1,4 +1,12 @@
-import { IsEnum, IsOptional, IsString, IsUUID } from 'class-validator';
+import { Transform } from 'class-transformer';
+import {
+  IsBoolean,
+  IsEnum,
+  IsOptional,
+  IsString,
+  IsUUID,
+} from 'class-validator';
+import { toOptionalBoolean } from '../../common/dto/query-transforms';
 import { PaginationQueryDto } from '../../common/dto/pagination.dto';
 import { OrderStatus, PaymentStatus } from '../entities/order.entity';
 
@@ -25,4 +33,10 @@ export class AdminOrdersQueryDto extends PaginationQueryDto {
   @IsOptional()
   @IsUUID()
   clientId?: string;
+
+  /** Pickup orders holding reserved stock away from their pickup storage. */
+  @IsOptional()
+  @Transform(toOptionalBoolean)
+  @IsBoolean()
+  needsTransfer?: boolean;
 }

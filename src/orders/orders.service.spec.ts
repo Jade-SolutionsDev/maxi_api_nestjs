@@ -10,6 +10,7 @@ import { CartService } from '../cart/cart.service';
 import { CartItem } from '../cart/entities/cart-item.entity';
 import { Client } from '../clients/entities/client.entity';
 import { InventoryService } from '../inventory/inventory.service';
+import { ProductsService } from '../products/products.service';
 import { Role, User } from '../users/entities/user.entity';
 import { OrderItem } from './entities/order-item.entity';
 import { Order, OrderStatus, PaymentStatus } from './entities/order.entity';
@@ -169,6 +170,12 @@ describe('OrdersService', () => {
         { provide: PaymentsService, useValue: paymentsService },
         { provide: PaymentMethodsService, useValue: paymentMethodsService },
         { provide: FulfillmentService, useValue: fulfillmentService },
+        {
+          provide: ProductsService,
+          useValue: {
+            coveringLocationIds: jest.fn().mockResolvedValue(['loc-1']),
+          },
+        },
         { provide: ClientAddressesService, useValue: clientAddressesService },
         { provide: GeographyService, useValue: geographyService },
         { provide: DataSource, useValue: dataSource },
@@ -197,7 +204,10 @@ describe('OrdersService', () => {
         'order-1',
         'prod-1',
         2,
-        undefined,
+        {
+          allowedLocationIds: ['loc-1'],
+          preferredLocationId: undefined,
+        },
       );
       expect(orderItemRepo.save).toHaveBeenCalledWith(
         expect.objectContaining({
@@ -229,14 +239,17 @@ describe('OrdersService', () => {
       await service.checkout(makeClient(), {});
 
       expect(cartService.getCart).toHaveBeenCalledWith('client-1', {
-        locationId: 'loc-1',
+        municipalityId: 'mun-1',
       });
       expect(inventoryService.reserve).toHaveBeenCalledWith(
         expect.anything(),
         'order-1',
         'prod-1',
         2,
-        'loc-1',
+        {
+          allowedLocationIds: ['loc-1'],
+          preferredLocationId: 'loc-1',
+        },
       );
       expect(orderRepo.save).toHaveBeenCalledWith(
         expect.objectContaining({

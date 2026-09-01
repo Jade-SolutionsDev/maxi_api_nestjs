@@ -251,6 +251,51 @@ describe('InventoryService', () => {
       );
     });
 
+    it('drains the preferred storage before its siblings', async () => {
+      const locA = {
+        locationId: 'loc-A',
+        productId: 'p-1',
+        quantity: 5,
+        reservedQuantity: 2,
+      }; // 3 available
+      const locB = {
+        locationId: 'loc-B',
+        productId: 'p-1',
+        quantity: 4,
+        reservedQuantity: 0,
+      }; // 4 available
+      inventoryRepo.find.mockResolvedValue([locA, locB]);
+
+      await service.reserve(manager as never, 'order-1', 'p-1', 5, {
+        preferredLocationId: 'loc-A',
+      });
+
+      // loc-A empties first even though loc-B has more available.
+      expect(locA.reservedQuantity).toBe(5);
+      expect(locB.reservedQuantity).toBe(2);
+    });
+
+    it('only reserves inside the allowed storage set', async () => {
+      manager.query.mockResolvedValue([{ id: 'loc-A' }]);
+      const locA = {
+        locationId: 'loc-A',
+        productId: 'p-1',
+        quantity: 5,
+        reservedQuantity: 0,
+      };
+      inventoryRepo.find.mockResolvedValue([locA]);
+
+      await service.reserve(manager as never, 'order-1', 'p-1', 3, {
+        allowedLocationIds: ['loc-A'],
+      });
+
+      expect(manager.query).toHaveBeenCalledWith(
+        expect.stringContaining('ANY'),
+        [['loc-A']],
+      );
+      expect(locA.reservedQuantity).toBe(3);
+    });
+
     it('409s when total available across storages is insufficient', async () => {
       inventoryRepo.find.mockResolvedValue([
         {

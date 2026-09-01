@@ -85,6 +85,7 @@ describe('FulfillmentService', () => {
     };
     for (const method of [
       'innerJoin',
+      'andWhere',
       'select',
       'addSelect',
       'orderBy',
@@ -123,6 +124,23 @@ describe('FulfillmentService', () => {
       expect(offer.deliveryOptions).toEqual([]);
       expect(offer.pickupPoints).toHaveLength(1);
       expect(offer.unavailableMessage).toBeNull();
+    });
+
+    it('hides every pickup point when no storage covers the municipality', async () => {
+      products.coveringLocationIds.mockResolvedValue([]);
+
+      const offer = await service.availableForClient('mun-1');
+
+      expect(offer.pickupPoints).toEqual([]);
+      expect(products.coveringLocationIds).toHaveBeenCalledWith({
+        municipalityId: 'mun-1',
+      });
+    });
+
+    it('keeps the full pickup list when the customer has no municipality', async () => {
+      const offer = await service.availableForClient(undefined);
+
+      expect(offer.pickupPoints).toHaveLength(1);
     });
 
     it('hides pickup entirely when the switch is off', async () => {
