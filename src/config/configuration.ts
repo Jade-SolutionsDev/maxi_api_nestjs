@@ -69,6 +69,8 @@ export interface TropipayConfig extends GatewayCredentials {
   serverMode: 'Development' | 'Production';
   /** Tropipay accepts EUR and USD only — anything else 400s opaquely. */
   currency: string;
+  /** Smallest charge the account accepts; below it the gateway says only "Invalid amount". */
+  minAmount: number | undefined;
 }
 
 export interface ExpiryConfig {
@@ -209,6 +211,11 @@ const positiveInt = (raw: string | undefined, fallback: number): number => {
   return Number.isInteger(value) && value > 0 ? value : fallback;
 };
 
+const positiveFloat = (raw: string | undefined): number | undefined => {
+  const value = Number(raw);
+  return Number.isFinite(value) && value > 0 ? value : undefined;
+};
+
 export const paymentsConfig = (): PaymentsConfig => {
   const keyId = process.env.MIBI_KEY_ID;
   const secretKey = process.env.MIBI_SECRET_KEY;
@@ -240,6 +247,7 @@ export const paymentsConfig = (): PaymentsConfig => {
           ? 'Production'
           : 'Development',
       currency: (process.env.TROPIPAY_CURRENCY ?? 'USD').toUpperCase(),
+      minAmount: positiveFloat(process.env.TROPIPAY_MIN_AMOUNT),
       configured: isConfigured(clientId, clientSecret),
     },
     publicUrl: process.env.PUBLIC_API_URL?.replace(/\/$/, ''),
