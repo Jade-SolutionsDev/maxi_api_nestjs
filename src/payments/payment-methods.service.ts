@@ -29,10 +29,10 @@ const SEED: Record<
     sortOrder: 10,
   },
   mibilletera: {
-    label: 'Criptomonedas (Mi Billetera)',
+    label: 'Mi Billetera',
     description:
-      'Transfiere USDT desde tu billetera; te damos la dirección de depósito.',
-    icon: 'Bitcoin',
+      'Paga desde tu app de Mi Billetera con tu saldo en USD, CUP o cripto.',
+    icon: 'Wallet',
     sortOrder: 20,
   },
   manual: {

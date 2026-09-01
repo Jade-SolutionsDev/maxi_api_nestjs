@@ -148,6 +148,14 @@ export class PaymentsService {
     const data = await this.callGateway(gateway.code, () =>
       gateway.createCharge(order, idempotencyKey),
     );
+    // The full gateway answer, so a new method's payload shape can be traced
+    // from the log alone (nothing in it is secret — it's shown to the customer).
+    this.logger.log(
+      `Charge created via "${gateway.code}" for ${order.orderNumber ?? order.id}: ` +
+        `${data.reference} status=${data.status} ` +
+        `action_payload=${JSON.stringify(data.actionPayload)} ` +
+        `redirectUrl=${data.redirectUrl ?? 'null'}`,
+    );
     const charge = await this.chargeRepository.save(
       this.chargeRepository.create({
         orderId: order.id,
@@ -174,10 +182,17 @@ export class PaymentsService {
       return charge;
     }
     const gateway = this.methodsService.gatewayFor(charge.provider);
+    const previousStatus = charge.status;
     const data = await this.callGateway(gateway.code, () =>
       gateway.syncCharge(charge),
     );
     Object.assign(charge, this.gatewayFields(data));
+    if (charge.status !== previousStatus) {
+      this.logger.log(
+        `Charge ${charge.reference} ("${charge.provider}") moved ` +
+          `${previousStatus} -> ${charge.status} on sync`,
+      );
+    }
     await this.chargeRepository.save(charge);
     await this.propagateToOrder(charge);
     return charge;
@@ -281,6 +296,10 @@ export class PaymentsService {
     ) {
       charge.completedAt = new Date();
     }
+    this.logger.log(
+      `Webhook applied to charge ${charge.reference} ("${provider}"): ` +
+        `status=${charge.status}`,
+    );
     await this.chargeRepository.save(charge);
     await this.propagateToOrder(charge);
     return { processed: true };
