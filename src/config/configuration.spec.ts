@@ -166,9 +166,9 @@ describe('configuration', () => {
     expect(config.currency).toBe('USD');
   });
 
-  it('mibi settlement currency is configurable and normalized to uppercase', () => {
-    process.env.MIBI_CURRENCY = 'usdt';
-    expect(paymentsConfig().mibi.currency).toBe('USDT');
+  it('mibi settlement currency passes through verbatim (codes are case-sensitive)', () => {
+    process.env.MIBI_CURRENCY = ' miUSD ';
+    expect(paymentsConfig().mibi.currency).toBe('miUSD');
   });
 
   it('mibi method defaults to CRYPTO and only accepts WALLET as override', () => {

@@ -224,7 +224,8 @@ export const paymentsConfig = (): PaymentsConfig => {
         /\/$/,
         '',
       ),
-      currency: (process.env.MIBI_CURRENCY ?? 'USD').toUpperCase(),
+      // Verbatim: gateway currency codes are case-sensitive (e.g. "miUSD").
+      currency: (process.env.MIBI_CURRENCY ?? 'USD').trim(),
       method:
         (process.env.MIBI_METHOD ?? 'CRYPTO').toUpperCase() === 'WALLET'
           ? 'WALLET'
