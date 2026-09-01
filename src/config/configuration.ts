@@ -54,12 +54,6 @@ export interface MibiConfig extends GatewayCredentials {
    * with "No active receiving account is bound for currency '<X>'".
    */
   currency: string;
-  /**
-   * Charge method the store is provisioned for: CRYPTO (deposit-address
-   * instructions) or WALLET (the customer pays a Mi Billetera payment request).
-   * The store's admin panel example shows which one the account supports.
-   */
-  method: 'CRYPTO' | 'WALLET';
 }
 
 export interface TropipayConfig extends GatewayCredentials {
@@ -233,10 +227,6 @@ export const paymentsConfig = (): PaymentsConfig => {
       ),
       // Verbatim: gateway currency codes are case-sensitive (e.g. "miUSD").
       currency: (process.env.MIBI_CURRENCY ?? 'USD').trim(),
-      method:
-        (process.env.MIBI_METHOD ?? 'CRYPTO').toUpperCase() === 'WALLET'
-          ? 'WALLET'
-          : 'CRYPTO',
       configured: isConfigured(keyId, secretKey),
     },
     tropipay: {

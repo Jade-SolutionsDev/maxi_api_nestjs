@@ -449,4 +449,37 @@ describe('PaymentsService', () => {
       expect(inventory.reserve).not.toHaveBeenCalled();
     });
   });
+
+  // Mi Billetera registers ONE notification URL, so a charge created by the
+  // wallet option is announced on the crypto option's route. Resolving by
+  // provider as well as reference used to lose it, and the payment never
+  // confirmed.
+  describe('a callback arriving on a sibling gateway route', () => {
+    it('settles a charge stored under another provider', async () => {
+      chargeRepo.findOne.mockResolvedValue(
+        makeCharge({ provider: 'mibilletera-wallet' }),
+      );
+      gateway.parseWebhook.mockReturnValue({
+        reference: 'REF123',
+        charge: { status: ChargeStatus.SUCCEEDED, rawPayload: {} },
+      });
+
+      const result = await service.handleWebhook('mibilletera', '{}', {});
+
+      expect(result).toEqual({ processed: true });
+      expect(orderRepo.save).toHaveBeenCalledWith(
+        expect.objectContaining({ paymentStatus: PaymentStatus.PAID }),
+      );
+    });
+
+    it('looks the charge up by reference alone', async () => {
+      chargeRepo.findOne.mockResolvedValue(makeCharge());
+
+      await service.handleWebhook('mibilletera', '{}', {});
+
+      expect(chargeRepo.findOne).toHaveBeenCalledWith({
+        where: { reference: 'REF123' },
+      });
+    });
+  });
 });

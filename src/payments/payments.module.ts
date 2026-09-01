@@ -9,6 +9,7 @@ import { PaymentMethod } from './entities/payment-method.entity';
 import { ManualGateway } from './gateways/manual/manual.gateway';
 import { MibiClient } from './gateways/mibilletera/mibi-client';
 import { MibilleteraGateway } from './gateways/mibilletera/mibilletera.gateway';
+import { MibilleteraWalletGateway } from './gateways/mibilletera/mibilletera-wallet.gateway';
 import { TropipayClient } from './gateways/tropipay/tropipay-client';
 import { TropipayGateway } from './gateways/tropipay/tropipay.gateway';
 import { OrderExpiryController } from './order-expiry.controller';
@@ -48,10 +49,16 @@ import { StorefrontPaymentMethodsController } from './storefront-payment-methods
     TropipayClient,
     ManualGateway,
     MibilleteraGateway,
+    MibilleteraWalletGateway,
     TropipayGateway,
     {
       provide: PAYMENT_GATEWAYS,
-      inject: [TropipayGateway, MibilleteraGateway, ManualGateway],
+      inject: [
+        TropipayGateway,
+        MibilleteraGateway,
+        MibilleteraWalletGateway,
+        ManualGateway,
+      ],
       useFactory: (...gateways: unknown[]) => gateways,
     },
   ],

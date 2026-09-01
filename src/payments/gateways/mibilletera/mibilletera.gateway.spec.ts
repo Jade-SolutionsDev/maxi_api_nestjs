@@ -83,16 +83,16 @@ describe('MibilleteraGateway', () => {
     });
   });
 
-  it('sends WALLET when the store is provisioned for it (MIBI_METHOD)', async () => {
-    mibi.method = 'WALLET';
-
+  // The method is the gateway's own, no longer an environment-wide switch:
+  // the wallet variant is a separate option the customer can choose.
+  it('always asks for CRYPTO', async () => {
     await gateway.createCharge(
       { id: 'order-1', orderNumber: 'ORD-20260001', total: '30.00' } as Order,
       'order_ORD-20260001_mibilletera_1',
     );
 
     expect(client.createCharge).toHaveBeenCalledWith(
-      expect.objectContaining({ method: 'WALLET' }),
+      expect.objectContaining({ method: 'CRYPTO' }),
     );
   });
 
