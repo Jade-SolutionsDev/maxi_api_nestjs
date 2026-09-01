@@ -1,3 +1,4 @@
+import { ReservationStatus } from '../inventory/entities/inventory-reservation.entity';
 import { ConflictException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { Test, TestingModule } from '@nestjs/testing';
@@ -113,6 +114,9 @@ describe('OrderExpiryService', () => {
     expect(inventory.releaseReservations).toHaveBeenCalledWith(
       expect.anything(),
       'order-1',
+      undefined,
+      // Caducada, no cancelada: es lo que permite medirlas por separado.
+      ReservationStatus.EXPIRED,
     );
     expect(saved[0]).toMatchObject({
       status: OrderStatus.CANCELLED,

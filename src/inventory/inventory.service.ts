@@ -1,3 +1,4 @@
+import { sinTildesSql } from '../common/search/accent-insensitive';
 import {
   BadRequestException,
   ConflictException,
@@ -153,7 +154,7 @@ export class InventoryService {
 
     const where: string[] = [];
     if (filters.q) {
-      where.push(`p.name ILIKE ${add(`%${filters.q}%`)}`);
+      where.push(sinTildesSql('p.name', add(`%${filters.q}%`)));
     }
     if (filters.categoryId) {
       where.push(`p.category_id = ${add(filters.categoryId)}`);
@@ -453,12 +454,18 @@ export class InventoryService {
     orderId: string,
     productId: string,
     quantity: number,
+    locationId?: string,
   ): Promise<void> {
     const repo = manager.getRepository(Inventory);
     // Only enabled storages can fulfil an order — never reserve from a disabled
-    // or soft-deleted location.
+    // or soft-deleted location. `locationId` narrows that to a single storage:
+    // a pickup order must hold its stock on the shelf the customer walks up to,
+    // not wherever the quantity happens to be.
     const activeLocations: { id: string }[] = await manager.query(
-      `SELECT id FROM stock_locations WHERE is_active = true AND deleted_at IS NULL`,
+      locationId
+        ? `SELECT id FROM stock_locations WHERE is_active = true AND deleted_at IS NULL AND id = $1`
+        : `SELECT id FROM stock_locations WHERE is_active = true AND deleted_at IS NULL`,
+      locationId ? [locationId] : undefined,
     );
     const activeIds = activeLocations.map((l) => l.id);
     const rows =
@@ -550,11 +557,17 @@ export class InventoryService {
     manager: EntityManager,
     orderId: string,
     userId?: string,
+    /**
+     * Con qué se marca lo liberado. Por defecto «cancelada», que es lo que hace
+     * una persona; la caducidad pasa `EXPIRED` para poder medir aparte cuánto
+     * stock retienen los pedidos que nunca se pagan.
+     */
+    estadoFinal: ReservationStatus = ReservationStatus.CANCELLED,
   ): Promise<void> {
     await this.settleReservations(
       manager,
       orderId,
-      ReservationStatus.CANCELLED,
+      estadoFinal,
       (row, n) => {
         row.reservedQuantity -= n;
       },
@@ -584,7 +597,7 @@ export class InventoryService {
           }),
         );
       }
-      reservation.status = ReservationStatus.CANCELLED;
+      reservation.status = estadoFinal;
       await reservationRepo.save(reservation);
     }
     if (confirmed.length > 0) {

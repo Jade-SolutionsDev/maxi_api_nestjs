@@ -11,6 +11,14 @@ export enum ReservationStatus {
   RESERVED = 'reserved',
   CONFIRMED = 'confirmed',
   CANCELLED = 'cancelled',
+  /**
+   * Liberada porque nadie pagó a tiempo, no porque alguien decidiera cancelar.
+   *
+   * Se mide distinto: las canceladas dicen algo del cliente o del almacén, las
+   * caducadas dicen cuánto stock se está reteniendo por pedidos que nunca se
+   * pagan — y ese número es el que decide si el plazo de pago está bien puesto.
+   */
+  EXPIRED = 'expired',
 }
 
 // Stock held for a pending order, per (location, product) allocation. While
@@ -41,9 +49,9 @@ export class InventoryReservation {
   })
   status: ReservationStatus;
 
-  @CreateDateColumn({ name: 'created_at' })
+  @CreateDateColumn({ name: 'created_at', type: 'timestamptz' })
   createdAt: Date;
 
-  @UpdateDateColumn({ name: 'updated_at' })
+  @UpdateDateColumn({ name: 'updated_at', type: 'timestamptz' })
   updatedAt: Date;
 }

@@ -38,6 +38,12 @@ export enum CancellationReason {
   PAID_AFTER_EXPIRY_OUT_OF_STOCK = 'paid_after_expiry_out_of_stock',
 }
 
+/** How the customer gets the order. */
+export enum FulfillmentType {
+  DELIVERY = 'delivery',
+  PICKUP = 'pickup',
+}
+
 export enum PaymentStatus {
   PENDING = 'pending',
   PAID = 'paid',
@@ -109,6 +115,38 @@ export class Order {
   @Column({ type: 'decimal', precision: 12, scale: 2 })
   total: string;
 
+  @Column({
+    name: 'fulfillment_type',
+    type: 'varchar',
+    length: 10,
+    default: FulfillmentType.DELIVERY,
+  })
+  fulfillmentType: FulfillmentType;
+
+  // Snapshots, not references: the option can be renamed or removed later, and
+  // the order must still say what the customer actually chose and paid for.
+  @Column({ name: 'delivery_option_id', type: 'uuid', nullable: true })
+  deliveryOptionId: string | null;
+
+  @Column({
+    name: 'delivery_option_label',
+    type: 'varchar',
+    length: 100,
+    nullable: true,
+  })
+  deliveryOptionLabel: string | null;
+
+  // Which storage the customer collects from — also the storage the stock is
+  // held in, so the goods are on the right shelf when they arrive.
+  @Column({ name: 'pickup_location_id', type: 'uuid', nullable: true })
+  pickupLocationId: string | null;
+
+  @Column({ name: 'pickup_address_id', type: 'uuid', nullable: true })
+  pickupAddressId: string | null;
+
+  @Column({ name: 'pickup_address_snapshot', type: 'jsonb', nullable: true })
+  pickupAddressSnapshot: Record<string, unknown> | null;
+
   @Column({ name: 'delivery_municipality_id', type: 'uuid', nullable: true })
   deliveryMunicipalityId: string | null;
 
@@ -131,12 +169,12 @@ export class Order {
   @OneToMany(() => OrderItem, (item) => item.order)
   items?: OrderItem[];
 
-  @CreateDateColumn({ name: 'created_at' })
+  @CreateDateColumn({ name: 'created_at', type: 'timestamptz' })
   createdAt: Date;
 
-  @UpdateDateColumn({ name: 'updated_at' })
+  @UpdateDateColumn({ name: 'updated_at', type: 'timestamptz' })
   updatedAt: Date;
 
-  @DeleteDateColumn({ name: 'deleted_at' })
+  @DeleteDateColumn({ name: 'deleted_at', type: 'timestamptz' })
   deletedAt: Date | null;
 }

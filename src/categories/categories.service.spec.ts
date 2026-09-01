@@ -78,6 +78,16 @@ function makeRawQueryBuilderStub(rawRows: { id: string; count: string }[]) {
   };
 }
 
+/**
+ * Compara la intencion, no el objeto: dos llamadas a `contieneSinTildes` traen
+ * funciones distintas y `toEqual` las mira por identidad.
+ */
+const esperarBusquedaSinTildes = (operador: any, termino: string) => {
+  expect(operador._type).toBe('raw');
+  expect(operador._getSql('tabla.columna')).toContain('f_unaccent');
+  expect(operador._objectLiteralParameters).toEqual({ termino: `%${termino}%` });
+};
+
 describe('CategoriesService', () => {
   let service: CategoriesService;
   let repository: jest.Mocked<Repository<Category>>;
@@ -259,22 +269,26 @@ describe('CategoriesService', () => {
       );
     });
 
-    it('filters departments by name OR slug (ILIKE) when q is present', async () => {
+    it('filters departments by name OR slug, accents folded, when q is present', async () => {
       repository.find.mockResolvedValue([]);
       await service.listDepartments('ques');
-      expect(repository.find.mock.calls[0][0].where).toEqual([
-        { parentId: IsNull(), name: ILike('%ques%') },
-        { parentId: IsNull(), slug: ILike('%ques%') },
-      ]);
+      const where = repository.find.mock.calls[0][0].where;
+      expect(where).toHaveLength(2);
+      expect(where[0].parentId).toEqual(IsNull());
+      expect(where[1].parentId).toEqual(IsNull());
+      esperarBusquedaSinTildes(where[0].name, 'ques');
+      esperarBusquedaSinTildes(where[1].slug, 'ques');
     });
 
-    it('filters categories by name OR slug (ILIKE) when q is present', async () => {
+    it('filters categories by name OR slug, accents folded, when q is present', async () => {
       repository.find.mockResolvedValue([]);
       await service.listCategories(provider, undefined, 'ques');
-      expect(repository.find.mock.calls[0][0].where).toEqual([
-        { parentId: Not(IsNull()), name: ILike('%ques%') },
-        { parentId: Not(IsNull()), slug: ILike('%ques%') },
-      ]);
+      const where = repository.find.mock.calls[0][0].where;
+      expect(where).toHaveLength(2);
+      expect(where[0].parentId).toEqual(Not(IsNull()));
+      expect(where[1].parentId).toEqual(Not(IsNull()));
+      esperarBusquedaSinTildes(where[0].name, 'ques');
+      esperarBusquedaSinTildes(where[1].slug, 'ques');
     });
   });
 

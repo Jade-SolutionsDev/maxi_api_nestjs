@@ -95,6 +95,13 @@ describe('Orders (e2e)', () => {
     await inventory.save(
       inventory.create({ locationId, productId, quantity: 5 }),
     );
+    // Checkout refuses when the shop can fulfil nothing, so the fixture has to
+    // say how it fulfils. One enabled option with no zones = delivery anywhere,
+    // which is what these tests exercise.
+    await clients.query(`DELETE FROM delivery_options`);
+    await clients.query(
+      `INSERT INTO delivery_options (label, fee, enabled) VALUES ('E2E Delivery', 0, true)`,
+    );
   });
 
   afterAll(async () => {
@@ -298,6 +305,17 @@ describe('Orders (e2e)', () => {
 
     expect(res.body.data.cancelled).toBe(1);
 
+    /**
+     * La reserva queda marcada como caducada, no como cancelada: son dos cosas
+     * distintas y `MxH-0078` pedia poder medirlas por separado — cuanto stock
+     * retienen los pedidos que nadie paga es lo que dice si el plazo esta bien
+     * puesto.
+     */
+    const estados = await inventory.query(
+      `SELECT status, count(*)::int AS n FROM inventory_reservations GROUP BY status`,
+    );
+    expect(estados).toEqual([{ status: 'expired', n: 1 }]);
+
     const row = await physicalRow();
     expect(row.reservedQuantity).toBe(0);
     expect(row.quantity).toBe(5);
@@ -308,5 +326,122 @@ describe('Orders (e2e)', () => {
       [order.id],
     );
     expect(sales[0].n).toBe(0);
+  });
+
+  // The state the shop is actually in at launch: no delivery, pickup only.
+  describe('pickup', () => {
+    const secondLocationId = '8f14e45f-ceea-467a-9f8a-2b9c2f2a9b21';
+
+    beforeEach(async () => {
+      await clients.query(`DELETE FROM delivery_options`);
+      await clients.query(`DELETE FROM stock_location_pickup_addresses`);
+      await clients.query(
+        `INSERT INTO stock_location_pickup_addresses (location_id, label, address)
+         VALUES ($1, 'Mostrador', 'Calle 1 #2, Centro')`,
+        [locationId],
+      );
+    });
+
+    const pickupPoint = async (): Promise<{
+      deliveryOptions: { id: string }[];
+      pickupPoints: { id: string }[];
+      unavailableMessage: string | null;
+    }> => {
+      const res = await request(app.getHttpServer())
+        .get('/api/storefront/fulfillment')
+        .set(clientAuth)
+        .expect(200);
+      return res.body.data as {
+        deliveryOptions: { id: string }[];
+        pickupPoints: { id: string }[];
+        unavailableMessage: string | null;
+      };
+    };
+
+    it('offers pickup and nothing else when no delivery option exists', async () => {
+      const offer = await pickupPoint();
+
+      expect(offer.deliveryOptions).toEqual([]);
+      expect(offer.pickupPoints).toHaveLength(1);
+      expect(offer.unavailableMessage).toBeNull();
+    });
+
+    it('holds the stock in the storage the customer collects from', async () => {
+      // A second storage with stock: the reservation must not drift to it.
+      await clients.query(
+        `INSERT INTO stock_locations (id, name, is_active)
+         VALUES ($1, 'Far Warehouse', true) ON CONFLICT (id) DO NOTHING`,
+        [secondLocationId],
+      );
+      await inventory.save(
+        inventory.create({
+          locationId: secondLocationId,
+          productId,
+          quantity: 50,
+        }),
+      );
+
+      const offer = await pickupPoint();
+      await request(app.getHttpServer())
+        .post('/api/cart/items')
+        .set(clientAuth)
+        .send({ productId, quantity: 2 })
+        .expect(201);
+
+      const res = await request(app.getHttpServer())
+        .post('/api/storefront/orders')
+        .set(clientAuth)
+        .send({
+          fulfillmentType: 'pickup',
+          pickupAddressId: offer.pickupPoints[0].id,
+        })
+        .expect(201);
+
+      expect(res.body.data.fulfillmentType).toBe('pickup');
+      expect(res.body.data.pickupAddress).toMatchObject({
+        address: 'Calle 1 #2, Centro',
+      });
+      expect(res.body.data.deliveryFee).toBe(0);
+
+      const held = await clients.query(
+        `SELECT location_id, quantity FROM inventory_reservations WHERE order_id = $1`,
+        [res.body.data.id],
+      );
+      expect(held).toHaveLength(1);
+      expect(held[0].location_id).toBe(locationId);
+    });
+
+    it('blocks checkout when pickup is off and nothing else is offered', async () => {
+      await clients.query(
+        `UPDATE fulfillment_settings SET data = jsonb_set(data, '{pickupEnabled}', 'false')`,
+      );
+      await request(app.getHttpServer())
+        .post('/api/cart/items')
+        .set(clientAuth)
+        .send({ productId, quantity: 1 })
+        .expect(201);
+
+      const offer = await pickupPoint();
+      expect(offer.unavailableMessage).toBeTruthy();
+
+      await request(app.getHttpServer())
+        .post('/api/storefront/orders')
+        .set(clientAuth)
+        .send({ fulfillmentType: 'pickup' })
+        .expect(400);
+
+      await clients.query(
+        `UPDATE fulfillment_settings SET data = jsonb_set(data, '{pickupEnabled}', 'true')`,
+      );
+    });
+
+    it('says to contact support when no storage has a pickup address', async () => {
+      await clients.query(`DELETE FROM stock_location_pickup_addresses`);
+
+      const offer = await pickupPoint();
+
+      expect(offer.pickupPoints).toEqual([]);
+      expect(offer.unavailableMessage).toBeTruthy();
+    });
   });
 });

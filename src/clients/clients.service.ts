@@ -4,10 +4,25 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { In, Repository } from 'typeorm';
+import {
+  buildPaginatedResponse,
+  getPaginationParams,
+  type PaginatedResponse,
+  type PaginationQueryDto,
+} from '../common/dto/pagination.dto';
+import { sinTildes } from '../common/search/accent-insensitive';
+import { CAMPOS_ORDENABLES } from './dto/list-clients-query.dto';
 import { CreateClientDto } from './dto/create-client.dto';
 import { UpdateClientDto } from './dto/update-client.dto';
 import { Client } from './entities/client.entity';
+
+export interface FiltroDeClientes {
+  /** Texto libre sobre nombre, apellidos, correo y teléfono. */
+  q?: string;
+  isActive?: boolean;
+  ids?: string[];
+}
 
 @Injectable()
 export class ClientsService {
@@ -16,8 +31,45 @@ export class ClientsService {
     private readonly clientsRepository: Repository<Client>,
   ) {}
 
-  async findAll(): Promise<Client[]> {
-    return this.clientsRepository.find();
+  async findAll(
+    filtro: FiltroDeClientes = {},
+    paginacion: PaginationQueryDto = {},
+  ): Promise<PaginatedResponse<Client>> {
+    const { page, limit, skip } = getPaginationParams(paginacion);
+    const qb = this.clientsRepository.createQueryBuilder('client');
+
+    if (filtro.ids?.length) {
+      qb.andWhere({ id: In(filtro.ids) });
+    }
+
+    if (filtro.q) {
+      qb.andWhere(
+        `(${sinTildes('client.firstName')} OR ${sinTildes('client.lastName')} OR ${sinTildes('client.email')} OR ${sinTildes('client.phone')})`,
+        { q: `%${filtro.q}%` },
+      );
+    }
+
+    if (filtro.isActive !== undefined) {
+      qb.andWhere('client.isActive = :isActive', { isActive: filtro.isActive });
+    }
+
+    // `id` es la clave primaria: como desempate deja un orden total estable
+    // entre peticiones, que es lo que evita que una fila aparezca en dos
+    // páginas o en ninguna cuando varias comparten fecha.
+    const campo = CAMPOS_ORDENABLES.includes(
+      paginacion.sortBy as (typeof CAMPOS_ORDENABLES)[number],
+    )
+      ? (paginacion.sortBy as string)
+      : 'createdAt';
+    const sentido = paginacion.sortOrder === 'asc' ? 'ASC' : 'DESC';
+
+    qb.orderBy(`client.${campo}`, sentido)
+      .addOrderBy('client.id', 'DESC')
+      .skip(skip)
+      .take(limit);
+
+    const [clients, total] = await qb.getManyAndCount();
+    return buildPaginatedResponse(clients, total, page, limit);
   }
 
   async findOne(id: string): Promise<Client> {

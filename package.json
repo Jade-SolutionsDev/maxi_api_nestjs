@@ -5,11 +5,6 @@
   "author": "",
   "private": true,
   "license": "UNLICENSED",
-  "pnpm": {
-    "onlyBuiltDependencies": [
-      "bcrypt"
-    ]
-  },
   "scripts": {
     "build": "nest build",
     "format": "prettier --write \"src/**/*.ts\" \"test/**/*.ts\"",
@@ -23,6 +18,9 @@
     "test:cov": "jest --coverage",
     "test:debug": "node --inspect-brk -r tsconfig-paths/register -r ts-node/register node_modules/.bin/jest --runInBand",
     "test:e2e": "NODE_ENV=test jest --config ./test/jest-e2e.json --runInBand",
+    "migration:generate": "typeorm-ts-node-commonjs migration:generate -d src/database/data-source.ts",
+    "migration:run": "typeorm-ts-node-commonjs migration:run -d src/database/data-source.ts",
+    "migration:revert": "typeorm-ts-node-commonjs migration:revert -d src/database/data-source.ts",
     "docker:db:start": "docker compose -f docker-compose.dev.yml up -d",
     "docker:db:stop": "docker compose -f docker-compose.dev.yml down",
     "docker:db:reset": "docker compose -f docker-compose.dev.yml down -v && docker compose -f docker-compose.dev.yml up -d",
@@ -33,7 +31,9 @@
     "seed:inventory": "ts-node scripts/seed-inventory.ts",
     "backfill:sale-operations": "ts-node scripts/backfill-sale-operations.ts",
     "seed:orders": "ts-node scripts/seed-orders.ts",
-    "seed:cms": "ts-node scripts/seed-cms.ts"
+    "seed:cms": "ts-node scripts/seed-cms.ts",
+    "seed:contact": "ts-node scripts/seed-contact.ts",
+    "seed:fulfillment": "ts-node scripts/seed-fulfillment.ts"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1085.0",

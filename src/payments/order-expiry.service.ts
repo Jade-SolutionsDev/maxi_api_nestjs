@@ -1,3 +1,4 @@
+import { ReservationStatus } from '../inventory/entities/inventory-reservation.entity';
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { InjectRepository } from '@nestjs/typeorm';
@@ -144,7 +145,13 @@ export class OrderExpiryService {
         ) {
           return false;
         }
-        await this.inventoryService.releaseReservations(manager, fresh.id);
+        // Caducada, no cancelada: son dos cosas distintas y se miden aparte.
+        await this.inventoryService.releaseReservations(
+          manager,
+          fresh.id,
+          undefined,
+          ReservationStatus.EXPIRED,
+        );
         fresh.status = OrderStatus.CANCELLED;
         fresh.cancellationReason = CancellationReason.PAYMENT_NOT_RECEIVED;
         await repo.save(fresh);

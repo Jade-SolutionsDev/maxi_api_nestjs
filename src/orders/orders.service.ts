@@ -1,3 +1,4 @@
+import { sinTildes } from '../common/search/accent-insensitive';
 import {
   BadRequestException,
   ConflictException,
@@ -22,7 +23,16 @@ import { AdminOrdersQueryDto } from './dto/admin-orders-query.dto';
 import { CheckoutDto } from './dto/checkout.dto';
 import { OrderResponseDto } from './dto/order-response.dto';
 import { OrderItem } from './entities/order-item.entity';
-import { Order, OrderStatus, PaymentStatus } from './entities/order.entity';
+import {
+  FulfillmentType,
+  Order,
+  OrderStatus,
+  PaymentStatus,
+} from './entities/order.entity';
+import { ClientAddressesService } from '../client-addresses/client-addresses.service';
+import { ClientAddress } from '../client-addresses/entities/client-address.entity';
+import { FulfillmentService } from '../fulfillment/fulfillment.service';
+import { GeographyService } from '../geography/geography.service';
 import { PaymentGateway } from '../payments/payment-gateway.interface';
 import { PaymentMethodsService } from '../payments/payment-methods.service';
 import { PaymentsService } from '../payments/payments.service';
@@ -53,6 +63,23 @@ const GROCER_TARGETS = [
   OrderStatus.DELIVERED,
 ];
 
+/** What the order keeps of an address, independent of the address book. */
+const snapshotAddress = (
+  address: ClientAddress,
+  place: { municipality: string; province: string } | null,
+): Record<string, unknown> => ({
+  label: address.label ?? null,
+  street: address.street,
+  betweenStreets: address.betweenStreets ?? null,
+  reference: address.reference ?? null,
+  municipalityId: address.municipalityId,
+  // Names too: an id tells a customer reading their own order nothing, and the
+  // catalog entry may be renamed or removed long after the order shipped.
+  municipalityName: place?.municipality ?? null,
+  provinceName: place?.province ?? null,
+  contactPhone: address.contactPhone ?? null,
+});
+
 @Injectable()
 export class OrdersService {
   private readonly logger = new Logger(OrdersService.name);
@@ -64,6 +91,9 @@ export class OrdersService {
     private readonly inventoryService: InventoryService,
     private readonly paymentsService: PaymentsService,
     private readonly paymentMethodsService: PaymentMethodsService,
+    private readonly fulfillmentService: FulfillmentService,
+    private readonly clientAddressesService: ClientAddressesService,
+    private readonly geographyService: GeographyService,
     private readonly dataSource: DataSource,
   ) {}
 
@@ -90,13 +120,33 @@ export class OrdersService {
   // commit: an outbound gateway call must not hold the inventory row locks,
   // and a gateway failure must not lose the order.
   async checkout(client: Client, dto: CheckoutDto): Promise<OrderResponseDto> {
-    // Same municipality the order ships to, so availability is judged against
-    // the zone the customer is actually buying for.
+    // Where the order is going, and how. Both are settled before anything is
+    // written: a choice the shop cannot honour must 400, not become an order
+    // nobody can fill.
+    const address = await this.resolveAddress(client, dto);
     const deliveryMunicipalityId =
-      dto.deliveryMunicipalityId ?? client.defaultMunicipalityId ?? undefined;
-    const cart = await this.cartService.getCart(client.id, {
+      address?.municipalityId ??
+      dto.deliveryMunicipalityId ??
+      client.defaultMunicipalityId ??
+      undefined;
+
+    const place = address ? await this.resolvePlace(address) : null;
+
+    const fulfillment = await this.fulfillmentService.resolveChoice({
+      fulfillmentType: dto.fulfillmentType,
+      deliveryOptionId: dto.deliveryOptionId,
+      pickupAddressId: dto.pickupAddressId,
       municipalityId: deliveryMunicipalityId,
     });
+
+    // Availability is judged where the goods will actually be handed over: the
+    // storage the customer collects from, or the zone we deliver to.
+    const cart = await this.cartService.getCart(
+      client.id,
+      fulfillment.pickupLocationId
+        ? { locationId: fulfillment.pickupLocationId }
+        : { municipalityId: deliveryMunicipalityId },
+    );
     if (cart.items.length === 0) {
       throw new BadRequestException('Cart is empty');
     }
@@ -117,6 +167,8 @@ export class OrdersService {
     // gateway call.
     const gateway = await this.paymentMethodsService.resolve(dto.paymentMethod);
 
+    const total = (cart.subtotal + Number(fulfillment.fee)).toFixed(2);
+
     const orderId = await this.dataSource.transaction(async (manager) => {
       const orderRepo = manager.getRepository(Order);
       const order = await orderRepo.save(
@@ -125,10 +177,20 @@ export class OrdersService {
           status: OrderStatus.PENDING,
           paymentStatus: PaymentStatus.PENDING,
           subtotal: cart.subtotal.toFixed(2),
-          deliveryFee: '0.00',
-          total: cart.subtotal.toFixed(2),
+          deliveryFee: fulfillment.fee,
+          total,
+          fulfillmentType: fulfillment.type,
+          deliveryOptionId: fulfillment.deliveryOptionId,
+          deliveryOptionLabel: fulfillment.deliveryOptionLabel,
+          pickupLocationId: fulfillment.pickupLocationId,
+          pickupAddressId: fulfillment.pickupAddressId,
+          pickupAddressSnapshot: fulfillment.pickupAddressSnapshot,
           deliveryMunicipalityId: deliveryMunicipalityId ?? null,
-          deliveryAddress: dto.deliveryAddress ?? null,
+          // A snapshot: the saved address may be edited or deleted later, the
+          // order must still say where it was going.
+          deliveryAddress: address
+            ? snapshotAddress(address, place)
+            : (dto.deliveryAddress ?? null),
           customerNotes: dto.customerNotes ?? null,
         }),
       );
@@ -144,6 +206,8 @@ export class OrdersService {
           order.id,
           line.productId,
           line.quantity,
+          // Pickup holds its stock in the storage the customer walks up to.
+          fulfillment.pickupLocationId ?? undefined,
         );
         await itemRepo.save(
           itemRepo.create({
@@ -166,9 +230,68 @@ export class OrdersService {
     // and visible by now, so making the customer watch a spinner for it only
     // risks them abandoning a checkout that already succeeded. The order page
     // polls for the attempt and can start one itself if this fails.
+    if (dto.saveAddress && dto.address && !dto.addressId) {
+      // After the commit, and never fatal: the order is placed either way.
+      try {
+        await this.clientAddressesService.create(client.id, dto.address);
+      } catch (err) {
+        this.logger.error(
+          `Could not save the address of order ${orderId} to the address book`,
+          err instanceof Error ? err.stack : String(err),
+        );
+      }
+    }
+
     void this.initiatePayment(orderId, gateway);
 
     return this.findOneForClient(client.id, orderId);
+  }
+
+  /**
+   * The address this order ships to: a saved one (ownership-checked), or one
+   * typed at checkout — persisted to the customer's book only if they asked.
+   * Pickup orders have none.
+   */
+  private async resolveAddress(
+    client: Client,
+    dto: CheckoutDto,
+  ): Promise<ClientAddress | null> {
+    if (dto.fulfillmentType === FulfillmentType.PICKUP) return null;
+
+    if (dto.addressId) {
+      return this.clientAddressesService.findOneForClient(
+        client.id,
+        dto.addressId,
+      );
+    }
+    if (!dto.address) return null;
+
+    // Detached: the order snapshots it. Saving to the address book happens
+    // only once the order exists — a checkout that fails must not leave the
+    // customer with a new address (and a retry with a duplicate of it).
+    return {
+      ...dto.address,
+      clientId: client.id,
+      municipalityId: dto.address.municipalityId,
+    } as ClientAddress;
+  }
+
+  // Human-readable place for the order's address snapshot.
+  private async resolvePlace(
+    address: ClientAddress,
+  ): Promise<{ municipality: string; province: string } | null> {
+    try {
+      const municipality = await this.geographyService.getMunicipalityOrThrow(
+        address.municipalityId,
+      );
+      const province = await this.geographyService.getProvinceOrThrow(
+        municipality.provinceId,
+      );
+      return { municipality: municipality.name, province: province.name };
+    } catch {
+      // A municipality that left the catalog must not stop an order.
+      return null;
+    }
   }
 
   // Background payment initiation. Never throws: a gateway failure leaves the
@@ -276,8 +399,8 @@ export class OrdersService {
     }
     if (query.q) {
       qb.andWhere(
-        `(order.orderNumber ILIKE :q OR client.email ILIKE :q
-          OR client.firstName ILIKE :q OR client.lastName ILIKE :q)`,
+        `(${sinTildes('order.orderNumber')} OR ${sinTildes('client.email')}
+          OR ${sinTildes('client.firstName')} OR ${sinTildes('client.lastName')})`,
         { q: `%${query.q}%` },
       );
     }

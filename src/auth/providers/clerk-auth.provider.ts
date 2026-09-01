@@ -1,3 +1,4 @@
+import { isLocalEnv } from '../../config/configuration';
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { verifyToken } from '@clerk/backend';
@@ -58,7 +59,20 @@ export class ClerkAuthProvider extends AuthProvider {
       throw new Error('Unable to verify Clerk token against known instances');
     }
 
-    // Dev fallback when no Clerk secrets are configured.
+    /**
+     * Dev fallback when no Clerk secrets are configured — local only.
+     *
+     * Without the interlock, forgetting both Clerk keys in a deployed
+     * environment did not break authentication: it opened it. Any token signed
+     * with `dev-secret` — a literal in this repository — would be accepted as
+     * a valid user. A missing variable must never widen access.
+     */
+    if (!isLocalEnv()) {
+      throw new Error(
+        'Clerk no está configurado en un entorno desplegado: falta CLERK_SECRET_KEY o CLERK_BACKOFFICE_SECRET_KEY',
+      );
+    }
+
     const devSecret =
       this.configService.get<string>('clerk.jwtSecret') ?? 'dev-secret';
     const payload = verify(token, devSecret) as { sub: string };

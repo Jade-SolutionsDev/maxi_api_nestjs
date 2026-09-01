@@ -1,3 +1,4 @@
+import { sinTildes } from '../common/search/accent-insensitive';
 import {
   ConflictException,
   Injectable,
@@ -31,6 +32,11 @@ export interface ProductFilters {
    */
   priceField?: 'basePrice' | 'finalPrice';
   featured?: boolean;
+  /**
+   * `true` → only discounted products, `false` → only products at list price.
+   * Omitted → no discount filter.
+   */
+  onSale?: boolean;
   isActive?: boolean;
   sortBy?: 'name' | 'price' | 'finalPrice' | 'createdAt' | 'updatedAt';
   sortOrder?: 'asc' | 'desc';
@@ -62,6 +68,13 @@ export class ProductsService {
   // categories/clients; the catalog is small. Add paging if it grows.
   async findAll(filters: ProductFilters = {}): Promise<Product[]> {
     const qb = this.productRepository.createQueryBuilder('product');
+
+    /**
+     * La categoría viaja con el producto para que la respuesta pueda decir a
+     * qué departamento pertenece — `MxH-0012` lo pide en el listado, y sin la
+     * relación cargada `departmentId` llegaba siempre nulo.
+     */
+    qb.leftJoinAndSelect('product.category', 'category');
 
     if (filters.categoryId) {
       qb.andWhere('product.categoryId = :categoryId', {
@@ -102,7 +115,7 @@ export class ProductsService {
       );
     }
     if (filters.q) {
-      qb.andWhere('product.name ILIKE :q', { q: `%${filters.q}%` });
+      qb.andWhere(sinTildes('product.name'), { q: `%${filters.q}%` });
     }
     const priceExpr =
       filters.priceField === 'finalPrice'
@@ -122,6 +135,12 @@ export class ProductsService {
       qb.andWhere('product.isFeatured = :featured', {
         featured: filters.featured,
       });
+    }
+    if (filters.onSale != null) {
+      // A product is "on sale" when it carries a discount percentage.
+      qb.andWhere(
+        filters.onSale ? 'product.discount > 0' : 'product.discount = 0',
+      );
     }
     if (filters.isActive != null) {
       qb.andWhere('product.isActive = :isActive', {
@@ -253,7 +272,7 @@ export class ProductsService {
   // municipality directly, OR the whole province it belongs to (derived from the
   // municipality). By province alone: those with province-wide coverage. Disabled
   // /soft-deleted storages are excluded. Empty result → nothing is deliverable.
-  private async coveringLocationIds(area: {
+  async coveringLocationIds(area: {
     provinceId?: string;
     municipalityId?: string;
   }): Promise<string[]> {

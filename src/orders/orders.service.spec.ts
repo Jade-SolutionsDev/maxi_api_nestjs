@@ -14,6 +14,9 @@ import { Role, User } from '../users/entities/user.entity';
 import { OrderItem } from './entities/order-item.entity';
 import { Order, OrderStatus, PaymentStatus } from './entities/order.entity';
 import { OrdersService } from './orders.service';
+import { ClientAddressesService } from '../client-addresses/client-addresses.service';
+import { FulfillmentService } from '../fulfillment/fulfillment.service';
+import { GeographyService } from '../geography/geography.service';
 import { PaymentMethodsService } from '../payments/payment-methods.service';
 import { PaymentsService } from '../payments/payments.service';
 
@@ -82,6 +85,11 @@ describe('OrdersService', () => {
     latestMethodsFor: jest.Mock;
   };
   let paymentMethodsService: { resolve: jest.Mock };
+  let fulfillmentService: { resolveChoice: jest.Mock };
+  let clientAddressesService: {
+    findOneForClient: jest.Mock;
+    create: jest.Mock;
+  };
   let orderItemRepo: { save: jest.Mock; create: jest.Mock };
   let cartItemRepo: { delete: jest.Mock };
 
@@ -116,6 +124,29 @@ describe('OrdersService', () => {
     paymentMethodsService = {
       resolve: jest.fn().mockResolvedValue({ code: 'manual' }),
     };
+    fulfillmentService = {
+      resolveChoice: jest.fn().mockResolvedValue({
+        type: 'delivery',
+        fee: '0.00',
+        deliveryOptionId: null,
+        deliveryOptionLabel: null,
+        pickupLocationId: null,
+        pickupAddressId: null,
+        pickupAddressSnapshot: null,
+      }),
+    };
+    clientAddressesService = {
+      findOneForClient: jest.fn(),
+      create: jest.fn(),
+    };
+    geographyService = {
+      getMunicipalityOrThrow: jest
+        .fn()
+        .mockResolvedValue({ id: 'mun-9', name: 'Báguanos', provinceId: 'p1' }),
+      getProvinceOrThrow: jest
+        .fn()
+        .mockResolvedValue({ id: 'p1', name: 'Holguín' }),
+    };
 
     const manager = {
       getRepository: (entity: unknown) => {
@@ -137,6 +168,9 @@ describe('OrdersService', () => {
         { provide: InventoryService, useValue: inventoryService },
         { provide: PaymentsService, useValue: paymentsService },
         { provide: PaymentMethodsService, useValue: paymentMethodsService },
+        { provide: FulfillmentService, useValue: fulfillmentService },
+        { provide: ClientAddressesService, useValue: clientAddressesService },
+        { provide: GeographyService, useValue: geographyService },
         { provide: DataSource, useValue: dataSource },
       ],
     }).compile();
@@ -163,6 +197,7 @@ describe('OrdersService', () => {
         'order-1',
         'prod-1',
         2,
+        undefined,
       );
       expect(orderItemRepo.save).toHaveBeenCalledWith(
         expect.objectContaining({
@@ -178,6 +213,140 @@ describe('OrdersService', () => {
       expect(paymentsService.createChargeForOrder).toHaveBeenCalled();
       expect(result.status).toBe(OrderStatus.PENDING);
       expect(result.paymentStatus).toBe(PaymentStatus.PENDING);
+    });
+
+    it('holds pickup stock in the storage the customer collects from', async () => {
+      fulfillmentService.resolveChoice.mockResolvedValue({
+        type: 'pickup',
+        fee: '0.00',
+        deliveryOptionId: null,
+        deliveryOptionLabel: null,
+        pickupLocationId: 'loc-1',
+        pickupAddressId: 'pick-1',
+        pickupAddressSnapshot: { address: 'Calle 1' },
+      });
+
+      await service.checkout(makeClient(), {});
+
+      expect(cartService.getCart).toHaveBeenCalledWith('client-1', {
+        locationId: 'loc-1',
+      });
+      expect(inventoryService.reserve).toHaveBeenCalledWith(
+        expect.anything(),
+        'order-1',
+        'prod-1',
+        2,
+        'loc-1',
+      );
+      expect(orderRepo.save).toHaveBeenCalledWith(
+        expect.objectContaining({
+          fulfillmentType: 'pickup',
+          pickupLocationId: 'loc-1',
+        }),
+      );
+    });
+
+    it('charges the delivery fee of the chosen option', async () => {
+      fulfillmentService.resolveChoice.mockResolvedValue({
+        type: 'delivery',
+        fee: '5.00',
+        deliveryOptionId: 'opt-1',
+        deliveryOptionLabel: 'Mensajería',
+        pickupLocationId: null,
+        pickupAddressId: null,
+        pickupAddressSnapshot: null,
+      });
+
+      await service.checkout(makeClient(), {});
+
+      expect(orderRepo.save).toHaveBeenCalledWith(
+        expect.objectContaining({
+          subtotal: '15.00',
+          deliveryFee: '5.00',
+          total: '20.00',
+          deliveryOptionLabel: 'Mensajería',
+        }),
+      );
+    });
+
+    it('refuses a fulfillment choice the shop cannot honour', async () => {
+      fulfillmentService.resolveChoice.mockRejectedValue(
+        new BadRequestException('nothing available'),
+      );
+
+      await expect(service.checkout(makeClient(), {})).rejects.toBeInstanceOf(
+        BadRequestException,
+      );
+      expect(orderRepo.save).not.toHaveBeenCalled();
+      expect(inventoryService.reserve).not.toHaveBeenCalled();
+    });
+
+    it('snapshots a saved address and ships to its municipality', async () => {
+      clientAddressesService.findOneForClient.mockResolvedValue({
+        id: 'addr-1',
+        clientId: 'client-1',
+        label: 'Casa',
+        street: 'Calle 23 #456',
+        betweenStreets: null,
+        reference: null,
+        municipalityId: 'mun-9',
+        contactPhone: null,
+      });
+
+      await service.checkout(makeClient(), { addressId: 'addr-1' });
+
+      expect(clientAddressesService.findOneForClient).toHaveBeenCalledWith(
+        'client-1',
+        'addr-1',
+      );
+      expect(orderRepo.save).toHaveBeenCalledWith(
+        expect.objectContaining({
+          deliveryMunicipalityId: 'mun-9',
+          deliveryAddress: expect.objectContaining({
+            street: 'Calle 23 #456',
+            municipalityId: 'mun-9',
+            municipalityName: 'Báguanos',
+            provinceName: 'Holguín',
+          }),
+        }),
+      );
+    });
+
+    it('does not touch the address book when checkout fails', async () => {
+      cartService.getCart.mockResolvedValue({
+        items: [{ ...cartLine, isAvailable: false, available: 0 }],
+        totalItems: 2,
+        subtotal: 15,
+      });
+
+      await expect(
+        service.checkout(makeClient(), {
+          address: { street: 'Calle nueva', municipalityId: 'mun-9' },
+          saveAddress: true,
+        }),
+      ).rejects.toBeInstanceOf(ConflictException);
+
+      expect(clientAddressesService.create).not.toHaveBeenCalled();
+    });
+
+    it('saves a new address only when the customer asked for it', async () => {
+      const address = { street: 'Calle nueva', municipalityId: 'mun-9' };
+
+      await service.checkout(makeClient(), { address });
+      expect(clientAddressesService.create).not.toHaveBeenCalled();
+
+      clientAddressesService.create.mockResolvedValue({
+        ...address,
+        id: 'addr-2',
+        clientId: 'client-1',
+      });
+      await service.checkout(makeClient(), { address, saveAddress: true });
+
+      expect(clientAddressesService.create).toHaveBeenCalledTimes(1);
+      expect(clientAddressesService.create).toHaveBeenCalledWith(
+        'client-1',
+        address,
+      );
     });
 
     it('assigns a year-prefixed order number from the sequence', async () => {

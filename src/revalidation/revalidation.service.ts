@@ -22,6 +22,9 @@ export const PRODUCT_REVALIDATE_TAGS = [
 /** Storefront cache tag invalidated by CMS writes (pages, banners, settings…). */
 export const CMS_REVALIDATE_TAGS = ['cms'];
 
+/** Storefront cache tag invalidated by nomenclator writes (contact motives…). */
+export const NOMENCLATOR_REVALIDATE_TAGS = ['nomenclators'];
+
 /**
  * Pings the storefront's POST /api/revalidate so its cached data ('use cache'
  * tags) refreshes right after an admin write instead of waiting out the TTL.

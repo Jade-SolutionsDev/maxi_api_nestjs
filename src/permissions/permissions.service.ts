@@ -33,6 +33,8 @@ export const MODULES = [
   'categories',
   'departments',
   'stock-locations',
+  // Support inbox + reply templates; grantable to non-admin staff.
+  'contact',
 ] as const;
 export const ACTIONS = ['list', 'read', 'create', 'update', 'delete'] as const;
 

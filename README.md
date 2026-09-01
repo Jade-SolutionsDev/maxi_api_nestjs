@@ -100,6 +100,54 @@ Reset the database (removes all data and volumes):
 $ pnpm run docker:db:reset
 ```
 
+## Database migrations
+
+**The schema is never inferred from the entities.** `synchronize` is off in every
+environment, including development and tests. Every change travels as a committed
+migration, and `migrationsRun` applies the pending ones **at boot**, in order.
+
+That is deliberate. `synchronize` silently altered whatever schema it found — and
+it can drop columns to make the database match the entities. It is also how
+production and development drifted apart before this existed.
+
+### Changing the schema
+
+Edit the entity, then generate the migration by diffing against a database that
+is already up to date:
+
+```bash
+pnpm run migration:generate src/database/migrations/WhatYouDid
+```
+
+Read the generated SQL before committing it. `migration:generate` diffs against
+whatever database `DATABASE_URL` points at, so an out-of-date database produces a
+wrong migration.
+
+```bash
+pnpm run migration:run      # apply pending ones (the app also does this at boot)
+pnpm run migration:revert   # undo the last one
+```
+
+### The initial migration
+
+`1787500000000-InitialSchema.ts` is the whole schema as of 24-ago-2026, and it is
+**idempotent**: `CREATE TABLE IF NOT EXISTS`, plus `DO` blocks for enums and
+foreign keys, which do not support it.
+
+That matters because production already had these 31 tables, created by
+`synchronize` back when there were no migrations. A plain `CREATE` would fail
+there. This way the same migration serves a fresh database and one that already
+carries the schema, with no manual step.
+
+**Caveat worth knowing:** `IF NOT EXISTS` skips a table that already exists *even
+if its columns differ*. Against a database that has drifted, the migration fails
+loudly on the first index over a missing column — which is the useful outcome:
+it names exactly what is missing instead of leaving a half-built schema.
+
+Verified end to end: an empty database boots the app, builds all 31 tables and
+serves requests; a database that already has the schema applies it without
+changing anything.
+
 ## Deployment
 
 When you're ready to deploy your NestJS application to production, there are some key steps you can take to ensure it runs as efficiently as possible. Check out the [deployment documentation](https://docs.nestjs.com/deployment) for more information.

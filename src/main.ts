@@ -1,3 +1,15 @@
+/**
+ * El proceso trabaja en UTC, pase lo que pase en la máquina que lo arranca.
+ *
+ * Las columnas de fecha son `timestamp without time zone` y la base guarda UTC.
+ * Al leerlas, el driver construye la fecha interpretando ese texto **en la zona
+ * del proceso**: en `America/Havana` las 14:59 UTC guardadas se convertían en
+ * las 18:59 UTC, y la administración las mostraba cuatro horas adelantadas.
+ *
+ * Tiene que ir antes de cualquier import que pueda leer la hora.
+ */
+process.env.TZ = 'UTC';
+
 import { Logger, ValidationPipe } from '@nestjs/common';
 import { NestFactory } from '@nestjs/core';
 import { NestExpressApplication } from '@nestjs/platform-express';
@@ -6,6 +18,7 @@ import helmet from 'helmet';
 import { IncomingMessage, ServerResponse } from 'http';
 import { DataSource } from 'typeorm';
 import { AppModule } from './app.module';
+import { comprobarConfiguracion } from './config/startup-checks';
 import { AllExceptionsFilter } from './common/filters/all-exceptions.filter';
 import { ResponseInterceptor } from './common/interceptors/response.interceptor';
 import { ConfigService } from '@nestjs/config';
@@ -25,7 +38,24 @@ async function bootstrap() {
   const app = await NestFactory.create<NestExpressApplication>(AppModule, {
     bodyParser: false,
   });
+  comprobarConfiguracion();
+
   const configService = app.get(ConfigService);
+
+  /**
+   * Una variable peligrosa que se ignora en silencio se queda puesta para
+   * siempre, y reaparece el día que alguien quite la guardia. Si está puesta y
+   * no se está honrando, que se sepa al arrancar.
+   */
+  if (
+    process.env.MOCK_AUTH_ENABLED === 'true' &&
+    !configService.get<boolean>('auth.mockEnabled')
+  ) {
+    new Logger('Bootstrap').warn(
+      'MOCK_AUTH_ENABLED está puesta y se ignora: la autenticación simulada solo existe en local y en pruebas. Quítala de este entorno.',
+    );
+  }
+
 
   // Trust the reverse proxy (Traefik) so req.ip is the real client from
   // X-Forwarded-For, not the proxy's address. Without this, rate limiting keys

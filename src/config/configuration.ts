@@ -104,6 +104,14 @@ export interface StorefrontConfig {
   revalidateSecret: string | undefined;
 }
 
+export interface ResendConfig {
+  apiKey: string | undefined;
+  /** Sender address for platform replies, e.g. "Maxi <soporte@maxihabana.com>". */
+  fromAddress: string | undefined;
+  /** Credentials present. Platform email replies stay disabled without this. */
+  configured: boolean;
+}
+
 export interface AppConfig {
   port: number;
   database: DatabaseConfig;
@@ -114,6 +122,7 @@ export interface AppConfig {
   storage: StorageConfig;
   payments: PaymentsConfig;
   storefront: StorefrontConfig;
+  resend: ResendConfig;
   nodeEnv: string;
   /** Number of reverse proxies in front of the API (Express `trust proxy`).
    *  Makes req.ip resolve to the real client from X-Forwarded-For, so rate
@@ -123,7 +132,7 @@ export interface AppConfig {
 }
 
 /** True only for local/test — never a deployed environment. */
-const isLocalEnv = (): boolean => {
+export const isLocalEnv = (): boolean => {
   const env = process.env.NODE_ENV ?? 'development';
   return env === 'development' || env === 'test';
 };
@@ -150,7 +159,11 @@ export const clerkConfig = (): ClerkConfig => ({
 });
 
 export const authConfig = (): AuthConfig => ({
-  mockEnabled: process.env.MOCK_AUTH_ENABLED === 'true',
+  // Same interlock as the unsigned-webhook hatch below: honored ONLY in
+  // local/test. `MockAuthProvider` returns `mock:<clerkId>` as an authenticated
+  // user without verifying anything, so a copied `.env` would hand production a
+  // superadmin to whoever sends the header. It must not depend on remembering.
+  mockEnabled: isLocalEnv() && process.env.MOCK_AUTH_ENABLED === 'true',
   // The unsigned-webhook escape hatch is honored ONLY in local/test, never in a
   // deployed environment — even if the flag is left set by mistake.
   allowUnverifiedWebhooks:
@@ -258,6 +271,16 @@ export const storefrontConfig = (): StorefrontConfig => ({
   revalidateSecret: process.env.STOREFRONT_REVALIDATE_SECRET,
 });
 
+export const resendConfig = (): ResendConfig => {
+  const apiKey = process.env.RESEND_API_KEY;
+  const fromAddress = process.env.RESEND_FROM;
+  return {
+    apiKey,
+    fromAddress,
+    configured: isConfigured(apiKey, fromAddress),
+  };
+};
+
 export default (): AppConfig => ({
   port: parseInt(process.env.PORT ?? '3000', 10),
   database: databaseConfig(),
@@ -268,6 +291,7 @@ export default (): AppConfig => ({
   storage: storageConfig(),
   payments: paymentsConfig(),
   storefront: storefrontConfig(),
+  resend: resendConfig(),
   nodeEnv: process.env.NODE_ENV ?? 'development',
   trustProxyHops: parseInt(process.env.TRUST_PROXY_HOPS ?? '1', 10),
 });

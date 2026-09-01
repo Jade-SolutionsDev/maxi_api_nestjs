@@ -1,3 +1,4 @@
+import { contieneSinTildes } from '../common/search/accent-insensitive';
 import {
   BadRequestException,
   ConflictException,
@@ -571,7 +572,7 @@ export class CategoriesService {
     const term = q?.trim();
     if (!term) return base;
 
-    const like = ILike(`%${term}%`);
+    const like = contieneSinTildes(term);
     return [
       { ...base, name: like },
       { ...base, slug: like },
