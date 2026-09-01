@@ -41,8 +41,12 @@ export class UnaccentSearch1787760000000 implements MigrationInterface {
   }
 
   public async down(queryRunner: QueryRunner): Promise<void> {
-    await queryRunner.query(`DROP INDEX IF EXISTS idx_stock_locations_name_unaccent`);
-    await queryRunner.query(`DROP INDEX IF EXISTS idx_categories_name_unaccent`);
+    await queryRunner.query(
+      `DROP INDEX IF EXISTS idx_stock_locations_name_unaccent`,
+    );
+    await queryRunner.query(
+      `DROP INDEX IF EXISTS idx_categories_name_unaccent`,
+    );
     await queryRunner.query(`DROP INDEX IF EXISTS idx_products_name_unaccent`);
     await queryRunner.query(`DROP FUNCTION IF EXISTS f_unaccent(text)`);
     // Las extensiones se quedan: otras cosas pueden estar usandolas.

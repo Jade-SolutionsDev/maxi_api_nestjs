@@ -85,7 +85,9 @@ function makeRawQueryBuilderStub(rawRows: { id: string; count: string }[]) {
 const esperarBusquedaSinTildes = (operador: any, termino: string) => {
   expect(operador._type).toBe('raw');
   expect(operador._getSql('tabla.columna')).toContain('f_unaccent');
-  expect(operador._objectLiteralParameters).toEqual({ termino: `%${termino}%` });
+  expect(operador._objectLiteralParameters).toEqual({
+    termino: `%${termino}%`,
+  });
 };
 
 describe('CategoriesService', () => {

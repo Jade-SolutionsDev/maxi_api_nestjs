@@ -155,9 +155,9 @@ describe('ClientsController · listado (e2e)', () => {
     expect(primera.data).toHaveLength(2);
     expect(segunda.data).toHaveLength(1);
     expect(primera.meta.totalPages).toBe(2);
-    expect(
-      [...primera.data, ...segunda.data].map((c) => c.email),
-    ).toHaveLength(3);
+    expect([...primera.data, ...segunda.data].map((c) => c.email)).toHaveLength(
+      3,
+    );
   });
 
   it('ordena por el campo que se le pida', async () => {

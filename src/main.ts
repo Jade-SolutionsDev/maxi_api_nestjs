@@ -56,7 +56,6 @@ async function bootstrap() {
     );
   }
 
-
   // Trust the reverse proxy (Traefik) so req.ip is the real client from
   // X-Forwarded-For, not the proxy's address. Without this, rate limiting keys
   // every client to one bucket. Exact hop count is spoof-safe (MxH-0066).

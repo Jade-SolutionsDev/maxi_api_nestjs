@@ -55,7 +55,9 @@ describe('comprobación de configuración al arrancar', () => {
   it('una sola ausencia se cuenta en singular', () => {
     configuracionCompleta();
     delete process.env.CRON_SECRET;
-    expect(() => comprobarConfiguracion()).toThrow(/Falta 1 variable imprescindible/);
+    expect(() => comprobarConfiguracion()).toThrow(
+      /Falta 1 variable imprescindible/,
+    );
   });
 
   it('en local no comprueba nada: ahí se trabaja a medio configurar', () => {

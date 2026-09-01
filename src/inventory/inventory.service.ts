@@ -564,14 +564,9 @@ export class InventoryService {
      */
     estadoFinal: ReservationStatus = ReservationStatus.CANCELLED,
   ): Promise<void> {
-    await this.settleReservations(
-      manager,
-      orderId,
-      estadoFinal,
-      (row, n) => {
-        row.reservedQuantity -= n;
-      },
-    );
+    await this.settleReservations(manager, orderId, estadoFinal, (row, n) => {
+      row.reservedQuantity -= n;
+    });
     const reservationRepo = manager.getRepository(InventoryReservation);
     const confirmed = await reservationRepo.find({
       where: { orderId, status: ReservationStatus.CONFIRMED },

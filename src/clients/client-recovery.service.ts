@@ -54,9 +54,8 @@ export class ClientRecoveryService {
     if (!usuario) return null;
 
     const correo =
-      usuario.emailAddresses.find(
-        (e) => e.id === usuario.primaryEmailAddressId,
-      )?.emailAddress ?? usuario.emailAddresses[0]?.emailAddress;
+      usuario.emailAddresses.find((e) => e.id === usuario.primaryEmailAddressId)
+        ?.emailAddress ?? usuario.emailAddresses[0]?.emailAddress;
 
     const cliente = await this.clientsService.createOrUpdateFromClerk(clerkId, {
       email: correo ?? undefined,

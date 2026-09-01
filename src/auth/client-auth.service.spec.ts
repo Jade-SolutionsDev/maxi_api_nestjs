@@ -67,7 +67,7 @@ describe('ClientAuthService', () => {
     findByClerkId.mockResolvedValue({
       ...cliente,
       deletedAt: new Date(),
-    } as Client);
+    });
 
     await expect(service.authenticateByBearerToken('t')).rejects.toThrow(
       new UnauthorizedException('Account is inactive'),
@@ -77,7 +77,7 @@ describe('ClientAuthService', () => {
 
   // El espejo de un administrador invitado nace desactivado a propósito.
   it('a un cliente desactivado tampoco lo reactiva', async () => {
-    findByClerkId.mockResolvedValue({ ...cliente, isActive: false } as Client);
+    findByClerkId.mockResolvedValue({ ...cliente, isActive: false });
 
     await expect(service.authenticateByBearerToken('t')).rejects.toThrow(
       new UnauthorizedException('Account is inactive'),

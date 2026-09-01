@@ -51,8 +51,14 @@ const IMPRESCINDIBLES: Variable[] = [
 /** Sin estas la aplicación funciona, pero algo deja de hacerse. */
 const DEGRADAN: Variable[] = [
   { nombre: 'RESEND_API_KEY', porque: 'no se enviará ningún correo' },
-  { nombre: 'STOREFRONT_URL', porque: 'no se podrá avisar a la tienda de los cambios' },
-  { nombre: 'PUBLIC_API_URL', porque: 'los enlaces absolutos que genere la API saldrán mal' },
+  {
+    nombre: 'STOREFRONT_URL',
+    porque: 'no se podrá avisar a la tienda de los cambios',
+  },
+  {
+    nombre: 'PUBLIC_API_URL',
+    porque: 'los enlaces absolutos que genere la API saldrán mal',
+  },
 ];
 
 const falta = (nombre: string) => !process.env[nombre]?.trim();
@@ -82,8 +88,7 @@ export function comprobarConfiguracion(): void {
     logger.warn(`${v.nombre} no está definida: ${v.porque}.`);
   }
 
-  const sinPasarela =
-    falta('TROPIPAY_CLIENT_ID') && falta('MIBI_KEY_ID');
+  const sinPasarela = falta('TROPIPAY_CLIENT_ID') && falta('MIBI_KEY_ID');
   if (sinPasarela) {
     logger.warn(
       'No hay ninguna pasarela de pago configurada: los pedidos solo podrán cobrarse a mano.',

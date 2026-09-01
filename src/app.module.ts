@@ -5,7 +5,10 @@ import { ThrottlerGuard, ThrottlerModule } from '@nestjs/throttler';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
-import configuration, { databaseConfig, isLocalEnv } from './config/configuration';
+import configuration, {
+  databaseConfig,
+  isLocalEnv,
+} from './config/configuration';
 import { AuthModule } from './auth/auth.module';
 import { CartModule } from './cart/cart.module';
 import { CategoriesModule } from './categories/categories.module';

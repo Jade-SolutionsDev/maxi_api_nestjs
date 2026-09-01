@@ -21,7 +21,10 @@ describe('selección del proveedor de autenticación', () => {
         { provide: MockAuthProvider, useValue: { nombre: 'mock' } },
         {
           provide: ConfigService,
-          useValue: { get: (clave: string) => (clave === 'auth.mockEnabled' ? mockEnabled : undefined) },
+          useValue: {
+            get: (clave: string) =>
+              clave === 'auth.mockEnabled' ? mockEnabled : undefined,
+          },
         },
         {
           provide: AUTH_PROVIDER,
