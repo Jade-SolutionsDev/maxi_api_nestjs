@@ -2,6 +2,7 @@ import {
   BadRequestException,
   Controller,
   HttpCode,
+  Logger,
   Param,
   Post,
   Req,
@@ -25,6 +26,8 @@ interface RequestWithRawBody extends Request {
 @Controller('webhooks/payments')
 @Public()
 export class PaymentsWebhookController {
+  private readonly logger = new Logger(PaymentsWebhookController.name);
+
   constructor(private readonly paymentsService: PaymentsService) {}
 
   @Post(':provider')
@@ -42,15 +45,35 @@ export class PaymentsWebhookController {
     @Req() request: RequestWithRawBody,
   ): Promise<{ processed: boolean }> {
     const rawBody = request.rawBody;
+    // Every delivery leaves a trace, accepted or not — a staging webhook that
+    // dies on signature or parsing must still be visible in the log.
+    this.logger.log(
+      `Webhook received for "${provider}" (${rawBody?.length ?? 0} bytes) ` +
+        `from ${request.ip ?? 'unknown'}`,
+    );
     if (!rawBody) {
       throw new BadRequestException(
         'Missing raw body for webhook verification',
       );
     }
-    return this.paymentsService.handleWebhook(
-      provider,
-      rawBody,
-      request.headers,
-    );
+    try {
+      const result = await this.paymentsService.handleWebhook(
+        provider,
+        rawBody,
+        request.headers,
+      );
+      this.logger.log(
+        `Webhook for "${provider}" handled: processed=${result.processed}`,
+      );
+      return result;
+    } catch (err) {
+      // Body first, then the error: the raw payload is the evidence support
+      // will ask for. Signatures and payloads carry no secrets.
+      this.logger.error(
+        `Webhook for "${provider}" rejected. Body: ${rawBody.slice(0, 2000)}`,
+        err instanceof Error ? err.stack : String(err),
+      );
+      throw err;
+    }
   }
 }

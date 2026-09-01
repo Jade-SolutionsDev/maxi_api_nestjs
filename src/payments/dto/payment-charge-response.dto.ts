@@ -37,6 +37,12 @@ export class PaymentChargeResponseDto {
   /** Network the customer must use (e.g. "BEP20") — always display it. */
   blockchain: string | null;
 
+  /** Wallet payment-request number (e.g. "PR-…") the customer can look up in the app. */
+  operationNumber: string | null;
+
+  /** Opaque payload for rendering the payment-request QR (wallet charges). */
+  qrData: Record<string, unknown> | null;
+
   /** Settlement currency of the attempt. */
   currency: string | null;
 
@@ -67,6 +73,8 @@ export class PaymentChargeResponseDto {
     dto.amount = (action.amount as string) ?? charge.amount ?? null;
     dto.token = (action.token as string) ?? null;
     dto.blockchain = (action.blockchain as string) ?? null;
+    dto.operationNumber = (action.operation_number as string) ?? null;
+    dto.qrData = (action.qr_data as Record<string, unknown>) ?? null;
     dto.currency = charge.currency ?? null;
     dto.expiresAt = charge.expiresAt;
     dto.feeAmount = charge.feeAmount;

@@ -7,7 +7,7 @@ never on the provider name**:
 | `kind` | Gateway today | What the client renders |
 |---|---|---|
 | `redirect` | **Tropipay** (cards) | A "pay now" button pointing at `redirectUrl` |
-| `instructions` | **Mi Billetera** (crypto) | The deposit data from the response, verbatim |
+| `instructions` | **Mi Billetera** (wallet o cripto) | Wallet: the payment request (`operationNumber`/`qrData`); crypto: the deposit data — always verbatim from the response |
 | `manual` | fallback | "we'll confirm your payment by hand" |
 
 Adding a gateway does not change this contract — an existing screen picks it up.
@@ -129,8 +129,11 @@ Two rules the redirect shape imposes:
 
 ### `kind: "instructions"` (Mi Billetera)
 
-Show, verbatim from the response (all of it comes from the gateway's
-`action_payload`):
+Branch on which fields are present. **Wallet charge** (`depositAddress` null,
+`operationNumber` set): tell the customer to pay the request from their Mi
+Billetera app, show `operationNumber` with a copy button (QR from `qrData`
+pending encoding confirmation). **Crypto charge**: show, verbatim from the
+response (all of it comes from the gateway's `action_payload`):
 
 > Envía **exactamente `{amount}` `{token}` en `{blockchain}`** a:
 > `{depositAddress}`
@@ -207,6 +210,36 @@ polling stays the authoritative reconciliation. Terminal events:
 from the event name if the payload omits a `status` field. Local dev without
 a public URL needs no webhook at all: the storefront's polling settles the
 order on its own.
+
+## WALLET action_payload (captured from the dev gateway, 2026-09-01)
+
+A WALLET charge's `action_payload` is a payment request, not a deposit address:
+
+```json
+{
+  "operation_number": "PR-20260901-2RDR0HCH",
+  "qr_data": {
+    "operation_number": "PR-20260901-2RDR0HCH",
+    "payee_account": "0707-...",
+    "establishment_name": "Cuenta MIUSD",
+    "payee_username": "Jade",
+    "amount": "1.00",
+    "currency": "miUSD",
+    "description": "Orden ORD-20260038",
+    "expires_at": "2026-09-01T16:19:26+00:00",
+    "type": "payment_request",
+    "is_merchant_charge": true,
+    "merchant_charge_reference": "MCH...",
+    "customer_total_amount": "1.00",
+    "fee_payer": "MERCHANT"
+  },
+  "expires_at": "...", "fee_amount": "0.01", "customer_total_amount": "1.00"
+}
+```
+
+The charge DTO surfaces `operationNumber` and `qrData` from it. The storefront
+shows the operation number; rendering `qr_data` as a scannable QR is pending
+confirmation of the exact QR text encoding with Mi Billetera support.
 
 ## Network reality (verified 2026-08-13)
 
