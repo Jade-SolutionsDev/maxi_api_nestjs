@@ -165,6 +165,38 @@ describe('TropipayGateway', () => {
       });
     });
 
+    // The gateway answers "Invalid amount" for anything under its fee-shaped
+    // floor; catching it here is what turns a 502 into something a customer
+    // can act on.
+    it('refuses a total below the minimum before calling the gateway', async () => {
+      await expect(
+        gateway.createCharge(makeOrder({ total: '1.00' }), 'key-1'),
+      ).rejects.toBeInstanceOf(BadRequestException);
+      expect(client.createPaymentLink).not.toHaveBeenCalled();
+    });
+
+    it('names the minimum and the currency so the customer can act', async () => {
+      await expect(
+        gateway.createCharge(makeOrder({ total: '1.00' }), 'key-1'),
+      ).rejects.toThrow(/1\.50 USD/);
+    });
+
+    it('accepts a total on the minimum', async () => {
+      await gateway.createCharge(makeOrder({ total: '1.50' }), 'key-1');
+
+      expect(client.createPaymentLink).toHaveBeenCalledWith(
+        expect.objectContaining({ amount: 150 }),
+      );
+    });
+
+    it('honours a minimum lowered for the environment', async () => {
+      client.config.minAmount = 1;
+
+      await gateway.createCharge(makeOrder({ total: '1.00' }), 'key-1');
+
+      expect(client.createPaymentLink).toHaveBeenCalled();
+    });
+
     it('refuses a currency Tropipay does not settle', async () => {
       client.config.currency = 'CUP';
 

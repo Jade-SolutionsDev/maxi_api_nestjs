@@ -39,15 +39,23 @@ const EVENT_STATUSES: Record<string, ChargeStatus> = {
 };
 
 /**
- * Mi Billetera merchant charges (CRYPTO). The gateway rule that shapes this:
- * an order is paid ONLY when a charge reaches SUCCEEDED, and an expired/failed
- * attempt is never reused — a retry is a NEW charge with a NEW idempotency key
- * (PaymentsService supplies it).
+ * Mi Billetera merchant charges. Unlike a hosted checkout, the platform decides
+ * nothing: whatever `method` we put on the charge is the experience the
+ * customer gets — a deposit address (CRYPTO) or a payment request they approve
+ * in the app (WALLET). Subclasses pick one; everything else is shared, down to
+ * the credentials and the webhook secret.
+ *
+ * The gateway rule that shapes the rest: an order is paid ONLY when a charge
+ * reaches SUCCEEDED, and an expired/failed attempt is never reused — a retry is
+ * a NEW charge with a NEW idempotency key (PaymentsService supplies it).
  */
 @Injectable()
 export class MibilleteraGateway extends PaymentGateway {
-  readonly code = 'mibilletera';
+  readonly code: string = 'mibilletera';
   readonly kind: PaymentActionKind = 'instructions';
+
+  /** What the customer is asked to do. Overridden by the wallet variant. */
+  protected readonly method: 'CRYPTO' | 'WALLET' = 'CRYPTO';
 
   private readonly logger = new Logger(MibilleteraGateway.name);
 
@@ -71,8 +79,7 @@ export class MibilleteraGateway extends PaymentGateway {
     idempotencyKey: string,
   ): Promise<GatewayCharge> {
     const data = await this.mibiClient.createCharge({
-      // WALLET or CRYPTO per store provisioning (MIBI_METHOD).
-      method: this.config.method,
+      method: this.method,
       amount: Number(order.total).toFixed(2),
       // Must match a receiving account bound to the merchant payment account.
       currency: this.config.currency,

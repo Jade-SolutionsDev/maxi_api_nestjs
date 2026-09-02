@@ -25,7 +25,6 @@ describe('configuration', () => {
     delete process.env.MIBI_WEBHOOK_SECRET;
     delete process.env.MIBI_API_BASE;
     delete process.env.MIBI_CURRENCY;
-    delete process.env.MIBI_METHOD;
     delete process.env.TROPIPAY_CLIENT_ID;
     delete process.env.TROPIPAY_CLIENT_SECRET;
     delete process.env.TROPIPAY_ENV;
@@ -169,14 +168,6 @@ describe('configuration', () => {
   it('mibi settlement currency passes through verbatim (codes are case-sensitive)', () => {
     process.env.MIBI_CURRENCY = ' miUSD ';
     expect(paymentsConfig().mibi.currency).toBe('miUSD');
-  });
-
-  it('mibi method defaults to CRYPTO and only accepts WALLET as override', () => {
-    expect(paymentsConfig().mibi.method).toBe('CRYPTO');
-    process.env.MIBI_METHOD = 'wallet';
-    expect(paymentsConfig().mibi.method).toBe('WALLET');
-    process.env.MIBI_METHOD = 'nonsense';
-    expect(paymentsConfig().mibi.method).toBe('CRYPTO');
   });
 
   it('mibi is configured when both keys are present', () => {

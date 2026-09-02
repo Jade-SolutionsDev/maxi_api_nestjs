@@ -25,6 +25,15 @@ import { TropipayClient } from './tropipay-client';
 /** Tropipay rejects anything else with an opaque 400 that never names the field. */
 const SUPPORTED_CURRENCIES = ['EUR', 'USD'];
 
+/**
+ * Tropipay rejects small charges with the same opaque "Invalid amount" it uses
+ * for a malformed one. Measured against the sandbox on 2026-09-01: 1.10 USD is
+ * refused, 1.15 accepted — a fee-shaped floor rather than a documented round
+ * number, so the real limit may differ per account and in production. Hence a
+ * default with margin that ops can lower per environment.
+ */
+const DEFAULT_MIN_AMOUNT = 1.5;
+
 /** Movement state for a settled incoming payment. */
 const MOVEMENT_COMPLETED = 2;
 
@@ -74,6 +83,16 @@ export class TropipayGateway extends PaymentGateway {
     if (!SUPPORTED_CURRENCIES.includes(currency)) {
       throw new BadRequestException(
         `Tropipay only settles in ${SUPPORTED_CURRENCIES.join(' or ')} (configured: ${currency})`,
+      );
+    }
+
+    const total = Number(order.total);
+    const minAmount = this.client.config.minAmount ?? DEFAULT_MIN_AMOUNT;
+    if (total < minAmount) {
+      // Caught here so the customer reads why, instead of the gateway's
+      // "Invalid amount" surfacing as a generic payment failure.
+      throw new BadRequestException(
+        `El monto mínimo para pagar con tarjeta es ${minAmount.toFixed(2)} ${currency}. Elige otra forma de pago para este pedido.`,
       );
     }
 
