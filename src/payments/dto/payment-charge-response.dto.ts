@@ -49,6 +49,14 @@ export class PaymentChargeResponseDto {
   /** Action deadline; hide/expire the payment screen when reached. Null = no deadline. */
   expiresAt: Date | null;
 
+  /**
+   * Seconds left at the moment this response was built. The client counts down
+   * from it instead of comparing `expiresAt` against its own clock: a machine
+   * whose clock runs ahead would otherwise declare a perfectly live charge
+   * expired and show the customer a payment that "failed".
+   */
+  expiresInSeconds: number | null;
+
   /** Fee charged by the gateway (admin reconciliation). */
   feeAmount: string | null;
 
@@ -77,6 +85,12 @@ export class PaymentChargeResponseDto {
     dto.qrData = (action.qr_data as Record<string, unknown>) ?? null;
     dto.currency = charge.currency ?? null;
     dto.expiresAt = charge.expiresAt;
+    dto.expiresInSeconds = charge.expiresAt
+      ? Math.max(
+          0,
+          Math.floor((charge.expiresAt.getTime() - Date.now()) / 1000),
+        )
+      : null;
     dto.feeAmount = charge.feeAmount;
     dto.settlementAmount = charge.settlementAmount;
     dto.errorMessage = charge.errorMessage;

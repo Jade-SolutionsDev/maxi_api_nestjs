@@ -209,7 +209,20 @@ export class PaymentsService {
     if (!charge) {
       throw new NotFoundException('This order has no payment attempt yet');
     }
-    return this.syncCharge(charge);
+
+    try {
+      return await this.syncCharge(charge);
+    } catch (err) {
+      // The customer polls this while staring at the payment screen. A gateway
+      // that is slow or unreachable must not turn that screen into an error:
+      // the webhook is what actually confirms a payment, so serving the charge
+      // we already hold is both accurate and enough.
+      this.logger.warn(
+        `Could not refresh charge ${charge.reference} ("${charge.provider}"), ` +
+          `serving the stored one: ${err instanceof Error ? err.message : String(err)}`,
+      );
+      return charge;
+    }
   }
 
   /**

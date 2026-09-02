@@ -482,4 +482,34 @@ describe('PaymentsService', () => {
       });
     });
   });
+
+  describe('polling while the gateway is having a bad day', () => {
+    // The customer is staring at the payment screen; a slow gateway must not
+    // turn it into an error, because the webhook is what confirms a payment.
+    it('serves the stored charge when the gateway cannot be reached', async () => {
+      const stored = makeCharge();
+      chargeRepo.findOne.mockResolvedValue(stored);
+      gateway.syncCharge.mockRejectedValue(new Error('aborted due to timeout'));
+
+      const result = await service.getChargeForClient('client-1', 'order-1');
+
+      expect(result).toBe(stored);
+      expect(result.status).toBe(ChargeStatus.REQUIRES_ACTION);
+    });
+
+    it('still refreshes normally when the gateway answers', async () => {
+      chargeRepo.findOne.mockResolvedValue(makeCharge());
+      gateway.syncCharge.mockResolvedValue({
+        reference: 'REF123',
+        status: ChargeStatus.SUCCEEDED,
+        amount: '30.00',
+        currency: 'USD',
+        rawPayload: {},
+      });
+
+      const result = await service.getChargeForClient('client-1', 'order-1');
+
+      expect(result.status).toBe(ChargeStatus.SUCCEEDED);
+    });
+  });
 });
