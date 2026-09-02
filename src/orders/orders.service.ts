@@ -99,19 +99,40 @@ export class OrdersService {
     private readonly dataSource: DataSource,
   ) {}
 
-  // List rows carry the method name (not the whole attempt): one query for the
-  // page, so naming the gateway never costs a query per row.
+  // List rows carry the method name and the transfer flag (not the whole
+  // attempt/detail): two batched queries for the page, never one per row.
   private async withPaymentMethods(
     orders: Order[],
   ): Promise<OrderResponseDto[]> {
-    const methods = await this.paymentsService.latestMethodsFor(
-      orders.map((order) => order.id),
-    );
+    const orderIds = orders.map((order) => order.id);
+    const [methods, transferIds] = await Promise.all([
+      this.paymentsService.latestMethodsFor(orderIds),
+      this.needsTransferIds(orderIds),
+    ]);
     return orders.map((order) => {
       const dto = OrderResponseDto.fromEntity(order);
       dto.paymentMethod = methods.get(order.id);
+      dto.needsTransfer = transferIds.has(order.id);
       return dto;
     });
+  }
+
+  // Same predicate as the list's needsTransfer filter: pickup orders still
+  // holding RESERVED stock away from their counter.
+  private async needsTransferIds(orderIds: string[]): Promise<Set<string>> {
+    if (orderIds.length === 0) return new Set();
+    const rows: { order_id: string }[] =
+      await this.orderRepository.manager.query(
+        `SELECT DISTINCT r.order_id
+           FROM inventory_reservations r
+           JOIN orders o ON o.id = r.order_id
+          WHERE r.order_id = ANY($1)
+            AND o.fulfillment_type = 'pickup'
+            AND r.status = 'reserved'
+            AND r.location_id <> o.pickup_location_id`,
+        [orderIds],
+      );
+    return new Set(rows.map((row) => row.order_id));
   }
 
   // ---------------- Storefront ----------------
@@ -494,24 +515,52 @@ export class OrdersService {
     const rows: {
       location_id: string;
       name: string;
-      holds_reserved: boolean;
+      product_id: string;
+      status: string;
+      quantity: number;
     }[] = await this.orderRepository.manager.query(
-      `SELECT r.location_id, sl.name,
-              bool_or(r.status = 'reserved') AS holds_reserved
+      `SELECT r.location_id, sl.name, r.product_id, r.status,
+              SUM(r.quantity)::int AS quantity
          FROM inventory_reservations r
          JOIN stock_locations sl ON sl.id = r.location_id
         WHERE r.order_id = $1 AND r.status IN ('reserved', 'confirmed')
-        GROUP BY r.location_id, sl.name
+        GROUP BY r.location_id, sl.name, r.product_id, r.status
         ORDER BY sl.name`,
       [order.id],
     );
-    dto.reservationStorages = rows.map((row) => ({
-      locationId: row.location_id,
-      locationName: row.name,
-    }));
-    dto.needsTransfer = rows.some(
-      (row) => row.holds_reserved && row.location_id !== order.pickupLocationId,
+
+    const storages = new Map<string, string>();
+    for (const row of rows) storages.set(row.location_id, row.name);
+    dto.reservationStorages = [...storages.entries()].map(
+      ([locationId, locationName]) => ({ locationId, locationName }),
     );
+
+    // The misplaced lines, grouped by source storage: one group = one transfer
+    // operation the admin can run. Names come from the order's own snapshots.
+    const nameByProduct = new Map(
+      (order.items ?? []).map((item) => [item.productId, item.productNameSnapshot]),
+    );
+    const pending = new Map<
+      string,
+      NonNullable<OrderResponseDto['pendingTransfers']>[number]
+    >();
+    for (const row of rows) {
+      if (row.status !== 'reserved') continue;
+      if (row.location_id === order.pickupLocationId) continue;
+      const group = pending.get(row.location_id) ?? {
+        locationId: row.location_id,
+        locationName: row.name,
+        items: [],
+      };
+      group.items.push({
+        productId: row.product_id,
+        name: nameByProduct.get(row.product_id) ?? row.product_id,
+        quantity: row.quantity,
+      });
+      pending.set(row.location_id, group);
+    }
+    dto.pendingTransfers = [...pending.values()];
+    dto.needsTransfer = dto.pendingTransfers.length > 0;
   }
 
   async updateStatus(

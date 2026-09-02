@@ -2,6 +2,7 @@ import { Module, forwardRef } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { AuthModule } from '../auth/auth.module';
 import { InventoryModule } from '../inventory/inventory.module';
+import { ProductsModule } from '../products/products.module';
 import { OrderItem } from '../orders/entities/order-item.entity';
 import { Order } from '../orders/entities/order.entity';
 import { PaymentCharge } from './entities/payment-charge.entity';
@@ -34,6 +35,7 @@ import { StorefrontPaymentMethodsController } from './storefront-payment-methods
     TypeOrmModule.forFeature([Order, OrderItem, PaymentCharge, PaymentMethod]),
     forwardRef(() => AuthModule),
     InventoryModule,
+    ProductsModule,
   ],
   controllers: [
     PaymentMethodsController,

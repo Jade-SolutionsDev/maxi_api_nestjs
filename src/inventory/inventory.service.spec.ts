@@ -24,6 +24,7 @@ type MockRepo = {
   create: jest.Mock;
   save: jest.Mock;
   count: jest.Mock;
+  update: jest.Mock;
   manager: { query: jest.Mock };
 };
 
@@ -49,6 +50,7 @@ describe('InventoryService', () => {
           Promise.resolve(Array.isArray(d) ? d : { id: 'op-1', ...d }),
         ),
       count: jest.fn().mockResolvedValue(1),
+      update: jest.fn().mockResolvedValue({ affected: 1 }),
       manager: { query: jest.fn().mockResolvedValue([]) },
     });
     inventoryRepo = repoMock();
@@ -65,6 +67,7 @@ describe('InventoryService', () => {
         (
           cb: (m: {
             getRepository: (e: unknown) => MockRepo | null;
+            query: jest.Mock;
           }) => unknown,
         ) =>
           cb({
@@ -74,6 +77,7 @@ describe('InventoryService', () => {
               if (entity === InventoryOperationItem) return itemRepo;
               return null;
             },
+            query: jest.fn().mockResolvedValue([]),
           }),
       ),
     };
@@ -207,6 +211,7 @@ describe('InventoryService', () => {
         create: jest.fn().mockImplementation((d: unknown) => d),
         save: jest.fn().mockImplementation((d: unknown) => Promise.resolve(d)),
         count: jest.fn(),
+        update: jest.fn().mockResolvedValue({ affected: 1 }),
         manager: { query: jest.fn().mockResolvedValue([]) },
       };
       manager = {
@@ -368,6 +373,51 @@ describe('InventoryService', () => {
       expect(itemRepo.create).toHaveBeenCalledWith(
         expect.objectContaining({ productId: 'p-1', quantity: 3 }),
       );
+    });
+
+    it('rehome moves a misplaced reservation once its counter can hold it', async () => {
+      manager.query.mockResolvedValue([
+        { id: 'res-1', product_id: 'p-1', location_id: 'loc-A', quantity: 2 },
+      ]);
+      const target = {
+        locationId: 'loc-B',
+        productId: 'p-1',
+        quantity: 5,
+        reservedQuantity: 0,
+      };
+      const source = {
+        locationId: 'loc-A',
+        productId: 'p-1',
+        quantity: 4,
+        reservedQuantity: 2,
+      };
+      inventoryRepo.findOne
+        .mockResolvedValueOnce(target)
+        .mockResolvedValueOnce(source);
+
+      await service['rehomeReservations'](manager as never, 'loc-B', ['p-1']);
+
+      expect(target.reservedQuantity).toBe(2);
+      expect(source.reservedQuantity).toBe(0);
+      expect(reservationRepo.update).toHaveBeenCalledWith('res-1', {
+        locationId: 'loc-B',
+      });
+    });
+
+    it('rehome leaves the reservation alone when the counter lacks room', async () => {
+      manager.query.mockResolvedValue([
+        { id: 'res-1', product_id: 'p-1', location_id: 'loc-A', quantity: 4 },
+      ]);
+      inventoryRepo.findOne.mockResolvedValueOnce({
+        locationId: 'loc-B',
+        productId: 'p-1',
+        quantity: 5,
+        reservedQuantity: 3, // only 2 free, needs 4
+      });
+
+      await service['rehomeReservations'](manager as never, 'loc-B', ['p-1']);
+
+      expect(reservationRepo.update).not.toHaveBeenCalled();
     });
 
     it('release frees held stock and restocks confirmed allocations', async () => {

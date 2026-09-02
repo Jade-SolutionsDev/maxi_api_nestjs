@@ -73,6 +73,7 @@ describe('OrdersService', () => {
     save: jest.Mock;
     create: jest.Mock;
     createQueryBuilder: jest.Mock;
+    manager: { query: jest.Mock };
   };
   let cartService: { getCart: jest.Mock };
   let inventoryService: {
@@ -105,6 +106,7 @@ describe('OrdersService', () => {
         ),
       create: jest.fn().mockImplementation((o: unknown) => o),
       createQueryBuilder: jest.fn(),
+      manager: { query: jest.fn().mockResolvedValue([]) },
     };
     orderItemRepo = {
       save: jest.fn().mockImplementation((o: unknown) => Promise.resolve(o)),
@@ -475,6 +477,83 @@ describe('OrdersService', () => {
           where: expect.objectContaining({ deletedAt: expect.anything() }),
         }),
       );
+    });
+  });
+
+  describe('findOneAdmin', () => {
+    it('groups the misplaced reserved lines by source storage', async () => {
+      orderRepo.findOne.mockResolvedValue(
+        makeOrder({
+          fulfillmentType: 'pickup',
+          pickupLocationId: 'loc-B',
+          items: [
+            {
+              productId: 'prod-1',
+              productNameSnapshot: 'Leche Entera 1 L',
+              quantity: 1,
+            },
+            {
+              productId: 'prod-2',
+              productNameSnapshot: 'Aceite de Oliva 500 ml',
+              quantity: 1,
+            },
+          ],
+        } as never),
+      );
+      orderRepo.manager.query.mockResolvedValue([
+        {
+          location_id: 'loc-A',
+          name: 'Gasd',
+          product_id: 'prod-1',
+          status: 'reserved',
+          quantity: 1,
+        },
+        {
+          location_id: 'loc-B',
+          name: 'Central',
+          product_id: 'prod-2',
+          status: 'reserved',
+          quantity: 1,
+        },
+      ]);
+
+      const dto = await service.findOneAdmin('order-1');
+
+      expect(dto.needsTransfer).toBe(true);
+      expect(dto.pendingTransfers).toEqual([
+        {
+          locationId: 'loc-A',
+          locationName: 'Gasd',
+          items: [
+            { productId: 'prod-1', name: 'Leche Entera 1 L', quantity: 1 },
+          ],
+        },
+      ]);
+      expect(dto.reservationStorages).toHaveLength(2);
+    });
+
+    it('reports no transfer when every reserved line sits at the counter', async () => {
+      orderRepo.findOne.mockResolvedValue(
+        makeOrder({
+          fulfillmentType: 'pickup',
+          pickupLocationId: 'loc-B',
+          items: [],
+        } as never),
+      );
+      orderRepo.manager.query.mockResolvedValue([
+        {
+          location_id: 'loc-B',
+          name: 'Central',
+          product_id: 'prod-1',
+          status: 'reserved',
+          quantity: 2,
+        },
+      ]);
+
+      const dto = await service.findOneAdmin('order-1');
+
+      expect(dto.needsTransfer).toBe(false);
+      expect(dto.pendingTransfers).toEqual([]);
     });
   });
 

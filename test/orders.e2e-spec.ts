@@ -33,7 +33,7 @@ describe('Orders (e2e)', () => {
 
   const clientAuth = { Authorization: 'Bearer mock:clerk_client_1' };
   const adminAuth = { Authorization: 'Bearer mock:clerk_admin_1' };
-  const locationId = '00000000-0000-0000-0000-000000000002';
+  const locationId = '00000000-0000-4000-8000-000000000002';
 
   beforeAll(async () => {
     const moduleRef = await Test.createTestingModule({
@@ -578,6 +578,97 @@ describe('Orders (e2e)', () => {
         .expect(200);
       expect(confirmed.body.data.needsTransfer).toBe(false);
       expect(confirmed.body.data.reservationStorages).toHaveLength(2);
+    });
+
+    it('a transfer into the counter re-homes the reservation and clears the flag', async () => {
+      await clients.query(
+        `INSERT INTO stock_location_coverage (location_id, coverage_type, province_id, municipality_id)
+         SELECT $1, 'municipality', m.province_id, m.id FROM municipalities m WHERE m.id = $2`,
+        [otherLocationId, municipalityId],
+      );
+      await inventory.save(
+        inventory.create({
+          locationId: otherLocationId,
+          productId,
+          quantity: 50,
+        }),
+      );
+
+      const offer = await offerFor(municipalityId);
+      const counter = offer.pickupPoints.find(
+        (p) => p.locationId === locationId,
+      ) as { id: string };
+      await request(app.getHttpServer())
+        .post('/api/cart/items')
+        .set(clientAuth)
+        .send({ productId, quantity: 7 })
+        .expect(201);
+      const res = await request(app.getHttpServer())
+        .post('/api/storefront/orders')
+        .set(clientAuth)
+        .send({
+          fulfillmentType: 'pickup',
+          pickupAddressId: counter.id,
+          deliveryMunicipalityId: municipalityId,
+        })
+        .expect(201);
+      const orderId = res.body.data.id as string;
+
+      // The detail names exactly what must move, grouped by source storage.
+      const before = await request(app.getHttpServer())
+        .get(`/api/orders/${orderId}`)
+        .set(adminAuth)
+        .expect(200);
+      expect(before.body.data.pendingTransfers).toEqual([
+        {
+          locationId: otherLocationId,
+          locationName: 'Far Warehouse',
+          items: [{ productId, name: 'Cola 1L', quantity: 2 }],
+        },
+      ]);
+
+      // The prefilled operation the admin confirms from the alert.
+      await request(app.getHttpServer())
+        .post('/api/inventory/operations')
+        .set(adminAuth)
+        .send({
+          locationId: otherLocationId,
+          type: 'TRANSFER',
+          targetLocationId: locationId,
+          orderId,
+          items: [{ productId, quantity: 2 }],
+        })
+        .expect(201);
+
+      const after = await request(app.getHttpServer())
+        .get(`/api/orders/${orderId}`)
+        .set(adminAuth)
+        .expect(200);
+      expect(after.body.data.needsTransfer).toBe(false);
+      expect(after.body.data.pendingTransfers).toEqual([]);
+
+      const held = await clients.query(
+        `SELECT DISTINCT location_id FROM inventory_reservations
+          WHERE order_id = $1 AND status = 'reserved'`,
+        [orderId],
+      );
+      expect(held).toEqual([{ location_id: locationId }]);
+
+      const flagged = await request(app.getHttpServer())
+        .get('/api/orders?needsTransfer=true')
+        .set(adminAuth)
+        .expect(200);
+      expect(flagged.body.data.meta.total).toBe(0);
+
+      // The list row itself carries the (now cleared) flag for the icon.
+      const list = await request(app.getHttpServer())
+        .get('/api/orders')
+        .set(adminAuth)
+        .expect(200);
+      const row = list.body.data.data.find(
+        (o: { id: string }) => o.id === orderId,
+      ) as { needsTransfer: boolean };
+      expect(row.needsTransfer).toBe(false);
     });
 
     it('delivery never reserves at a storage outside the coverage', async () => {

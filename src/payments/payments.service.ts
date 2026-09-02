@@ -10,6 +10,7 @@ import {
 import { InjectRepository } from '@nestjs/typeorm';
 import { DataSource, In, Repository } from 'typeorm';
 import { InventoryService } from '../inventory/inventory.service';
+import { ProductsService } from '../products/products.service';
 import { OrderItem } from '../orders/entities/order-item.entity';
 import {
   CancellationReason,
@@ -49,6 +50,7 @@ export class PaymentsService {
     private readonly orderItemRepository: Repository<OrderItem>,
     private readonly methodsService: PaymentMethodsService,
     private readonly inventoryService: InventoryService,
+    private readonly productsService: ProductsService,
     private readonly dataSource: DataSource,
   ) {}
 
@@ -363,6 +365,19 @@ export class PaymentsService {
       where: { orderId: order.id },
     });
 
+    // Same scoping as checkout: reinstated stock stays within the storages
+    // covering the order's municipality, draining the pickup counter first —
+    // otherwise a late payment silently re-creates the needs-transfer state.
+    const coveringIds = order.deliveryMunicipalityId
+      ? await this.productsService.coveringLocationIds({
+          municipalityId: order.deliveryMunicipalityId,
+        })
+      : undefined;
+    const allowedLocationIds =
+      coveringIds && order.pickupLocationId
+        ? [...new Set([...coveringIds, order.pickupLocationId])]
+        : coveringIds;
+
     try {
       await this.dataSource.transaction(async (manager) => {
         for (const item of items) {
@@ -371,6 +386,10 @@ export class PaymentsService {
             order.id,
             item.productId,
             item.quantity,
+            {
+              allowedLocationIds,
+              preferredLocationId: order.pickupLocationId ?? undefined,
+            },
           );
         }
         // The one sanctioned cancelled -> pending move: TRANSITIONS forbids it

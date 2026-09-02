@@ -418,6 +418,16 @@ export class InventoryService {
         }
       }
 
+      if (dto.type === OperationType.TRANSFER) {
+        // Same transaction as the stock move: an order whose counter just
+        // received its missing goods stops needing a transfer atomically.
+        await this.rehomeReservations(
+          manager,
+          targetLocationId as string,
+          items.map((i) => i.productId),
+        );
+      }
+
       const opRepo = manager.getRepository(InventoryOperation);
       const savedOp = await opRepo.save(
         opRepo.create({
@@ -425,6 +435,7 @@ export class InventoryService {
           locationId: dto.locationId,
           targetLocationId,
           note: dto.note ?? null,
+          orderId: dto.orderId ?? null,
           createdBy: user.id,
         }),
       );
@@ -440,6 +451,67 @@ export class InventoryService {
       );
       return OperationResponseDto.build(savedOp, savedItems);
     });
+  }
+
+  // Stock just arrived at a pickup counter: reservations for pickup orders of
+  // that counter still held elsewhere move home while the new stock can hold
+  // them, oldest order first. All-or-nothing per reservation — the books stay
+  // simple and a partial transfer just keeps the order flagged.
+  private async rehomeReservations(
+    manager: EntityManager,
+    targetLocationId: string,
+    productIds: string[],
+  ): Promise<void> {
+    const misplaced: {
+      id: string;
+      product_id: string;
+      location_id: string;
+      quantity: number;
+    }[] = await manager.query(
+      `SELECT r.id, r.product_id, r.location_id, r.quantity
+         FROM inventory_reservations r
+         JOIN orders o ON o.id = r.order_id
+        WHERE r.status = 'reserved'
+          AND r.product_id = ANY($1)
+          AND r.location_id <> $2
+          AND o.fulfillment_type = 'pickup'
+          AND o.pickup_location_id = $2
+        ORDER BY o.created_at ASC, r.created_at ASC`,
+      [productIds, targetLocationId],
+    );
+    if (misplaced.length === 0) return;
+
+    const repo = manager.getRepository(Inventory);
+    const reservationRepo = manager.getRepository(InventoryReservation);
+    for (const reservation of misplaced) {
+      const target = await repo.findOne({
+        where: { locationId: targetLocationId, productId: reservation.product_id },
+        lock: { mode: 'pessimistic_write' },
+      });
+      if (!target) continue;
+      if (target.quantity - target.reservedQuantity < reservation.quantity) {
+        continue;
+      }
+      const source = await repo.findOne({
+        where: {
+          locationId: reservation.location_id,
+          productId: reservation.product_id,
+        },
+        lock: { mode: 'pessimistic_write' },
+      });
+      target.reservedQuantity += reservation.quantity;
+      await repo.save(target);
+      if (source) {
+        source.reservedQuantity = Math.max(
+          0,
+          source.reservedQuantity - reservation.quantity,
+        );
+        await repo.save(source);
+      }
+      await reservationRepo.update(reservation.id, {
+        locationId: targetLocationId,
+      });
+    }
   }
 
   // ---------------- Order reservations (not exposed over HTTP) ----------------

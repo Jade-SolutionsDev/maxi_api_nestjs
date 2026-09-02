@@ -7,6 +7,7 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { getRepositoryToken } from '@nestjs/typeorm';
 import { DataSource } from 'typeorm';
 import { InventoryService } from '../inventory/inventory.service';
+import { ProductsService } from '../products/products.service';
 import { OrderItem } from '../orders/entities/order-item.entity';
 import {
   CancellationReason,
@@ -142,6 +143,10 @@ describe('PaymentsService', () => {
         { provide: getRepositoryToken(OrderItem), useValue: orderItemRepo },
         { provide: PaymentMethodsService, useValue: methods },
         { provide: InventoryService, useValue: inventory },
+        {
+          provide: ProductsService,
+          useValue: { coveringLocationIds: jest.fn().mockResolvedValue([]) },
+        },
         {
           provide: DataSource,
           useValue: {
@@ -404,6 +409,7 @@ describe('PaymentsService', () => {
         'order-1',
         'prod-1',
         2,
+        expect.objectContaining({}),
       );
       expect(orderRepo.save).toHaveBeenCalledWith(
         expect.objectContaining({
