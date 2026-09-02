@@ -512,4 +512,47 @@ describe('PaymentsService', () => {
       expect(result.status).toBe(ChargeStatus.SUCCEEDED);
     });
   });
+
+  describe('two creators racing for the same order', () => {
+    // Checkout starts the attempt in the background while the order page asks
+    // for one: both send the same idempotency key, the gateway answers both
+    // with the same charge, and the loser's insert hits UNIQUE (reference).
+    const uniqueViolation = Object.assign(new Error('duplicate key'), {
+      code: '23505',
+    });
+
+    it('reuses the charge the parallel attempt already stored', async () => {
+      const stored = makeCharge();
+      chargeRepo.save.mockRejectedValueOnce(uniqueViolation);
+      chargeRepo.findOne.mockResolvedValue(stored);
+
+      const result = await service.createChargeForOrder(makeOrder(), gateway);
+
+      expect(result).toBe(stored);
+      expect(chargeRepo.findOne).toHaveBeenCalledWith({
+        where: { reference: 'order_ORD-20260001_fake_1' },
+      });
+    });
+
+    it('still reports a violation that leaves no charge behind', async () => {
+      chargeRepo.save.mockRejectedValueOnce(uniqueViolation);
+      chargeRepo.findOne.mockResolvedValue(null);
+
+      await expect(
+        service.createChargeForOrder(makeOrder(), gateway),
+      ).rejects.toBe(uniqueViolation);
+    });
+
+    it('does not swallow an unrelated database failure', async () => {
+      const boom = Object.assign(new Error('connection lost'), {
+        code: '08006',
+      });
+      chargeRepo.save.mockRejectedValueOnce(boom);
+
+      await expect(
+        service.createChargeForOrder(makeOrder(), gateway),
+      ).rejects.toBe(boom);
+      expect(chargeRepo.findOne).not.toHaveBeenCalled();
+    });
+  });
 });

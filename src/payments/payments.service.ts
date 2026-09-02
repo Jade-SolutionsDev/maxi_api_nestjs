@@ -27,6 +27,14 @@ import {
 import { PaymentMethodsService } from './payment-methods.service';
 import { GatewayCharge, PaymentGateway } from './payment-gateway.interface';
 
+/** Postgres reports a broken unique constraint as 23505. */
+const isUniqueViolation = (err: unknown): boolean =>
+  (typeof err === 'object' &&
+    err !== null &&
+    (err as { code?: string; driverError?: { code?: string } }).code ===
+      '23505') ||
+  (err as { driverError?: { code?: string } })?.driverError?.code === '23505';
+
 /**
  * Everything about a payment attempt that does not depend on which platform
  * runs it: attempt numbering and idempotency keys, persistence, ownership
@@ -156,19 +164,52 @@ export class PaymentsService {
         `action_payload=${JSON.stringify(data.actionPayload)} ` +
         `redirectUrl=${data.redirectUrl ?? 'null'}`,
     );
-    const charge = await this.chargeRepository.save(
-      this.chargeRepository.create({
-        orderId: order.id,
-        provider: gateway.code,
-        reference: data.reference,
-        idempotencyKey,
-        ...this.gatewayFields(data),
-      }),
-    );
+    const charge = await this.storeCharge(order, gateway, idempotencyKey, data);
 
     order.paymentRef = data.reference;
     await this.orderRepository.save(order);
     return charge;
+  }
+
+  /**
+   * Persists the attempt, tolerating a second creator for the same order.
+   *
+   * Checkout starts the attempt in the background while the order page may ask
+   * for one of its own, and both compute the same attempt number — so both send
+   * the same idempotency key. The gateway is idempotent and answers both with
+   * the SAME charge, and the second insert then trips `UNIQUE (reference)`.
+   * That is not a failure: the charge exists and is the right one, so take it.
+   */
+  private async storeCharge(
+    order: Order,
+    gateway: PaymentGateway,
+    idempotencyKey: string,
+    data: GatewayCharge,
+  ): Promise<PaymentCharge> {
+    try {
+      return await this.chargeRepository.save(
+        this.chargeRepository.create({
+          orderId: order.id,
+          provider: gateway.code,
+          reference: data.reference,
+          idempotencyKey,
+          ...this.gatewayFields(data),
+        }),
+      );
+    } catch (err) {
+      const stored = isUniqueViolation(err)
+        ? await this.chargeRepository.findOne({
+            where: { reference: data.reference },
+          })
+        : null;
+      if (!stored) throw err;
+
+      this.logger.log(
+        `Charge ${data.reference} was already stored by a parallel attempt on ` +
+          `order ${order.orderNumber ?? order.id}; reusing it`,
+      );
+      return stored;
+    }
   }
 
   /**
