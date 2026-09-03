@@ -129,11 +129,51 @@ describe('TropipayGateway', () => {
           favorite: false,
           reasonId: expect.any(Number),
           serviceDate: expect.stringMatching(/^\d{4}-\d{2}-\d{2}$/),
-          directPayment: true,
           // All-or-nothing: a partial client object is a common 400.
           client: null,
         }),
       );
+    });
+
+    /**
+     * Sin declararlo, lo que ve el pagador depende de un ajuste de la cuenta de
+     * Tropipay que aquí no se ve ni se versiona. La tienda llama «Tarjeta» a
+     * este método: que la tarjeta esté es parte del contrato.
+     */
+    it('declara la tarjeta entre las formas de pago', async () => {
+      await gateway.createCharge(makeOrder(), 'key-1');
+
+      const [payload] = client.createPaymentLink.mock.calls[0] as [
+        Record<string, unknown>,
+      ];
+      expect(payload.paymentMethods).toContain('EXT');
+    });
+
+    // 4 es TRAVEL_FUND en el enumerado del SDK: declaraba cada compra de
+    // comida como un fondo de viaje.
+    it('no declara la compra como un fondo de viaje', async () => {
+      await gateway.createCharge(makeOrder(), 'key-1');
+
+      const [payload] = client.createPaymentLink.mock.calls[0] as [
+        Record<string, unknown>,
+      ];
+      expect(payload.reasonId).not.toBe(4);
+    });
+
+    /**
+     * El cobro tiene que llevar al cliente a la página de pago de Tropipay,
+     * donde está el formulario de tarjeta. `directPayment: true` se la salta e
+     * intenta cobrar del saldo de una cuenta Tropipay: quien llegaba veía un
+     * muro de acceso o un «no tienes balance suficiente», nunca una tarjeta.
+     * Trescientos trece cobros y ni un pago. Que no vuelva.
+     */
+    it('no le pide a Tropipay que se salte la página de pago', async () => {
+      await gateway.createCharge(makeOrder(), 'key-1');
+
+      const [payload] = client.createPaymentLink.mock.calls[0] as [
+        Record<string, unknown>,
+      ];
+      expect(payload.directPayment).not.toBe(true);
     });
 
     it('rewrites localhost callback URLs to 127.0.0.1 (bare localhost is rejected)', async () => {
