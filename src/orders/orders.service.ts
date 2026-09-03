@@ -20,7 +20,10 @@ import {
 import { InventoryService } from '../inventory/inventory.service';
 import { ProductsService } from '../products/products.service';
 import { Role, User } from '../users/entities/user.entity';
-import { AdminOrdersQueryDto } from './dto/admin-orders-query.dto';
+import {
+  AdminOrdersQueryDto,
+  SIN_METODO_DE_PAGO,
+} from './dto/admin-orders-query.dto';
 import { CheckoutDto } from './dto/checkout.dto';
 import { OrderResponseDto } from './dto/order-response.dto';
 import { OrderItem } from './entities/order-item.entity';
@@ -450,6 +453,26 @@ export class OrdersService {
       qb.andWhere('order.paymentStatus = :paymentStatus', {
         paymentStatus: query.paymentStatus,
       });
+    }
+    if (query.paymentMethod) {
+      // El método de un pedido es el de su **último** intento, que es lo que
+      // muestra la columna (`latestMethodsFor`). Un `EXISTS` sobre cualquier
+      // intento sería más corto y mentiría: hay pedidos que probaron Tropipay y
+      // reintentaron con otra cosa, y saldrían al filtrar por una pasarela
+      // mientras la tabla muestra la otra.
+      qb.andWhere(
+        query.paymentMethod === SIN_METODO_DE_PAGO
+          ? // `"order"` entrecomillado: es palabra reservada en SQL, y aquí dentro
+            // no pasa por la sustitución de alias de TypeORM.
+            `NOT EXISTS (SELECT 1 FROM payment_charges c WHERE c.order_id = "order"."id")`
+          : `(SELECT c.provider FROM payment_charges c
+                WHERE c.order_id = "order"."id"
+                ORDER BY c.created_at DESC, c.id DESC
+                LIMIT 1) = :paymentMethod`,
+        query.paymentMethod === SIN_METODO_DE_PAGO
+          ? {}
+          : { paymentMethod: query.paymentMethod },
+      );
     }
     if (query.needsTransfer) {
       // Pickup orders still holding RESERVED stock away from their counter —
