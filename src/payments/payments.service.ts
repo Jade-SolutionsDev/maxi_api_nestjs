@@ -93,7 +93,10 @@ export class PaymentsService {
 
     const charges = await this.chargeRepository.find({
       where: { orderId: In(orderIds) },
-      order: { createdAt: 'DESC' },
+      // `id` como desempate: dos intentos creados en el mismo instante dejaban
+      // el «último» al azar del orden que devolviera la base. El filtro por
+      // método del listado ordena igual, y así no pueden discrepar.
+      order: { createdAt: 'DESC', id: 'DESC' },
     });
 
     const latest = new Map<string, PaymentCharge>();

@@ -17,7 +17,7 @@ import { configureApp } from './test-setup';
 process.env.MOCK_AUTH_ENABLED = 'true';
 
 const TABLES =
-  'order_items, orders, inventory_reservations, cart_items, inventory, products, categories, clients, users';
+  'payment_charges, order_items, orders, inventory_reservations, cart_items, inventory, products, categories, clients, users';
 
 const CRON_SECRET = 'orders_e2e_cron';
 process.env.CRON_SECRET = CRON_SECRET;
@@ -236,6 +236,111 @@ describe('Orders (e2e)', () => {
     const row = await physicalRow();
     expect(row.quantity).toBe(5);
     expect(row.reservedQuantity).toBe(0);
+  });
+
+  describe('filtro por método de pago', () => {
+    /**
+     * El checkout ya deja un cobro `manual` en cada pedido, así que los
+     * intentos sembrados van fechados **después** de ése: lo que se prueba es
+     * el último intento, y el último tiene que ser el que se siembra.
+     */
+    const sembrarCobro = async (
+      orderId: string,
+      provider: string,
+      minutos: number,
+    ) => {
+      await products.query(
+        `INSERT INTO payment_charges
+           (order_id, provider, reference, idempotency_key, status, amount,
+            currency, created_at, updated_at)
+         VALUES ($1, $2, $3, $4, 'requires_action', 1, 'USD',
+                 now() + ($5 || ' minutes')::interval,
+                 now() + ($5 || ' minutes')::interval)`,
+        [
+          orderId,
+          provider,
+          `ref-${provider}-${minutos}-${orderId.slice(0, 8)}`,
+          `key-${provider}-${minutos}-${orderId.slice(0, 8)}`,
+          String(minutos),
+        ],
+      );
+    };
+
+    const sinNingunCobro = async (orderId: string) => {
+      await products.query('DELETE FROM payment_charges WHERE order_id = $1', [
+        orderId,
+      ]);
+    };
+
+    const listar = async (query: string) => {
+      const res = await request(app.getHttpServer())
+        .get(`/api/orders${query}`)
+        .set(adminAuth)
+        .expect(200);
+      return res.body.data as {
+        data: { id: string; paymentMethod?: { code: string } }[];
+        meta: { total: number };
+      };
+    };
+
+    it('devuelve solo los pedidos de esa pasarela', async () => {
+      const conTarjeta = await addToCartAndCheckout(1);
+      const conBilletera = await addToCartAndCheckout(1);
+      await sembrarCobro(conTarjeta.id, 'tropipay', 1);
+      await sembrarCobro(conBilletera.id, 'mibilletera', 1);
+
+      const body = await listar('?paymentMethod=tropipay');
+
+      expect(body.data.map((o) => o.id)).toEqual([conTarjeta.id]);
+    });
+
+    /**
+     * El caso que decidió la implementación: probar con una pasarela y
+     * reintentar con otra. Si el filtro mirara «algún intento», este pedido
+     * saldría al filtrar por Tropipay mientras la columna dice Mi Billetera.
+     */
+    it('manda el último intento, no el primero', async () => {
+      const pedido = await addToCartAndCheckout(1);
+      await sembrarCobro(pedido.id, 'tropipay', 1);
+      await sembrarCobro(pedido.id, 'mibilletera', 2);
+
+      const porTropipay = await listar('?paymentMethod=tropipay');
+      const porBilletera = await listar('?paymentMethod=mibilletera');
+
+      expect(porTropipay.data).toHaveLength(0);
+      expect(porBilletera.data.map((o) => o.id)).toEqual([pedido.id]);
+    });
+
+    // Y lo que se filtra tiene que ser lo que se ve en la tabla.
+    it('coincide con el método que muestra el listado', async () => {
+      const pedido = await addToCartAndCheckout(1);
+      await sembrarCobro(pedido.id, 'tropipay', 1);
+      await sembrarCobro(pedido.id, 'mibilletera', 2);
+
+      const body = await listar('?paymentMethod=mibilletera');
+
+      expect(body.data[0].paymentMethod?.code).toBe('mibilletera');
+    });
+
+    // Uno de cada diez pedidos de producción no tiene ningún intento.
+    it('encuentra los pedidos sin ningún intento de pago', async () => {
+      const sinCobro = await addToCartAndCheckout(1);
+      const conCobro = await addToCartAndCheckout(1);
+      await sinNingunCobro(sinCobro.id);
+      await sembrarCobro(conCobro.id, 'tropipay', 1);
+
+      const body = await listar('?paymentMethod=none');
+
+      expect(body.data.map((o) => o.id)).toEqual([sinCobro.id]);
+    });
+
+    it('una pasarela que no existe no devuelve nada, y no rompe', async () => {
+      await addToCartAndCheckout(1);
+
+      const body = await listar('?paymentMethod=inexistente');
+
+      expect(body.meta.total).toBe(0);
+    });
   });
 
   it('admin lists and settles payment manually', async () => {
