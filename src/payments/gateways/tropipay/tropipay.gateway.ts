@@ -108,7 +108,23 @@ export class TropipayGateway extends PaymentGateway {
       currency,
       singleUse: true,
       favorite: false,
-      reasonId: 4,
+      /**
+       * Tarjeta y saldo, declarado en vez de heredado.
+       *
+       * Sin este campo, lo que se le ofrece al pagador depende de cómo esté
+       * configurada la cuenta de Tropipay, que es un ajuste que nadie de aquí
+       * ve ni versiona. `EXT` es la tarjeta —lo que la tienda promete al
+       * llamar a este método «Tarjeta»— y `TPP` el saldo, que no cuesta nada
+       * dejar disponible para quien ya tenga cuenta.
+       */
+      paymentMethods: ['EXT', 'TPP'],
+      /**
+       * 9 = OTHER en el enumerado `Reasons` del SDK. Estaba en 4, que es
+       * TRAVEL_FUND: cada compra de comida se le declaraba a Tropipay como un
+       * fondo de viaje. Se veía hasta en la URL del enlace,
+       * `utm_term=TRAVEL_BAG`.
+       */
+      reasonId: 9,
       // 0 = no refund window, so funds settle immediately. Refunds stay a
       // manual admin action (production refunds need an SMS 2FA code).
       expirationDays: 0,
@@ -119,7 +135,20 @@ export class TropipayGateway extends PaymentGateway {
       urlNotification: this.notificationUrl(),
       // All-or-nothing: a partial client object is a common source of 400s.
       client: null,
-      directPayment: true,
+      /**
+       * `false` — y este campo es la razón por la que nadie pagó nunca.
+       *
+       * `directPayment: true` le pide a Tropipay que cobre **sin mostrar la
+       * página de pago**, es decir, del saldo de una cuenta Tropipay del
+       * pagador. Con él puesto, quien llegaba al enlace se encontraba un muro:
+       * sin sesión, «introduce tu correo y contraseña»; con sesión, «no tienes
+       * balance suficiente». La tarjeta no aparecía por ningún lado, aunque el
+       * método se llame «Tarjeta» en la tienda.
+       *
+       * Entre el 31-ago y el 3-sep de 2026 se crearon 313 cobros por US$11.910
+       * y ninguno llegó a pagarse. Comprobado abriendo un enlace real.
+       */
+      directPayment: false,
     });
 
     return {
