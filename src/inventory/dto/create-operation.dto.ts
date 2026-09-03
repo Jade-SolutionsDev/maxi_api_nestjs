@@ -30,6 +30,11 @@ export class CreateOperationDto {
   @MaxLength(500)
   note?: string;
 
+  /** Order this operation serves (e.g. a transfer prepared from its alert). */
+  @IsOptional()
+  @IsUUID()
+  orderId?: string;
+
   @IsArray()
   @ArrayMinSize(1)
   @ValidateNested({ each: true })

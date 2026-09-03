@@ -18,6 +18,7 @@ import {
   PaginatedResponse,
 } from '../common/dto/pagination.dto';
 import { InventoryService } from '../inventory/inventory.service';
+import { ProductsService } from '../products/products.service';
 import { Role, User } from '../users/entities/user.entity';
 import { AdminOrdersQueryDto } from './dto/admin-orders-query.dto';
 import { CheckoutDto } from './dto/checkout.dto';
@@ -92,24 +93,46 @@ export class OrdersService {
     private readonly paymentsService: PaymentsService,
     private readonly paymentMethodsService: PaymentMethodsService,
     private readonly fulfillmentService: FulfillmentService,
+    private readonly productsService: ProductsService,
     private readonly clientAddressesService: ClientAddressesService,
     private readonly geographyService: GeographyService,
     private readonly dataSource: DataSource,
   ) {}
 
-  // List rows carry the method name (not the whole attempt): one query for the
-  // page, so naming the gateway never costs a query per row.
+  // List rows carry the method name and the transfer flag (not the whole
+  // attempt/detail): two batched queries for the page, never one per row.
   private async withPaymentMethods(
     orders: Order[],
   ): Promise<OrderResponseDto[]> {
-    const methods = await this.paymentsService.latestMethodsFor(
-      orders.map((order) => order.id),
-    );
+    const orderIds = orders.map((order) => order.id);
+    const [methods, transferIds] = await Promise.all([
+      this.paymentsService.latestMethodsFor(orderIds),
+      this.needsTransferIds(orderIds),
+    ]);
     return orders.map((order) => {
       const dto = OrderResponseDto.fromEntity(order);
       dto.paymentMethod = methods.get(order.id);
+      dto.needsTransfer = transferIds.has(order.id);
       return dto;
     });
+  }
+
+  // Same predicate as the list's needsTransfer filter: pickup orders still
+  // holding RESERVED stock away from their counter.
+  private async needsTransferIds(orderIds: string[]): Promise<Set<string>> {
+    if (orderIds.length === 0) return new Set();
+    const rows: { order_id: string }[] =
+      await this.orderRepository.manager.query(
+        `SELECT DISTINCT r.order_id
+           FROM inventory_reservations r
+           JOIN orders o ON o.id = r.order_id
+          WHERE r.order_id = ANY($1)
+            AND o.fulfillment_type = 'pickup'
+            AND r.status = 'reserved'
+            AND r.location_id <> o.pickup_location_id`,
+        [orderIds],
+      );
+    return new Set(rows.map((row) => row.order_id));
   }
 
   // ---------------- Storefront ----------------
@@ -139,14 +162,13 @@ export class OrdersService {
       municipalityId: deliveryMunicipalityId,
     });
 
-    // Availability is judged where the goods will actually be handed over: the
-    // storage the customer collects from, or the zone we deliver to.
-    const cart = await this.cartService.getCart(
-      client.id,
-      fulfillment.pickupLocationId
-        ? { locationId: fulfillment.pickupLocationId }
-        : { municipalityId: deliveryMunicipalityId },
-    );
+    // Availability is judged across every storage covering the customer's
+    // municipality — the same stock the catalog showed. A pickup order may
+    // draw from sibling storages (the admin gets a transfer alert); pinning it
+    // to the counter's own shelf would reject carts the shop can fulfil.
+    const cart = await this.cartService.getCart(client.id, {
+      municipalityId: deliveryMunicipalityId,
+    });
     if (cart.items.length === 0) {
       throw new BadRequestException('Cart is empty');
     }
@@ -168,6 +190,19 @@ export class OrdersService {
     const gateway = await this.paymentMethodsService.resolve(dto.paymentMethod);
 
     const total = (cart.subtotal + Number(fulfillment.fee)).toFixed(2);
+
+    // Reservations stay within the storages covering the municipality; without
+    // a municipality (pickup-only client with no location) any active storage
+    // may hold the stock, as before.
+    const coveringIds = deliveryMunicipalityId
+      ? await this.productsService.coveringLocationIds({
+          municipalityId: deliveryMunicipalityId,
+        })
+      : undefined;
+    const allowedLocationIds =
+      coveringIds && fulfillment.pickupLocationId
+        ? [...new Set([...coveringIds, fulfillment.pickupLocationId])]
+        : coveringIds;
 
     const orderId = await this.dataSource.transaction(async (manager) => {
       const orderRepo = manager.getRepository(Order);
@@ -206,8 +241,12 @@ export class OrdersService {
           order.id,
           line.productId,
           line.quantity,
-          // Pickup holds its stock in the storage the customer walks up to.
-          fulfillment.pickupLocationId ?? undefined,
+          {
+            allowedLocationIds,
+            // Pickup drains the customer's counter first; overflow lands at
+            // sibling covering storages and flags the order for a transfer.
+            preferredLocationId: fulfillment.pickupLocationId ?? undefined,
+          },
         );
         await itemRepo.save(
           itemRepo.create({
@@ -412,6 +451,15 @@ export class OrdersService {
         paymentStatus: query.paymentStatus,
       });
     }
+    if (query.needsTransfer) {
+      // Pickup orders still holding RESERVED stock away from their counter —
+      // derived from the reservations so it clears itself once settled.
+      qb.andWhere(`order.fulfillment_type = 'pickup'`).andWhere(
+        `EXISTS (SELECT 1 FROM inventory_reservations r
+           WHERE r.order_id = order.id AND r.status = 'reserved'
+             AND r.location_id <> order.pickup_location_id)`,
+      );
+    }
 
     const sortColumns: Record<string, string> = {
       orderNumber: 'order.orderNumber',
@@ -451,7 +499,68 @@ export class OrdersService {
     dto.paymentMethod = (
       await this.paymentsService.latestMethodsFor([order.id])
     ).get(order.id);
+    await this.attachReservationStorages(dto, order);
     return dto;
+  }
+
+  // Where the order's stock actually sits. A pickup order still holding
+  // RESERVED stock at a storage other than its counter needs the admin to
+  // coordinate a transfer before the customer shows up.
+  private async attachReservationStorages(
+    dto: OrderResponseDto,
+    order: Order,
+  ): Promise<void> {
+    if (order.fulfillmentType !== FulfillmentType.PICKUP) return;
+
+    const rows: {
+      location_id: string;
+      name: string;
+      product_id: string;
+      status: string;
+      quantity: number;
+    }[] = await this.orderRepository.manager.query(
+      `SELECT r.location_id, sl.name, r.product_id, r.status,
+              SUM(r.quantity)::int AS quantity
+         FROM inventory_reservations r
+         JOIN stock_locations sl ON sl.id = r.location_id
+        WHERE r.order_id = $1 AND r.status IN ('reserved', 'confirmed')
+        GROUP BY r.location_id, sl.name, r.product_id, r.status
+        ORDER BY sl.name`,
+      [order.id],
+    );
+
+    const storages = new Map<string, string>();
+    for (const row of rows) storages.set(row.location_id, row.name);
+    dto.reservationStorages = [...storages.entries()].map(
+      ([locationId, locationName]) => ({ locationId, locationName }),
+    );
+
+    // The misplaced lines, grouped by source storage: one group = one transfer
+    // operation the admin can run. Names come from the order's own snapshots.
+    const nameByProduct = new Map(
+      (order.items ?? []).map((item) => [item.productId, item.productNameSnapshot]),
+    );
+    const pending = new Map<
+      string,
+      NonNullable<OrderResponseDto['pendingTransfers']>[number]
+    >();
+    for (const row of rows) {
+      if (row.status !== 'reserved') continue;
+      if (row.location_id === order.pickupLocationId) continue;
+      const group = pending.get(row.location_id) ?? {
+        locationId: row.location_id,
+        locationName: row.name,
+        items: [],
+      };
+      group.items.push({
+        productId: row.product_id,
+        name: nameByProduct.get(row.product_id) ?? row.product_id,
+        quantity: row.quantity,
+      });
+      pending.set(row.location_id, group);
+    }
+    dto.pendingTransfers = [...pending.values()];
+    dto.needsTransfer = dto.pendingTransfers.length > 0;
   }
 
   async updateStatus(

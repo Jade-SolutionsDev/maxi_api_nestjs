@@ -207,9 +207,16 @@ export class FulfillmentService {
 
   // ---------------- Storefront ----------------
 
-  /** Pickup points of active storages, newest storage name attached. */
-  private async pickupPoints(): Promise<StorefrontPickupPointDto[]> {
-    return this.pickupRepository
+  /**
+   * Pickup points of active storages. Scoped to the storages covering the
+   * customer's municipality when one is known — a customer buying in Matanzas
+   * has no business seeing Guantánamo's counter. Without a municipality the
+   * full list stays available so checkout never dead-ends.
+   */
+  private async pickupPoints(
+    municipalityId?: string,
+  ): Promise<StorefrontPickupPointDto[]> {
+    const qb = this.pickupRepository
       .createQueryBuilder('pickup')
       .innerJoin(
         'stock_locations',
@@ -222,8 +229,17 @@ export class FulfillmentService {
       .addSelect('pickup.label', 'label')
       .addSelect('pickup.address', 'address')
       .orderBy('location.name')
-      .addOrderBy('pickup.label')
-      .getRawMany<StorefrontPickupPointDto>();
+      .addOrderBy('pickup.label');
+
+    if (municipalityId) {
+      const serving = await this.productsService.coveringLocationIds({
+        municipalityId,
+      });
+      if (serving.length === 0) return [];
+      qb.andWhere('pickup.location_id IN (:...serving)', { serving });
+    }
+
+    return qb.getRawMany<StorefrontPickupPointDto>();
   }
 
   /**
@@ -274,7 +290,9 @@ export class FulfillmentService {
     const settings = await this.getSettings();
     const [options, points] = await Promise.all([
       this.optionsForMunicipality(municipalityId),
-      settings.pickupEnabled ? this.pickupPoints() : Promise.resolve([]),
+      settings.pickupEnabled
+        ? this.pickupPoints(municipalityId)
+        : Promise.resolve([]),
     ]);
 
     const nothingToOffer = options.length === 0 && points.length === 0;
