@@ -6,6 +6,7 @@ import {
   DashboardOrdersRow,
   DashboardProductsRow,
 } from './dto/dashboard-stats-response.dto';
+import { DashboardTopProductRow } from './dto/dashboard-top-products-response.dto';
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 const AHORA = new Date('2026-09-03T12:00:00.000Z');
@@ -197,6 +198,90 @@ describe('DashboardService', () => {
     cifras.forEach((cifra) => {
       expect(cifra).toBe(0);
       expect(Number.isNaN(cifra)).toBe(false);
+    });
+  });
+
+  describe('getTopProducts', () => {
+    const filas: DashboardTopProductRow[] = [
+      { product_id: 'p1', name: 'Café', image_url: 'a.png', sold: 80 },
+      { product_id: 'p2', name: 'Ron', image_url: null, sold: 45 },
+    ];
+
+    beforeEach(() => {
+      dataSource.query.mockResolvedValue(filas);
+    });
+
+    it('abre una sola ventana, sin la anterior', async () => {
+      const dto = await service.getTopProducts(7);
+
+      const [from, to] = dataSource.query.mock.calls[0][1] as Date[];
+      expect(from).toEqual(new Date(AHORA.getTime() - 7 * DAY_MS));
+      expect(to).toEqual(AHORA);
+      expect(dto.period).toEqual({
+        days: 7,
+        from: new Date(AHORA.getTime() - 7 * DAY_MS).toISOString(),
+        to: AHORA.toISOString(),
+      });
+    });
+
+    it('pasa el limit como parámetro, no interpolado en el SQL', async () => {
+      await service.getTopProducts(30, 3);
+
+      const [sql, params] = dataSource.query.mock.calls[0] as [
+        string,
+        unknown[],
+      ];
+      expect(params[2]).toBe(3);
+      expect(sql).toContain('LIMIT $3');
+    });
+
+    it('agrupa por product_id y no por el nombre guardado en la orden', async () => {
+      await service.getTopProducts();
+
+      const [sql] = dataSource.query.mock.calls[0] as [string];
+      // Agrupar por el snapshot partiría en dos un producto renombrado.
+      expect(sql).toContain('GROUP BY oi.product_id');
+      expect(sql).not.toContain('product_name_snapshot');
+    });
+
+    it('excluye cancelados y pedidos borrados', async () => {
+      await service.getTopProducts();
+
+      const [sql] = dataSource.query.mock.calls[0] as [string];
+      expect(sql).toContain("o.status <> 'cancelled'");
+      expect(sql).toContain('o.deleted_at IS NULL');
+    });
+
+    it('no filtra productos borrados: la venta ocurrió igual', async () => {
+      await service.getTopProducts();
+
+      const [sql] = dataSource.query.mock.calls[0] as [string];
+      expect(sql).not.toContain('p.deleted_at');
+    });
+
+    it('ordena con desempate estable por nombre', async () => {
+      await service.getTopProducts();
+
+      const [sql] = dataSource.query.mock.calls[0] as [string];
+      expect(sql).toContain('ORDER BY sold DESC, p.name ASC');
+    });
+
+    it('mapea las filas al contrato del front', async () => {
+      const dto = await service.getTopProducts();
+
+      expect(dto.items).toEqual([
+        { id: 'p1', name: 'Café', imageUrl: 'a.png', sold: 80 },
+        { id: 'p2', name: 'Ron', imageUrl: null, sold: 45 },
+      ]);
+    });
+
+    it('devuelve una lista vacía cuando no hubo ventas', async () => {
+      dataSource.query.mockResolvedValue([]);
+
+      const dto = await service.getTopProducts();
+
+      expect(dto.items).toEqual([]);
+      expect(dto.period.days).toBe(30);
     });
   });
 
