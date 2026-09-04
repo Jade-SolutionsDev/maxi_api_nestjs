@@ -6,6 +6,7 @@ import { Repository } from 'typeorm';
 import { AppModule } from '../src/app.module';
 import { Category } from '../src/categories/entities/category.entity';
 import { Client } from '../src/clients/entities/client.entity';
+import { OrderItem } from '../src/orders/entities/order-item.entity';
 import { Order, OrderStatus } from '../src/orders/entities/order.entity';
 import { Product } from '../src/products/entities/product.entity';
 import { Role, User } from '../src/users/entities/user.entity';
@@ -18,6 +19,18 @@ const TABLES =
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 const diasAtras = (dias: number) => new Date(Date.now() - dias * DAY_MS);
+
+interface TopProductsBody {
+  data: {
+    period: { days: number; from: string; to: string };
+    items: Array<{
+      id: string;
+      name: string;
+      imageUrl: string | null;
+      sold: number;
+    }>;
+  };
+}
 
 interface StatsBody {
   data: {
@@ -36,6 +49,7 @@ describe('Dashboard (e2e)', () => {
   let products: Repository<Product>;
   let categories: Repository<Category>;
   let orders: Repository<Order>;
+  let orderItems: Repository<OrderItem>;
   let clientId: string;
   let categoryId: string;
 
@@ -101,6 +115,30 @@ describe('Dashboard (e2e)', () => {
       .get(`/api/dashboard/stats${query}`)
       .set(adminAuth);
 
+  const getTopProducts = (query = ''): request.Test =>
+    request(app.getHttpServer())
+      .get(`/api/dashboard/top-products${query}`)
+      .set(adminAuth);
+
+  /** One line on an order. `snapshot` defaults to the product's current name. */
+  const seedItem = async (opts: {
+    order: Order;
+    product: Product;
+    quantity: number;
+    snapshot?: string;
+  }): Promise<void> => {
+    await orderItems.save(
+      orderItems.create({
+        orderId: opts.order.id,
+        productId: opts.product.id,
+        productNameSnapshot: opts.snapshot ?? opts.product.name,
+        unitPrice: '10.00',
+        quantity: opts.quantity,
+        lineTotal: `${opts.quantity * 10}.00`,
+      }),
+    );
+  };
+
   beforeAll(async () => {
     const moduleRef = await Test.createTestingModule({
       imports: [AppModule],
@@ -115,6 +153,7 @@ describe('Dashboard (e2e)', () => {
     products = moduleRef.get(getRepositoryToken(Product));
     categories = moduleRef.get(getRepositoryToken(Category));
     orders = moduleRef.get(getRepositoryToken(Order));
+    orderItems = moduleRef.get(getRepositoryToken(OrderItem));
   });
 
   beforeEach(async () => {
@@ -270,5 +309,143 @@ describe('Dashboard (e2e)', () => {
 
   it('rechaza parámetros desconocidos', async () => {
     await getStats('?foo=1').expect(400);
+  });
+
+  describe('GET /dashboard/top-products', () => {
+    it('lo rechaza para un dependiente', async () => {
+      await request(app.getHttpServer())
+        .get('/api/dashboard/top-products')
+        .set(grocerAuth)
+        .expect(403);
+    });
+
+    it('lo rechaza sin credenciales', async () => {
+      await request(app.getHttpServer())
+        .get('/api/dashboard/top-products')
+        .expect(401);
+    });
+
+    it('suma las unidades y ordena de mayor a menor', async () => {
+      const cafe = await seedProduct({ sku: 'CAFE', isActive: true });
+      const ron = await seedProduct({ sku: 'RON', isActive: true });
+      const pedido = await seedOrder({
+        total: '10.00',
+        createdAt: diasAtras(2),
+      });
+      const otro = await seedOrder({ total: '10.00', createdAt: diasAtras(3) });
+      await seedItem({ order: pedido, product: cafe, quantity: 50 });
+      await seedItem({ order: otro, product: cafe, quantity: 30 });
+      await seedItem({ order: pedido, product: ron, quantity: 45 });
+
+      const { body } = (await getTopProducts().expect(200)) as {
+        body: TopProductsBody;
+      };
+
+      expect(body.data.items.map((i) => [i.name, i.sold])).toEqual([
+        ['Producto CAFE', 80],
+        ['Producto RON', 45],
+      ]);
+    });
+
+    it('agrupa un producto renombrado en una sola fila', async () => {
+      const ron = await seedProduct({ sku: 'RON', isActive: true });
+      const pedido = await seedOrder({
+        total: '10.00',
+        createdAt: diasAtras(2),
+      });
+      // El snapshot guarda cómo se llamaba al vender: agrupar por él partiría
+      // este producto en dos filas y rompería el ranking.
+      await seedItem({
+        order: pedido,
+        product: ron,
+        quantity: 30,
+        snapshot: 'Ron Viejo',
+      });
+      await seedItem({
+        order: pedido,
+        product: ron,
+        quantity: 15,
+        snapshot: 'Ron Añejo',
+      });
+
+      const { body } = (await getTopProducts().expect(200)) as {
+        body: TopProductsBody;
+      };
+
+      expect(body.data.items).toHaveLength(1);
+      expect(body.data.items[0]).toMatchObject({
+        name: 'Producto RON',
+        sold: 45,
+      });
+    });
+
+    it('deja fuera las unidades de un pedido cancelado', async () => {
+      const cafe = await seedProduct({ sku: 'CAFE', isActive: true });
+      const vivo = await seedOrder({ total: '10.00', createdAt: diasAtras(2) });
+      const cancelado = await seedOrder({
+        total: '10.00',
+        createdAt: diasAtras(2),
+        status: OrderStatus.CANCELLED,
+      });
+      await seedItem({ order: vivo, product: cafe, quantity: 10 });
+      await seedItem({ order: cancelado, product: cafe, quantity: 100 });
+
+      const { body } = (await getTopProducts().expect(200)) as {
+        body: TopProductsBody;
+      };
+
+      expect(body.data.items[0].sold).toBe(10);
+    });
+
+    it('deja fuera lo vendido antes de la ventana', async () => {
+      const cafe = await seedProduct({ sku: 'CAFE', isActive: true });
+      const dentro = await seedOrder({
+        total: '10.00',
+        createdAt: diasAtras(3),
+      });
+      const fuera = await seedOrder({
+        total: '10.00',
+        createdAt: diasAtras(40),
+      });
+      await seedItem({ order: dentro, product: cafe, quantity: 5 });
+      await seedItem({ order: fuera, product: cafe, quantity: 500 });
+
+      const { body } = (await getTopProducts('?days=30').expect(200)) as {
+        body: TopProductsBody;
+      };
+
+      expect(body.data.items[0].sold).toBe(5);
+    });
+
+    it('recorta al limit pedido', async () => {
+      const pedido = await seedOrder({
+        total: '10.00',
+        createdAt: diasAtras(2),
+      });
+      for (const sku of ['A', 'B', 'C']) {
+        const producto = await seedProduct({ sku, isActive: true });
+        await seedItem({ order: pedido, product: producto, quantity: 10 });
+      }
+
+      const { body } = (await getTopProducts('?limit=2').expect(200)) as {
+        body: TopProductsBody;
+      };
+
+      expect(body.data.items).toHaveLength(2);
+    });
+
+    it('devuelve una lista vacía cuando no hubo ventas', async () => {
+      const { body } = (await getTopProducts().expect(200)) as {
+        body: TopProductsBody;
+      };
+
+      expect(body.data.items).toEqual([]);
+    });
+
+    it('rechaza un limit fuera de rango y una ventana arbitraria', async () => {
+      await getTopProducts('?limit=99').expect(400);
+      await getTopProducts('?days=5').expect(400);
+      await getTopProducts('?foo=1').expect(400);
+    });
   });
 });

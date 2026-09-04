@@ -8,6 +8,10 @@ import {
   DashboardProductsRow,
   DashboardStatsResponseDto,
 } from './dto/dashboard-stats-response.dto';
+import {
+  DashboardTopProductRow,
+  DashboardTopProductsResponseDto,
+} from './dto/dashboard-top-products-response.dto';
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
@@ -69,6 +73,46 @@ const CLIENTS_SQL = `
 `;
 
 /**
+ * Units sold per product over a single window. $1 = from, $2 = to, $3 = limit.
+ *
+ * Grouped by `product_id`, NOT by `product_name_snapshot`: the snapshot records
+ * what the product was called at the moment of sale, so grouping by it would
+ * split one renamed product into two rows and break the ranking. The snapshot
+ * belongs on the order detail; an aggregate wants the stable id and the current
+ * name.
+ *
+ * Cancelled orders are excluded, on the same reasoning as `revenue`: those
+ * units were not sold. This is the ONE place the ranking follows the money
+ * convention rather than the order-count one.
+ *
+ * `p.deleted_at` is deliberately NOT filtered. A product that sold 80 units in
+ * the window sold them even if it was retired afterwards; filtering on a
+ * current-state flag would make historical windows drift, exactly as it would
+ * for `clients.is_active`. The join stays INNER because soft deletes leave the
+ * row in place, so no sale can be dropped by it.
+ *
+ * The `p.name` tie-break makes the order total: without it two products on the
+ * same unit count could swap places between identical requests.
+ */
+const TOP_PRODUCTS_SQL = `
+  SELECT
+    oi.product_id AS product_id,
+    p.name        AS name,
+    p.image_url   AS image_url,
+    COALESCE(SUM(oi.quantity), 0)::int AS sold
+  FROM order_items oi
+  JOIN orders   o ON o.id = oi.order_id
+  JOIN products p ON p.id = oi.product_id
+  WHERE o.deleted_at IS NULL
+    AND o.status <> 'cancelled'
+    AND o.created_at >= $1
+    AND o.created_at <  $2
+  GROUP BY oi.product_id, p.name, p.image_url
+  ORDER BY sold DESC, p.name ASC
+  LIMIT $3
+`;
+
+/**
  * The four figures on the admin landing page, each with the same figure over
  * the previous window so the UI can draw a trend.
  *
@@ -122,6 +166,32 @@ export class DashboardService {
       orderRows[0],
       productRows[0],
       clientRows[0],
+    );
+  }
+
+  /**
+   * Best-selling products by UNITS, not by revenue. The two rankings disagree
+   * on purpose: a cheap item everyone buys outranks an expensive one that
+   * bills more, and "más vendidos" is a question about volume.
+   *
+   * One window only — there is no previous-window comparison to draw here, so
+   * this takes `from`/`to` rather than the three instants `getStats` needs.
+   */
+  async getTopProducts(
+    days = 30,
+    limit = 5,
+  ): Promise<DashboardTopProductsResponseDto> {
+    const to = new Date();
+    const from = new Date(to.getTime() - days * DAY_MS);
+
+    const rows = await this.dataSource.query<DashboardTopProductRow[]>(
+      TOP_PRODUCTS_SQL,
+      [from, to, limit],
+    );
+
+    return DashboardTopProductsResponseDto.fromRows(
+      { days, from: from.toISOString(), to: to.toISOString() },
+      rows,
     );
   }
 }

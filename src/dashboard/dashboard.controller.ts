@@ -10,6 +10,8 @@ import { Role } from '../users/entities/user.entity';
 import { DashboardService } from './dashboard.service';
 import { DashboardStatsQueryDto } from './dto/dashboard-stats-query.dto';
 import { DashboardStatsResponseDto } from './dto/dashboard-stats-response.dto';
+import { DashboardTopProductsQueryDto } from './dto/dashboard-top-products-query.dto';
+import { DashboardTopProductsResponseDto } from './dto/dashboard-top-products-response.dto';
 
 /**
  * Business figures for the backoffice landing page. ADMIN and up only: three of
@@ -38,5 +40,23 @@ export class DashboardController {
     @Query() query: DashboardStatsQueryDto,
   ): Promise<DashboardStatsResponseDto> {
     return this.dashboardService.getStats(query.days ?? 30);
+  }
+
+  @Get('top-products')
+  @ApiOperation({
+    summary: 'Best-selling products for the admin dashboard',
+    description:
+      'Ranked by UNITS sold, not by revenue — a cheap item everyone buys ' +
+      'outranks an expensive one that bills more. Cancelled orders are ' +
+      'excluded. `days` defaults to 30 and `limit` to 5.',
+  })
+  @ApiOkResponse({ type: DashboardTopProductsResponseDto })
+  getTopProducts(
+    @Query() query: DashboardTopProductsQueryDto,
+  ): Promise<DashboardTopProductsResponseDto> {
+    return this.dashboardService.getTopProducts(
+      query.days ?? 30,
+      query.limit ?? 5,
+    );
   }
 }
