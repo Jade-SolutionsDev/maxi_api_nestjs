@@ -145,6 +145,28 @@ describe('DashboardService', () => {
     conteos.forEach((linea) => expect(linea).not.toContain('cancelled'));
   });
 
+  it('la facturación cuenta solo lo cobrado, el conteo de pedidos no', async () => {
+    await service.getStats();
+
+    const { orders } = sqlPorTabla(dataSource);
+    // revenue = plata que entró: exige el pago conciliado.
+    const revenue = orders
+      .split('revenue_')
+      .slice(0, 2)
+      .join('revenue_')
+      .split('COALESCE(SUM(o.total)');
+    expect(revenue.length).toBeGreaterThan(1);
+    const pagos = orders.match(/o\.payment_status = 'paid'/g) ?? [];
+    expect(pagos).toHaveLength(2);
+
+    // El conteo mide demanda: no filtra ni cancelados ni pago.
+    const conteos = orders
+      .split('\n')
+      .filter((linea) => linea.includes('COUNT(*) FILTER'));
+    expect(conteos).toHaveLength(2);
+    conteos.forEach((linea) => expect(linea).not.toContain('payment_status'));
+  });
+
   it('ignora las filas borradas en las tres consultas', async () => {
     await service.getStats();
 
@@ -244,11 +266,13 @@ describe('DashboardService', () => {
       expect(sql).not.toContain('product_name_snapshot');
     });
 
-    it('excluye cancelados y pedidos borrados', async () => {
+    it('excluye cancelados, sin pagar y pedidos borrados', async () => {
       await service.getTopProducts();
 
       const [sql] = dataSource.query.mock.calls[0] as [string];
       expect(sql).toContain("o.status <> 'cancelled'");
+      // Misma convención que revenue: una unidad sin cobrar no se vendió.
+      expect(sql).toContain("o.payment_status = 'paid'");
       expect(sql).toContain('o.deleted_at IS NULL');
     });
 
