@@ -485,7 +485,10 @@ export class InventoryService {
     const reservationRepo = manager.getRepository(InventoryReservation);
     for (const reservation of misplaced) {
       const target = await repo.findOne({
-        where: { locationId: targetLocationId, productId: reservation.product_id },
+        where: {
+          locationId: targetLocationId,
+          productId: reservation.product_id,
+        },
         lock: { mode: 'pessimistic_write' },
       });
       if (!target) continue;
