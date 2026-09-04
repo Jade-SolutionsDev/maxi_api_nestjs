@@ -20,7 +20,7 @@ export class DashboardTopProductDto {
   /** The product's CURRENT name, not the snapshot stored on the order item. */
   name: string;
   imageUrl: string | null;
-  /** Units sold in the window, cancelled orders excluded. */
+  /** Units sold in the window; cancelled and unpaid orders excluded. */
   sold: number;
 }
 

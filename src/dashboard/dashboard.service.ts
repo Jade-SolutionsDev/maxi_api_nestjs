@@ -22,15 +22,20 @@ const DAY_MS = 24 * 60 * 60 * 1000;
  * One pass over the 2N-day slice: FILTER splits it into the two windows, so the
  * planner reads the range once instead of four times.
  *
- * `'cancelled'` is an unquoted literal so Postgres casts it to the column's own
- * enum type; binding it as a parameter would need an explicit cast.
+ * `'cancelled'` and `'paid'` are unquoted literals so Postgres casts them to
+ * each column's own enum type; binding them as parameters would need explicit
+ * casts.
  */
 const ORDERS_SQL = `
   SELECT
     COALESCE(SUM(o.total) FILTER (
-      WHERE o.created_at >= $2 AND o.status <> 'cancelled'), 0) AS revenue_current,
+      WHERE o.created_at >= $2
+        AND o.status <> 'cancelled'
+        AND o.payment_status = 'paid'), 0) AS revenue_current,
     COALESCE(SUM(o.total) FILTER (
-      WHERE o.created_at <  $2 AND o.status <> 'cancelled'), 0) AS revenue_previous,
+      WHERE o.created_at <  $2
+        AND o.status <> 'cancelled'
+        AND o.payment_status = 'paid'), 0) AS revenue_previous,
     COUNT(*) FILTER (WHERE o.created_at >= $2)::int AS orders_current,
     COUNT(*) FILTER (WHERE o.created_at <  $2)::int AS orders_previous
   FROM orders o
@@ -81,9 +86,9 @@ const CLIENTS_SQL = `
  * belongs on the order detail; an aggregate wants the stable id and the current
  * name.
  *
- * Cancelled orders are excluded, on the same reasoning as `revenue`: those
- * units were not sold. This is the ONE place the ranking follows the money
- * convention rather than the order-count one.
+ * Cancelled orders are excluded, and so is anything not settled: the ranking
+ * follows the same "collected money" convention as `revenue`, so the two agree
+ * about what counts as a sale. A unit nobody paid for has not been sold yet.
  *
  * `p.deleted_at` is deliberately NOT filtered. A product that sold 80 units in
  * the window sold them even if it was retired afterwards; filtering on a
@@ -105,6 +110,7 @@ const TOP_PRODUCTS_SQL = `
   JOIN products p ON p.id = oi.product_id
   WHERE o.deleted_at IS NULL
     AND o.status <> 'cancelled'
+    AND o.payment_status = 'paid'
     AND o.created_at >= $1
     AND o.created_at <  $2
   GROUP BY oi.product_id, p.name, p.image_url
@@ -118,13 +124,18 @@ const TOP_PRODUCTS_SQL = `
  *
  * Two conventions differ on purpose:
  *
- * - `revenue` EXCLUDES cancelled orders. It is money, and a cancelled order is
- *   not money. It deliberately does NOT require `payment_status = 'paid'`:
- *   payments are still settled by hand (PATCH /orders/:id/payment-status), so
- *   that filter would undercount everything nobody has got around to yet.
- * - `orders` INCLUDES cancelled ones. It answers "how much demand arrived", and
- *   a count that quietly disagrees with the total on the /orders list is worse
- *   than one that counts a cancellation.
+ * - `revenue` is MONEY COLLECTED: it excludes cancelled orders and requires
+ *   `payment_status = 'paid'`. It answers "how much came in", so the figure can
+ *   be reconciled against the till. Payments are still settled by hand (PATCH
+ *   /orders/:id/payment-status), so anything nobody has marked yet is missing
+ *   from this number BY DESIGN — it is billed, not collected, and the gap is
+ *   pending reconciliation work rather than an undercount.
+ * - `orders` INCLUDES cancelled ones and ignores payment entirely. It answers
+ *   "how much demand arrived", and a count that quietly disagrees with the
+ *   total on the /orders list is worse than one that counts a cancellation.
+ *
+ * So `revenue` and `orders` are deliberately NOT two views of one thing: the
+ * first is the till, the second is the door.
  *
  * Windows are rolling N x 24h spans, not calendar days, and all three
  * statements receive the SAME three instants captured once in JS. That keeps

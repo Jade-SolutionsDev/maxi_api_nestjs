@@ -7,7 +7,11 @@ import { AppModule } from '../src/app.module';
 import { Category } from '../src/categories/entities/category.entity';
 import { Client } from '../src/clients/entities/client.entity';
 import { OrderItem } from '../src/orders/entities/order-item.entity';
-import { Order, OrderStatus } from '../src/orders/entities/order.entity';
+import {
+  Order,
+  OrderStatus,
+  PaymentStatus,
+} from '../src/orders/entities/order.entity';
 import { Product } from '../src/products/entities/product.entity';
 import { Role, User } from '../src/users/entities/user.entity';
 import { configureApp } from './test-setup';
@@ -71,15 +75,22 @@ describe('Dashboard (e2e)', () => {
     ]);
   };
 
+  /**
+   * `paymentStatus` defaults to PAID because revenue and the product ranking
+   * both count collected money only: an unpaid order is the exception a test
+   * has to ask for, not the baseline.
+   */
   const seedOrder = async (opts: {
     total: string;
     createdAt: Date;
     status?: OrderStatus;
+    paymentStatus?: PaymentStatus;
   }): Promise<Order> => {
     const order = await orders.save(
       orders.create({
         clientId,
         status: opts.status ?? OrderStatus.CONFIRMED,
+        paymentStatus: opts.paymentStatus ?? PaymentStatus.PAID,
         subtotal: opts.total,
         deliveryFee: '0',
         total: opts.total,
@@ -228,6 +239,26 @@ describe('Dashboard (e2e)', () => {
 
     expect(body.data.revenue.current).toBe(100);
     expect(body.data.orders.current).toBe(2);
+  });
+
+  it('deja fuera de la facturación lo que todavía no está cobrado', async () => {
+    await seedOrder({ total: '100.00', createdAt: diasAtras(3) });
+    await seedOrder({
+      total: '500.00',
+      createdAt: diasAtras(3),
+      paymentStatus: PaymentStatus.PENDING,
+    });
+    await seedOrder({
+      total: '700.00',
+      createdAt: diasAtras(3),
+      paymentStatus: PaymentStatus.REFUNDED,
+    });
+
+    const { body } = (await getStats().expect(200)) as { body: StatsBody };
+
+    // Solo el pedido cobrado suma; los otros dos siguen contando como demanda.
+    expect(body.data.revenue.current).toBe(100);
+    expect(body.data.orders.current).toBe(3);
   });
 
   it('ignora los pedidos borrados', async () => {
@@ -389,6 +420,27 @@ describe('Dashboard (e2e)', () => {
       });
       await seedItem({ order: vivo, product: cafe, quantity: 10 });
       await seedItem({ order: cancelado, product: cafe, quantity: 100 });
+
+      const { body } = (await getTopProducts().expect(200)) as {
+        body: TopProductsBody;
+      };
+
+      expect(body.data.items[0].sold).toBe(10);
+    });
+
+    it('deja fuera las unidades de un pedido sin cobrar', async () => {
+      const cafe = await seedProduct({ sku: 'CAFE', isActive: true });
+      const cobrado = await seedOrder({
+        total: '10.00',
+        createdAt: diasAtras(2),
+      });
+      const sinCobrar = await seedOrder({
+        total: '10.00',
+        createdAt: diasAtras(2),
+        paymentStatus: PaymentStatus.PENDING,
+      });
+      await seedItem({ order: cobrado, product: cafe, quantity: 10 });
+      await seedItem({ order: sinCobrar, product: cafe, quantity: 100 });
 
       const { body } = (await getTopProducts().expect(200)) as {
         body: TopProductsBody;

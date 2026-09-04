@@ -32,8 +32,10 @@ export class DashboardController {
     summary: 'KPI figures for the admin dashboard',
     description:
       'Every metric carries the current window and the one immediately before ' +
-      'it, so the caller can render a trend. `days` defaults to 30. Revenue ' +
-      'excludes cancelled orders; the order count includes them.',
+      'it, so the caller can render a trend. `days` defaults to 30. Revenue is ' +
+      'money COLLECTED: it excludes cancelled orders and counts only those ' +
+      'with `payment_status = paid`. The order count ignores both filters — it ' +
+      'measures demand, not money.',
   })
   @ApiOkResponse({ type: DashboardStatsResponseDto })
   getStats(
@@ -47,8 +49,9 @@ export class DashboardController {
     summary: 'Best-selling products for the admin dashboard',
     description:
       'Ranked by UNITS sold, not by revenue — a cheap item everyone buys ' +
-      'outranks an expensive one that bills more. Cancelled orders are ' +
-      'excluded. `days` defaults to 30 and `limit` to 5.',
+      'outranks an expensive one that bills more. Cancelled and unpaid orders ' +
+      'are excluded, matching the revenue convention. `days` defaults to 30 ' +
+      'and `limit` to 5.',
   })
   @ApiOkResponse({ type: DashboardTopProductsResponseDto })
   getTopProducts(

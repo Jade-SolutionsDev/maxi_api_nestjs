@@ -45,7 +45,7 @@ export interface DashboardClientsRow {
 
 export class DashboardStatsResponseDto {
   period: DashboardPeriodDto;
-  /** Money billed in the window, cancelled orders excluded. */
+  /** Money COLLECTED in the window: cancelled and unpaid orders excluded. */
   revenue: DashboardMetricDto;
   /** Orders placed in the window, cancellations INCLUDED (demand, not money). */
   orders: DashboardMetricDto;
