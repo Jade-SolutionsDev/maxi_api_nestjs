@@ -561,7 +561,10 @@ export class OrdersService {
     // The misplaced lines, grouped by source storage: one group = one transfer
     // operation the admin can run. Names come from the order's own snapshots.
     const nameByProduct = new Map(
-      (order.items ?? []).map((item) => [item.productId, item.productNameSnapshot]),
+      (order.items ?? []).map((item) => [
+        item.productId,
+        item.productNameSnapshot,
+      ]),
     );
     const pending = new Map<
       string,

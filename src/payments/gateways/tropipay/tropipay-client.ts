@@ -98,8 +98,7 @@ export class TropipayClient implements OnModuleInit {
     reference: string,
   ): Promise<TropipayMovement | undefined> {
     const result = (await this.sdk.movements(0, 50)) as
-      | TropipayMovement[]
-      | { rows?: TropipayMovement[] };
+      TropipayMovement[] | { rows?: TropipayMovement[] };
     const rows = Array.isArray(result) ? result : (result?.rows ?? []);
     return rows.find((row) => row.reference === reference);
   }
