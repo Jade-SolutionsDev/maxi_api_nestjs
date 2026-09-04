@@ -13,6 +13,7 @@ import { AuthModule } from './auth/auth.module';
 import { CartModule } from './cart/cart.module';
 import { CategoriesModule } from './categories/categories.module';
 import { CmsModule } from './cms/cms.module';
+import { DashboardModule } from './dashboard/dashboard.module';
 import { ClientAddressesModule } from './client-addresses/client-addresses.module';
 import { ClientsModule } from './clients/clients.module';
 import { ContactModule } from './contact/contact.module';
@@ -99,6 +100,7 @@ import { WebhooksModule } from './webhooks/webhooks.module';
     UploadsModule,
     WebhooksModule,
     PermissionsModule,
+    DashboardModule,
   ],
   controllers: [AppController],
   providers: [
