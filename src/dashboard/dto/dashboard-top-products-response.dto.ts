@@ -7,12 +7,12 @@ export class DashboardWindowDto {
   to: string;
 }
 
-/** Raw row as Postgres returns it: `::int` on the sum, so it arrives a number. */
 export interface DashboardTopProductRow {
   product_id: string;
   name: string;
   image_url: string | null;
   sold: number;
+  revenue: string;
 }
 
 export class DashboardTopProductDto {
@@ -22,11 +22,13 @@ export class DashboardTopProductDto {
   imageUrl: string | null;
   /** Units sold in the window; cancelled and unpaid orders excluded. */
   sold: number;
+
+  revenue: number;
 }
 
 export class DashboardTopProductsResponseDto {
   period: DashboardWindowDto;
-  /** Ordered by units sold, descending. At most `limit` entries. */
+  /** Ordered by units sold, descending — not by `revenue`. At most `limit`. */
   items: DashboardTopProductDto[];
 
   static fromRows(
@@ -40,6 +42,7 @@ export class DashboardTopProductsResponseDto {
       name: row.name,
       imageUrl: row.image_url,
       sold: Number(row.sold),
+      revenue: Number(row.revenue),
     }));
     return dto;
   }
