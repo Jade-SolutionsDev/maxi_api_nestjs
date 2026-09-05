@@ -225,8 +225,20 @@ describe('DashboardService', () => {
 
   describe('getTopProducts', () => {
     const filas: DashboardTopProductRow[] = [
-      { product_id: 'p1', name: 'Café', image_url: 'a.png', sold: 80 },
-      { product_id: 'p2', name: 'Ron', image_url: null, sold: 45 },
+      {
+        product_id: 'p1',
+        name: 'Café',
+        image_url: 'a.png',
+        sold: 80,
+        revenue: '800.00',
+      },
+      {
+        product_id: 'p2',
+        name: 'Ron',
+        image_url: null,
+        sold: 45,
+        revenue: '450.50',
+      },
     ];
 
     beforeEach(() => {
@@ -290,13 +302,45 @@ describe('DashboardService', () => {
       expect(sql).toContain('ORDER BY sold DESC, p.name ASC');
     });
 
+    it('suma el dinero por line_total, no por el precio actual', async () => {
+      await service.getTopProducts();
+
+      const [sql] = dataSource.query.mock.calls[0] as [string];
+      // `line_total` es lo que se cobró, con el descuento congelado al vender.
+      expect(sql).toContain('SUM(oi.line_total)');
+      // Recalcular con el precio del catálogo movería las ventanas históricas.
+      expect(sql).not.toContain('base_price');
+      expect(sql).not.toContain('p.discount');
+    });
+
+    it('el dinero no manda en el ranking: sigue mandando la unidad', async () => {
+      await service.getTopProducts();
+
+      const [sql] = dataSource.query.mock.calls[0] as [string];
+      expect(sql).not.toContain('ORDER BY revenue');
+    });
+
     it('mapea las filas al contrato del front', async () => {
       const dto = await service.getTopProducts();
 
+      // `revenue` llega de pg como texto (numeric): sale como número.
       expect(dto.items).toEqual([
-        { id: 'p1', name: 'Café', imageUrl: 'a.png', sold: 80 },
-        { id: 'p2', name: 'Ron', imageUrl: null, sold: 45 },
+        {
+          id: 'p1',
+          name: 'Café',
+          imageUrl: 'a.png',
+          sold: 80,
+          revenue: 800,
+        },
+        {
+          id: 'p2',
+          name: 'Ron',
+          imageUrl: null,
+          sold: 45,
+          revenue: 450.5,
+        },
       ]);
+      expect(typeof dto.items[0].revenue).toBe('number');
     });
 
     it('devuelve una lista vacía cuando no hubo ventas', async () => {

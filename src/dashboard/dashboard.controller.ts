@@ -49,9 +49,13 @@ export class DashboardController {
     summary: 'Best-selling products for the admin dashboard',
     description:
       'Ranked by UNITS sold, not by revenue — a cheap item everyone buys ' +
-      'outranks an expensive one that bills more. Cancelled and unpaid orders ' +
-      'are excluded, matching the revenue convention. `days` defaults to 30 ' +
-      'and `limit` to 5.',
+      'outranks an expensive one that bills more. Each row also carries the ' +
+      '`revenue` that product billed in the window, at the prices charged when ' +
+      'each order was placed; it is reported, never ranked on. Delivery fees ' +
+      'belong to the order rather than to any product, so these figures add up ' +
+      'to less than the `revenue` KPI on /dashboard/stats. Cancelled and ' +
+      'unpaid orders are excluded from both columns, matching the revenue ' +
+      'convention. `days` defaults to 30 and `limit` to 5.',
   })
   @ApiOkResponse({ type: DashboardTopProductsResponseDto })
   getTopProducts(
