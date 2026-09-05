@@ -67,29 +67,33 @@ class FakeGateway extends PaymentGateway {
   readonly kind = 'redirect' as const;
   configuredValue = true;
 
-  createCharge = jest.fn((order: Order, key: string): Promise<GatewayCharge> =>
-    Promise.resolve({
-      reference: key,
-      status: ChargeStatus.REQUIRES_ACTION,
-      amount: order.total,
-      currency: 'USD',
-      redirectUrl: 'https://tppay.me/abc',
-      rawPayload: {},
+  createCharge = jest.fn(
+    (order: Order, key: string): Promise<GatewayCharge> =>
+      Promise.resolve({
+        reference: key,
+        status: ChargeStatus.REQUIRES_ACTION,
+        amount: order.total,
+        currency: 'USD',
+        redirectUrl: 'https://tppay.me/abc',
+        rawPayload: {},
+      }),
+  );
+  syncCharge = jest.fn(
+    (charge: PaymentCharge): Promise<GatewayCharge> =>
+      Promise.resolve({
+        reference: charge.reference,
+        status: charge.status,
+        amount: charge.amount,
+        currency: charge.currency,
+        rawPayload: {},
+      }),
+  );
+  parseWebhook = jest.fn(
+    (): GatewayWebhookEvent => ({
+      reference: 'REF123',
+      charge: { status: ChargeStatus.SUCCEEDED, rawPayload: {} },
     }),
   );
-  syncCharge = jest.fn((charge: PaymentCharge): Promise<GatewayCharge> =>
-    Promise.resolve({
-      reference: charge.reference,
-      status: charge.status,
-      amount: charge.amount,
-      currency: charge.currency,
-      rawPayload: {},
-    }),
-  );
-  parseWebhook = jest.fn((): GatewayWebhookEvent => ({
-    reference: 'REF123',
-    charge: { status: ChargeStatus.SUCCEEDED, rawPayload: {} },
-  }));
 
   get configured(): boolean {
     return this.configuredValue;

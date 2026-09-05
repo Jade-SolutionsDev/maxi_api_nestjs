@@ -32,6 +32,7 @@ interface TopProductsBody {
       name: string;
       imageUrl: string | null;
       sold: number;
+      revenue: number;
     }>;
   };
 }
@@ -131,21 +132,22 @@ describe('Dashboard (e2e)', () => {
       .get(`/api/dashboard/top-products${query}`)
       .set(adminAuth);
 
-  /** One line on an order. `snapshot` defaults to the product's current name. */
   const seedItem = async (opts: {
     order: Order;
     product: Product;
     quantity: number;
     snapshot?: string;
+    unitPrice?: string;
   }): Promise<void> => {
+    const unitPrice = opts.unitPrice ?? '10.00';
     await orderItems.save(
       orderItems.create({
         orderId: opts.order.id,
         productId: opts.product.id,
         productNameSnapshot: opts.snapshot ?? opts.product.name,
-        unitPrice: '10.00',
+        unitPrice,
         quantity: opts.quantity,
-        lineTotal: `${opts.quantity * 10}.00`,
+        lineTotal: (Number(unitPrice) * opts.quantity).toFixed(2),
       }),
     );
   };
@@ -372,9 +374,37 @@ describe('Dashboard (e2e)', () => {
         body: TopProductsBody;
       };
 
-      expect(body.data.items.map((i) => [i.name, i.sold])).toEqual([
-        ['Producto CAFE', 80],
-        ['Producto RON', 45],
+      // `seedItem` cobra 10.00 por unidad, así que el dinero es determinista.
+      expect(body.data.items.map((i) => [i.name, i.sold, i.revenue])).toEqual([
+        ['Producto CAFE', 80, 800],
+        ['Producto RON', 45, 450],
+      ]);
+      expect(typeof body.data.items[0].revenue).toBe('number');
+    });
+
+    it('no reordena el ranking por dinero: manda la unidad', async () => {
+      // El ron factura más, pero se vende menos: el ranking sigue por unidades.
+      const cafe = await seedProduct({ sku: 'CAFE', isActive: true });
+      const ron = await seedProduct({ sku: 'RON', isActive: true });
+      const pedido = await seedOrder({
+        total: '10.00',
+        createdAt: diasAtras(2),
+      });
+      await seedItem({ order: pedido, product: cafe, quantity: 50 });
+      await seedItem({
+        order: pedido,
+        product: ron,
+        quantity: 10,
+        unitPrice: '900.00',
+      });
+
+      const { body } = (await getTopProducts().expect(200)) as {
+        body: TopProductsBody;
+      };
+
+      expect(body.data.items.map((i) => [i.name, i.sold, i.revenue])).toEqual([
+        ['Producto CAFE', 50, 500],
+        ['Producto RON', 10, 9000],
       ]);
     });
 
@@ -426,6 +456,8 @@ describe('Dashboard (e2e)', () => {
       };
 
       expect(body.data.items[0].sold).toBe(10);
+      // El dinero vive en la misma consulta: se cae con las mismas unidades.
+      expect(body.data.items[0].revenue).toBe(100);
     });
 
     it('deja fuera las unidades de un pedido sin cobrar', async () => {
@@ -447,6 +479,8 @@ describe('Dashboard (e2e)', () => {
       };
 
       expect(body.data.items[0].sold).toBe(10);
+      // Facturado no es cobrado: lo que nadie pagó no entra en la caja.
+      expect(body.data.items[0].revenue).toBe(100);
     });
 
     it('deja fuera lo vendido antes de la ventana', async () => {
