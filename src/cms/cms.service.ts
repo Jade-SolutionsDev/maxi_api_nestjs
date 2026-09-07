@@ -1,12 +1,26 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Not, Repository } from 'typeorm';
+import { In, Not, Repository } from 'typeorm';
+import { CategoriesService } from '../categories/categories.service';
+import { Category } from '../categories/entities/category.entity';
 import { slugify } from '../common/utils/catalog-ownership.utils';
+import { Product } from '../products/entities/product.entity';
+import { ProductsService } from '../products/products.service';
 import {
   CMS_REVALIDATE_TAGS,
   RevalidationService,
 } from '../revalidation/revalidation.service';
 import { CreateCmsBannerDto, UpdateCmsBannerDto } from './dto/cms-banner.dto';
+import {
+  CmsBannerResolvedTarget,
+  CmsBannerTargetReference,
+  CmsBannerTargetType,
+  CmsBannerView,
+} from './cms-banner.types';
 import { CreateCmsPageDto, UpdateCmsPageDto } from './dto/cms-page.dto';
 import {
   CreateCmsServiceDto,
@@ -67,6 +81,12 @@ export class CmsService {
     private readonly pageRepository: Repository<CmsPage>,
     @InjectRepository(CmsBanner)
     private readonly bannerRepository: Repository<CmsBanner>,
+    @InjectRepository(Category)
+    private readonly categoryRepository: Repository<Category>,
+    @InjectRepository(Product)
+    private readonly productRepository: Repository<Product>,
+    private readonly categoriesService: CategoriesService,
+    private readonly productsService: ProductsService,
     @InjectRepository(CmsServiceEntity)
     private readonly serviceRepository: Repository<CmsServiceEntity>,
     @InjectRepository(CmsStaffMember)
@@ -161,27 +181,39 @@ export class CmsService {
 
   // ---------------- Banners ----------------
 
-  async createBanner(dto: CreateCmsBannerDto): Promise<CmsBanner> {
+  async createBanner(dto: CreateCmsBannerDto): Promise<CmsBannerView> {
+    if (dto.target) {
+      await this.validateBannerTarget(dto.target);
+    }
     const banner = this.bannerRepository.create({
       alt: dto.alt,
       desktop: dto.desktop,
       tablet: dto.tablet,
       mobile: dto.mobile,
+      targetType: dto.target?.type ?? null,
+      targetId: dto.target?.id ?? null,
       sortOrder: dto.sortOrder ?? 0,
       isActive: dto.isActive ?? true,
     });
     const saved = await this.bannerRepository.save(banner);
     this.revalidationService.notify(CMS_REVALIDATE_TAGS);
-    return saved;
+    return (await this.resolveBannerTargets([saved]))[0];
   }
 
-  async listBannersAdmin(): Promise<CmsBanner[]> {
-    return this.bannerRepository.find({
+  async listBannersAdmin(): Promise<CmsBannerView[]> {
+    const banners = await this.bannerRepository.find({
       order: { sortOrder: 'ASC', createdAt: 'ASC' },
     });
+    return this.resolveBannerTargets(banners);
   }
 
-  async getBanner(id: string): Promise<CmsBanner> {
+  async getBanner(id: string): Promise<CmsBannerView> {
+    return (
+      await this.resolveBannerTargets([await this.getBannerEntity(id)])
+    )[0];
+  }
+
+  private async getBannerEntity(id: string): Promise<CmsBanner> {
     const banner = await this.bannerRepository.findOne({ where: { id } });
     if (!banner) {
       throw new NotFoundException(`Banner with id "${id}" not found`);
@@ -189,8 +221,11 @@ export class CmsService {
     return banner;
   }
 
-  async updateBanner(id: string, dto: UpdateCmsBannerDto): Promise<CmsBanner> {
-    const banner = await this.getBanner(id);
+  async updateBanner(
+    id: string,
+    dto: UpdateCmsBannerDto,
+  ): Promise<CmsBannerView> {
+    const banner = await this.getBannerEntity(id);
     if (dto.alt !== undefined) {
       banner.alt = dto.alt;
     }
@@ -209,22 +244,202 @@ export class CmsService {
     if (dto.isActive !== undefined) {
       banner.isActive = dto.isActive;
     }
+    if (dto.target !== undefined) {
+      if (dto.target === null) {
+        banner.targetType = null;
+        banner.targetId = null;
+      } else {
+        await this.validateBannerTarget(dto.target);
+        banner.targetType = dto.target.type;
+        banner.targetId = dto.target.id;
+      }
+    }
     const saved = await this.bannerRepository.save(banner);
     this.revalidationService.notify(CMS_REVALIDATE_TAGS);
-    return saved;
+    return (await this.resolveBannerTargets([saved]))[0];
   }
 
   async removeBanner(id: string): Promise<void> {
-    await this.getBanner(id);
+    await this.getBannerEntity(id);
     await this.bannerRepository.softDelete(id);
     this.revalidationService.notify(CMS_REVALIDATE_TAGS);
   }
 
-  async listBannersPublic(): Promise<CmsBanner[]> {
-    return this.bannerRepository.find({
+  async listBannersPublic(): Promise<CmsBannerView[]> {
+    const banners = await this.bannerRepository.find({
       where: { isActive: true },
       order: { sortOrder: 'ASC', createdAt: 'ASC' },
     });
+    const views = await this.resolveBannerTargets(banners);
+    return views.filter(
+      ({ banner, target }) =>
+        (!banner.targetType && !banner.targetId) || target?.isAvailable,
+    );
+  }
+
+  private async validateBannerTarget(
+    target: CmsBannerTargetReference,
+  ): Promise<void> {
+    if (target.type === CmsBannerTargetType.PRODUCT) {
+      const product = await this.productRepository.findOne({
+        where: { id: target.id },
+      });
+      if (!product) {
+        throw new NotFoundException(
+          `Product banner target with id "${target.id}" not found`,
+        );
+      }
+      return;
+    }
+
+    const category = await this.categoryRepository.findOne({
+      where: { id: target.id },
+    });
+    if (!category) {
+      throw new NotFoundException(
+        `Taxonomy banner target with id "${target.id}" not found`,
+      );
+    }
+
+    const isDepartment = category.parentId === null;
+    if (
+      (target.type === CmsBannerTargetType.DEPARTMENT && !isDepartment) ||
+      (target.type === CmsBannerTargetType.CATEGORY && isDepartment)
+    ) {
+      throw new BadRequestException(
+        `Taxonomy target "${target.id}" is not a ${target.type}`,
+      );
+    }
+  }
+
+  private async resolveBannerTargets(
+    banners: CmsBanner[],
+  ): Promise<CmsBannerView[]> {
+    const categoryIds = this.targetIdsFor(
+      banners,
+      CmsBannerTargetType.CATEGORY,
+    );
+    const departmentIds = this.targetIdsFor(
+      banners,
+      CmsBannerTargetType.DEPARTMENT,
+    );
+    const taxonomyIds = [...new Set([...categoryIds, ...departmentIds])];
+    const productIds = this.targetIdsFor(banners, CmsBannerTargetType.PRODUCT);
+
+    const [
+      taxonomy,
+      products,
+      availableProductStock,
+      availableCategories,
+      availableDepartments,
+    ] = await Promise.all([
+      taxonomyIds.length
+        ? this.categoryRepository.find({
+            where: { id: In(taxonomyIds) },
+            withDeleted: true,
+          })
+        : Promise.resolve([]),
+      productIds.length
+        ? this.productRepository.find({
+            where: { id: In(productIds) },
+            withDeleted: true,
+          })
+        : Promise.resolve([]),
+      productIds.length
+        ? this.productsService.availableFor(productIds)
+        : Promise.resolve(new Map<string, number>()),
+      categoryIds.length
+        ? this.categoriesService.listPublicCategories({})
+        : Promise.resolve([]),
+      departmentIds.length
+        ? this.categoriesService.listPublicDepartments({})
+        : Promise.resolve([]),
+    ]);
+    const taxonomyById = new Map(taxonomy.map((item) => [item.id, item]));
+    const productsById = new Map(products.map((item) => [item.id, item]));
+    const availableCategoryIds = new Set(
+      availableCategories.map((item) => item.id),
+    );
+    const availableDepartmentIds = new Set(
+      availableDepartments.map((item) => item.id),
+    );
+
+    return banners.map((banner) => ({
+      banner,
+      target: this.resolveBannerTarget(
+        banner,
+        taxonomyById,
+        productsById,
+        availableProductStock,
+        availableCategoryIds,
+        availableDepartmentIds,
+      ),
+    }));
+  }
+
+  private targetIdsFor(
+    banners: CmsBanner[],
+    targetType: CmsBannerTargetType,
+  ): string[] {
+    return [
+      ...new Set(
+        banners
+          .filter(
+            (banner) => banner.targetId && banner.targetType === targetType,
+          )
+          .map((banner) => banner.targetId as string),
+      ),
+    ];
+  }
+
+  private resolveBannerTarget(
+    banner: CmsBanner,
+    taxonomyById: Map<string, Category>,
+    productsById: Map<string, Product>,
+    availableProductStock: Map<string, number>,
+    availableCategoryIds: Set<string>,
+    availableDepartmentIds: Set<string>,
+  ): CmsBannerResolvedTarget | null {
+    if (!banner.targetType || !banner.targetId) return null;
+
+    if (banner.targetType === CmsBannerTargetType.PRODUCT) {
+      const product = productsById.get(banner.targetId);
+      return {
+        type: banner.targetType,
+        id: banner.targetId,
+        name: product?.name ?? null,
+        slug: product?.slug ?? null,
+        isAvailable: Boolean(
+          product &&
+          product.isActive &&
+          product.deletedAt === null &&
+          (availableProductStock.get(banner.targetId) ?? 0) > 0,
+        ),
+      };
+    }
+
+    const category = taxonomyById.get(banner.targetId);
+    const matchesType =
+      banner.targetType === CmsBannerTargetType.DEPARTMENT
+        ? category?.parentId === null
+        : category?.parentId != null;
+    const isInPublicCatalog =
+      banner.targetType === CmsBannerTargetType.DEPARTMENT
+        ? availableDepartmentIds.has(banner.targetId)
+        : availableCategoryIds.has(banner.targetId);
+    return {
+      type: banner.targetType,
+      id: banner.targetId,
+      name: category?.name ?? null,
+      slug: category?.slug ?? null,
+      isAvailable: Boolean(
+        category &&
+        matchesType &&
+        category.isActive &&
+        category.deletedAt === null &&
+        isInPublicCatalog,
+      ),
+    };
   }
 
   // ---------------- Services ----------------

@@ -1,6 +1,10 @@
 import { Module, forwardRef } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { AuthModule } from '../auth/auth.module';
+import { CategoriesModule } from '../categories/categories.module';
+import { Category } from '../categories/entities/category.entity';
+import { ProductsModule } from '../products/products.module';
+import { Product } from '../products/entities/product.entity';
 import { CmsBannersController } from './cms-banners.controller';
 import { CmsPagesController } from './cms-pages.controller';
 import { CmsService } from './cms.service';
@@ -28,7 +32,11 @@ import { CmsFaqService } from './cms-faq.service';
       CmsSiteSettings,
       CmsFaqCategory,
       CmsFaqQuestion,
+      Category,
+      Product,
     ]),
+    CategoriesModule,
+    ProductsModule,
     forwardRef(() => AuthModule),
   ],
   controllers: [

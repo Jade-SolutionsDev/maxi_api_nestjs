@@ -29,19 +29,19 @@ export class CmsBannersController {
   @Get()
   async findAll(): Promise<CmsBannerResponseDto[]> {
     const banners = await this.cmsService.listBannersAdmin();
-    return banners.map(CmsBannerResponseDto.fromEntity);
+    return banners.map(CmsBannerResponseDto.fromView);
   }
 
   @Get(':id')
   async findOne(
     @Param('id', ParseUUIDPipe) id: string,
   ): Promise<CmsBannerResponseDto> {
-    return CmsBannerResponseDto.fromEntity(await this.cmsService.getBanner(id));
+    return CmsBannerResponseDto.fromView(await this.cmsService.getBanner(id));
   }
 
   @Post()
   async create(@Body() dto: CreateCmsBannerDto): Promise<CmsBannerResponseDto> {
-    return CmsBannerResponseDto.fromEntity(
+    return CmsBannerResponseDto.fromView(
       await this.cmsService.createBanner(dto),
     );
   }
@@ -51,7 +51,7 @@ export class CmsBannersController {
     @Param('id', ParseUUIDPipe) id: string,
     @Body() dto: UpdateCmsBannerDto,
   ): Promise<CmsBannerResponseDto> {
-    return CmsBannerResponseDto.fromEntity(
+    return CmsBannerResponseDto.fromView(
       await this.cmsService.updateBanner(id, dto),
     );
   }
