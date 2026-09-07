@@ -110,10 +110,11 @@ describe('Inventory and storages (e2e)', () => {
       .get(`/api/inventory?locationId=${locationId}`)
       .set(adminAuth)
       .expect(200);
-    const filas = res.body.data.items ?? res.body.data;
-    const fila = filas.find(
-      (r: { productId: string }) => r.productId === productId,
-    );
+    const filas = (res.body.data.items ?? res.body.data) as Array<{
+      productId: string;
+      quantity: number;
+    }>;
+    const fila = filas.find((r) => r.productId === productId);
     return fila?.quantity ?? 0;
   };
 

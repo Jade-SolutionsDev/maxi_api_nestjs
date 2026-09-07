@@ -38,7 +38,7 @@ describe('selección del proveedor de autenticación', () => {
       ],
     }).compile();
 
-    return moduleRef.get(AUTH_PROVIDER);
+    return moduleRef.get<{ nombre: string }>(AUTH_PROVIDER);
   };
 
   it('monta el proveedor real cuando la simulación está apagada', async () => {
