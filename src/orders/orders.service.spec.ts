@@ -646,6 +646,117 @@ describe('OrdersService', () => {
     });
   });
 
+  describe('updateStatus (direct jump)', () => {
+    beforeEach(() => {
+      orderRepo.findOne
+        .mockResolvedValueOnce(makeOrder()) // pending
+        .mockResolvedValue(makeOrder({ items: [] }));
+    });
+
+    it('pending -> delivered commits the reservations exactly once', async () => {
+      await service.updateStatus(
+        makeUser(Role.ADMIN),
+        'order-1',
+        OrderStatus.DELIVERED,
+        true,
+      );
+
+      expect(inventoryService.confirmReservations).toHaveBeenCalledTimes(1);
+      expect(orderRepo.save).toHaveBeenCalledWith(
+        expect.objectContaining({ status: OrderStatus.DELIVERED }),
+      );
+    });
+
+    it('confirmed -> delivered does not re-commit stock', async () => {
+      orderRepo.findOne.mockReset();
+      orderRepo.findOne
+        .mockResolvedValueOnce(makeOrder({ status: OrderStatus.CONFIRMED }))
+        .mockResolvedValue(makeOrder({ items: [] }));
+
+      await service.updateStatus(
+        makeUser(Role.GROCER),
+        'order-1',
+        OrderStatus.DELIVERED,
+        true,
+      );
+
+      expect(inventoryService.confirmReservations).not.toHaveBeenCalled();
+      expect(orderRepo.save).toHaveBeenCalledWith(
+        expect.objectContaining({ status: OrderStatus.DELIVERED }),
+      );
+    });
+
+    it('jumping to cancelled releases the reservations', async () => {
+      orderRepo.findOne.mockReset();
+      orderRepo.findOne
+        .mockResolvedValueOnce(makeOrder({ status: OrderStatus.SHIPPED }))
+        .mockResolvedValue(makeOrder({ items: [] }));
+
+      await service.updateStatus(
+        makeUser(Role.ADMIN),
+        'order-1',
+        OrderStatus.CANCELLED,
+        true,
+      );
+
+      expect(inventoryService.releaseReservations).toHaveBeenCalledTimes(1);
+    });
+
+    it('lets GROCER jump past confirm (manual in-store sale)', async () => {
+      await service.updateStatus(
+        makeUser(Role.GROCER),
+        'order-1',
+        OrderStatus.DELIVERED,
+        true,
+      );
+
+      expect(inventoryService.confirmReservations).toHaveBeenCalledTimes(1);
+    });
+
+    it('rejects roles outside admin/grocer', async () => {
+      await expect(
+        service.updateStatus(
+          makeUser(Role.KARDIST),
+          'order-1',
+          OrderStatus.DELIVERED,
+          true,
+        ),
+      ).rejects.toBeInstanceOf(ForbiddenException);
+    });
+
+    it('never moves backwards', async () => {
+      orderRepo.findOne.mockReset();
+      orderRepo.findOne.mockResolvedValue(
+        makeOrder({ status: OrderStatus.SHIPPED }),
+      );
+
+      await expect(
+        service.updateStatus(
+          makeUser(Role.ADMIN),
+          'order-1',
+          OrderStatus.CONFIRMED,
+          true,
+        ),
+      ).rejects.toBeInstanceOf(ConflictException);
+    });
+
+    it('never leaves a terminal state', async () => {
+      orderRepo.findOne.mockReset();
+      orderRepo.findOne.mockResolvedValue(
+        makeOrder({ status: OrderStatus.CANCELLED }),
+      );
+
+      await expect(
+        service.updateStatus(
+          makeUser(Role.ADMIN),
+          'order-1',
+          OrderStatus.DELIVERED,
+          true,
+        ),
+      ).rejects.toBeInstanceOf(ConflictException);
+    });
+  });
+
   describe('updatePaymentStatus', () => {
     it('settles a pending payment', async () => {
       orderRepo.findOne

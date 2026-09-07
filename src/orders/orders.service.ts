@@ -67,6 +67,18 @@ const GROCER_TARGETS = [
   OrderStatus.DELIVERED,
 ];
 
+// The fulfillment chain in order, for direct jumps (cancelled sits outside).
+const FORWARD_CHAIN = [
+  OrderStatus.PENDING,
+  OrderStatus.CONFIRMED,
+  OrderStatus.PROCESSING,
+  OrderStatus.SHIPPED,
+  OrderStatus.DELIVERED,
+];
+
+// Roles trusted to skip the step-by-step path (manual in-store sales, pickups).
+const DIRECT_JUMP_ROLES = [Role.SUPER_ADMIN, Role.ADMIN, Role.GROCER];
+
 /** What the order keeps of an address, independent of the address book. */
 const snapshotAddress = (
   address: ClientAddress,
@@ -593,24 +605,38 @@ export class OrdersService {
     user: User,
     id: string,
     status: OrderStatus,
+    direct = false,
   ): Promise<OrderResponseDto> {
     const order = await this.orderRepository.findOne({ where: { id } });
     if (!order) {
       throw new NotFoundException(`Order with id "${id}" not found`);
     }
-    if (!TRANSITIONS[order.status].includes(status)) {
-      throw new ConflictException(
-        `Cannot move order from "${order.status}" to "${status}"`,
-      );
-    }
-    if (user.role === Role.GROCER && !GROCER_TARGETS.includes(status)) {
-      throw new ForbiddenException(
-        'Grocers can only advance fulfillment (processing, shipped, delivered)',
-      );
+
+    if (direct) {
+      this.assertDirectJump(user, order, status);
+    } else {
+      if (!TRANSITIONS[order.status].includes(status)) {
+        throw new ConflictException(
+          `Cannot move order from "${order.status}" to "${status}"`,
+        );
+      }
+      if (user.role === Role.GROCER && !GROCER_TARGETS.includes(status)) {
+        throw new ForbiddenException(
+          'Grocers can only advance fulfillment (processing, shipped, delivered)',
+        );
+      }
     }
 
+    // A jump still owes the side effects of the steps it skips: stock is
+    // committed exactly once when the order passes (or lands on) confirmed,
+    // and released when it lands on cancelled.
+    const crossesConfirmed =
+      order.status === OrderStatus.PENDING &&
+      status !== OrderStatus.CANCELLED &&
+      FORWARD_CHAIN.indexOf(status) >= FORWARD_CHAIN.indexOf(OrderStatus.CONFIRMED);
+
     await this.dataSource.transaction(async (manager) => {
-      if (status === OrderStatus.CONFIRMED) {
+      if (crossesConfirmed) {
         // The hold becomes a physical stock decrement, logged as an OUT sale.
         await this.inventoryService.confirmReservations(
           manager,
@@ -629,6 +655,38 @@ export class OrdersService {
       await manager.getRepository(Order).save(order);
     });
     return this.findOneAdmin(id);
+  }
+
+  // Direct jumps skip the step chain but never its rules of physics: forward
+  // only (or to cancelled), never out of a terminal state, and reserved for
+  // the roles that run manual in-store sales. The step-by-step path stays the
+  // safe default for future lower-privilege roles.
+  private assertDirectJump(
+    user: User,
+    order: Order,
+    status: OrderStatus,
+  ): void {
+    if (!DIRECT_JUMP_ROLES.includes(user.role)) {
+      throw new ForbiddenException(
+        'Only admins and grocers can change the status directly',
+      );
+    }
+    if (TRANSITIONS[order.status].length === 0) {
+      throw new ConflictException(
+        `Order is already ${order.status}; nothing to change`,
+      );
+    }
+    if (status === order.status) {
+      throw new ConflictException(`Order is already ${status}`);
+    }
+    if (
+      status !== OrderStatus.CANCELLED &&
+      FORWARD_CHAIN.indexOf(status) <= FORWARD_CHAIN.indexOf(order.status)
+    ) {
+      throw new ConflictException(
+        `Cannot move order backwards from "${order.status}" to "${status}"`,
+      );
+    }
   }
 
   // Manual override (refunds, gateway-outage corrections). Guarded so an

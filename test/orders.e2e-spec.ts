@@ -198,6 +198,29 @@ describe('Orders (e2e)', () => {
     expect(await publicAvailability()).toBe(2);
   });
 
+  it('direct jump pending -> delivered commits the stock exactly once', async () => {
+    const order = await addToCartAndCheckout(3);
+
+    const res = await request(app.getHttpServer())
+      .patch(`/api/orders/${order.id}/status`)
+      .set(adminAuth)
+      .send({ status: 'delivered', direct: true })
+      .expect(200);
+    expect(res.body.data.status).toBe('delivered');
+
+    const row = await physicalRow();
+    expect(row.quantity).toBe(2);
+    expect(row.reservedQuantity).toBe(0);
+
+    // Skipping steps without the flag stays forbidden.
+    const other = await addToCartAndCheckout(1);
+    await request(app.getHttpServer())
+      .patch(`/api/orders/${other.id}/status`)
+      .set(adminAuth)
+      .send({ status: 'delivered' })
+      .expect(409);
+  });
+
   it('client cancel while pending releases the hold', async () => {
     const order = await addToCartAndCheckout(3);
     expect(await publicAvailability()).toBe(2);

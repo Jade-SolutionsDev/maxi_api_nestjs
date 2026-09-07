@@ -64,7 +64,11 @@ export class OrdersController {
       'confirmed→processing|cancelled, processing→shipped|cancelled, ' +
       'shipped→delivered|cancelled. Confirming physically decrements the ' +
       'reserved stock; cancelling releases (or restocks) it. GROCER may only ' +
-      'target processing/shipped/delivered.',
+      'target processing/shipped/delivered. With `direct: true` ' +
+      '(SUPER_ADMIN/ADMIN/GROCER) the order jumps straight to any later ' +
+      'status or to cancelled — for manual in-store sales and pickups — and ' +
+      'the skipped side effects still apply (stock commits once when passing ' +
+      'confirmed).',
   })
   @ApiOkResponse({ type: OrderResponseDto })
   @ApiConflictResponse({ description: 'Illegal status transition.' })
@@ -73,7 +77,12 @@ export class OrdersController {
     @Param('id', ParseUUIDPipe) id: string,
     @Body() dto: UpdateOrderStatusDto,
   ): Promise<OrderResponseDto> {
-    return this.ordersService.updateStatus(req.user, id, dto.status);
+    return this.ordersService.updateStatus(
+      req.user,
+      id,
+      dto.status,
+      dto.direct ?? false,
+    );
   }
 
   @Patch(':id/payment-status')
