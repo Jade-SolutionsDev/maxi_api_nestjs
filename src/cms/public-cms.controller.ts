@@ -3,7 +3,7 @@ import { ApiOperation, ApiTags } from '@nestjs/swagger';
 import { TAXONOMY_CACHE } from '../common/constants/cache-control';
 import { Public } from '../common/decorators/public.decorator';
 import { CmsService } from './cms.service';
-import { CmsBannerResponseDto } from './dto/cms-banner.dto';
+import { PublicCmsBannerResponseDto } from './dto/cms-banner.dto';
 import { CmsPageResponseDto } from './dto/cms-page.dto';
 import { CmsServiceResponseDto } from './dto/cms-service.dto';
 import { SiteSettingsData } from './entities/cms-site-settings.entity';
@@ -29,9 +29,9 @@ export class PublicCmsController {
   @Get('banners')
   @Header('Cache-Control', TAXONOMY_CACHE)
   @ApiOperation({ summary: 'Active hero banners, in display order' })
-  async banners(): Promise<CmsBannerResponseDto[]> {
+  async banners(): Promise<PublicCmsBannerResponseDto[]> {
     const banners = await this.cmsService.listBannersPublic();
-    return banners.map(CmsBannerResponseDto.fromEntity);
+    return banners.map(PublicCmsBannerResponseDto.fromView);
   }
 
   @Get('services')
