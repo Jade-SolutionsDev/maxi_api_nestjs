@@ -1,4 +1,5 @@
 import { Controller, Get } from '@nestjs/common';
+import { AnyAuthenticated } from '../common/decorators/any-authenticated.decorator';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { UserResponseDto } from '../users/dto/user-response.dto';
 import { User } from '../users/entities/user.entity';
@@ -18,7 +19,10 @@ export class AuthController {
   constructor(private readonly permissionsService: PermissionsService) {}
 
   // Authentication is enforced by the global AuthGuard; no @Public() here.
+  // @AnyAuthenticated: the session bootstrap must work for EVERY authenticated
+  // user (even one with zero grants), or nobody could load the app shell.
   @Get('me')
+  @AnyAuthenticated()
   async me(@CurrentUser() user: User): Promise<MeResponse> {
     const { permissions } = await this.permissionsService.getUserPermissions(
       user.id,

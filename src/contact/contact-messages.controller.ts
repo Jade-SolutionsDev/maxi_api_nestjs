@@ -64,7 +64,9 @@ export class ContactMessagesController {
   }
 
   @Post(':id/replies')
-  @RequirePermission({ module: 'contact', action: 'update' })
+  // `reply` is split from `update` so triage (status changes) and
+  // customer-facing replies are separately grantable.
+  @RequirePermission({ module: 'contact', action: 'reply' })
   @ApiOperation({
     summary: 'Record a reply action (email/whatsapp/telefono/nota/plataforma)',
     description:

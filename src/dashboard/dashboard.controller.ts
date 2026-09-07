@@ -5,8 +5,7 @@ import {
   ApiOperation,
   ApiTags,
 } from '@nestjs/swagger';
-import { Roles } from '../common/decorators/roles.decorator';
-import { Role } from '../users/entities/user.entity';
+import { RequirePermission } from '../permissions/decorators/require-permission.decorator';
 import { DashboardService } from './dashboard.service';
 import { DashboardStatsQueryDto } from './dto/dashboard-stats-query.dto';
 import { DashboardStatsResponseDto } from './dto/dashboard-stats-response.dto';
@@ -14,20 +13,20 @@ import { DashboardTopProductsQueryDto } from './dto/dashboard-top-products-query
 import { DashboardTopProductsResponseDto } from './dto/dashboard-top-products-response.dto';
 
 /**
- * Business figures for the backoffice landing page. ADMIN and up only: three of
- * the four are commercial performance (revenue, orders, customers) and a GROCER
- * cannot read /clients at all, so admitting that role here would mean
- * conditional fields inside a single payload. A grocer's dashboard shows the
- * recent-orders table instead, which they can already read via GET /orders.
+ * Business figures for the backoffice landing page, behind `dashboard:view`
+ * (admins bypass; no base role is granted it). The payload mixes commercial
+ * performance (revenue, orders, customers), so grant the permission only to
+ * roles that may read those figures — an ungranted user's dashboard shows the
+ * recent-orders table instead, gated by its own `orders:list`.
  */
 @ApiTags('dashboard')
 @ApiBearerAuth()
 @Controller('dashboard')
-@Roles(Role.SUPER_ADMIN, Role.ADMIN)
 export class DashboardController {
   constructor(private readonly dashboardService: DashboardService) {}
 
   @Get('stats')
+  @RequirePermission({ module: 'dashboard', action: 'view' })
   @ApiOperation({
     summary: 'KPI figures for the admin dashboard',
     description:
@@ -45,6 +44,7 @@ export class DashboardController {
   }
 
   @Get('top-products')
+  @RequirePermission({ module: 'dashboard', action: 'view' })
   @ApiOperation({
     summary: 'Best-selling products for the admin dashboard',
     description:

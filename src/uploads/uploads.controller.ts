@@ -7,8 +7,7 @@ import {
   UseInterceptors,
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
-import { Roles } from '../common/decorators/roles.decorator';
-import { Role } from '../users/entities/user.entity';
+import { RequirePermission } from '../permissions/decorators/require-permission.decorator';
 import {
   ALLOWED_IMAGE_MIME_TYPES,
   MAX_IMAGE_SIZE_BYTES,
@@ -20,11 +19,11 @@ import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 @ApiTags('uploads')
 @ApiBearerAuth()
 @Controller('uploads')
-@Roles(Role.SUPER_ADMIN, Role.ADMIN, Role.KARDIST)
 export class UploadsController {
   constructor(private readonly storageService: StorageService) {}
 
   @Post('image')
+  @RequirePermission({ module: 'uploads', action: 'create' })
   @UseInterceptors(
     // No `storage` option → multer keeps the file in memory (file.buffer).
     FileInterceptor('file', {

@@ -620,9 +620,14 @@ export class OrdersService {
           `Cannot move order from "${order.status}" to "${status}"`,
         );
       }
-      if (user.role === Role.GROCER && !GROCER_TARGETS.includes(status)) {
+      // Confirm/cancel commit or release stock — admin-level decisions. Any
+      // non-admin granted `orders:update-status` (grocer or custom role) is
+      // limited to advancing fulfillment.
+      const isAdmin =
+        user.role === Role.SUPER_ADMIN || user.role === Role.ADMIN;
+      if (!isAdmin && !GROCER_TARGETS.includes(status)) {
         throw new ForbiddenException(
-          'Grocers can only advance fulfillment (processing, shipped, delivered)',
+          'Non-admin staff can only advance fulfillment (processing, shipped, delivered)',
         );
       }
     }
@@ -633,7 +638,8 @@ export class OrdersService {
     const crossesConfirmed =
       order.status === OrderStatus.PENDING &&
       status !== OrderStatus.CANCELLED &&
-      FORWARD_CHAIN.indexOf(status) >= FORWARD_CHAIN.indexOf(OrderStatus.CONFIRMED);
+      FORWARD_CHAIN.indexOf(status) >=
+        FORWARD_CHAIN.indexOf(OrderStatus.CONFIRMED);
 
     await this.dataSource.transaction(async (manager) => {
       if (crossesConfirmed) {

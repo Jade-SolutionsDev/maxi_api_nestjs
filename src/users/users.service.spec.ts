@@ -14,6 +14,7 @@ jest.mock('@clerk/backend', () => ({
   createClerkClient: jest.fn(),
 }));
 import { CustomerProvisioningService } from '../clients/customer-provisioning.service';
+import { PermissionsService } from '../permissions/permissions.service';
 import { CreateUserDto } from './dto/create-user.dto';
 import { UpdateUserDto } from './dto/update-user.dto';
 import { Invitation } from './entities/invitation.entity';
@@ -26,6 +27,7 @@ describe('UsersService', () => {
   let invitationRepository: jest.Mocked<Repository<Invitation>>;
   let configService: jest.Mocked<ConfigService>;
   let customerProvisioning: jest.Mocked<CustomerProvisioningService>;
+  let permissionsService: jest.Mocked<PermissionsService>;
   let qb: {
     withDeleted: jest.Mock;
     andWhere: jest.Mock;
@@ -112,6 +114,10 @@ describe('UsersService', () => {
             provisionPending: jest.fn(),
           },
         },
+        {
+          provide: PermissionsService,
+          useValue: { assignBaseRoleForEnumRole: jest.fn() },
+        },
       ],
     }).compile();
 
@@ -120,6 +126,7 @@ describe('UsersService', () => {
     invitationRepository = module.get(getRepositoryToken(Invitation));
     configService = module.get(ConfigService);
     customerProvisioning = module.get(CustomerProvisioningService);
+    permissionsService = module.get(PermissionsService);
   });
 
   afterEach(() => {
@@ -270,6 +277,23 @@ describe('UsersService', () => {
           email: 'jane@example.com',
         }),
       );
+      // Every new user goes through the base-role hook (no-op for admins,
+      // decided inside PermissionsService).
+      expect(permissionsService.assignBaseRoleForEnumRole).toHaveBeenCalledWith(
+        user.id,
+        user.role,
+      );
+    });
+
+    it('should still create the user when the base-role hook fails', async () => {
+      repository.findOne.mockResolvedValue(null);
+      repository.create.mockReturnValue(user);
+      repository.save.mockResolvedValue(user);
+      permissionsService.assignBaseRoleForEnumRole.mockRejectedValue(
+        new Error('db down'),
+      );
+
+      await expect(service.create(createDto)).resolves.toEqual(user);
     });
 
     it('should throw ConflictException for duplicate email', async () => {
@@ -539,6 +563,10 @@ describe('UsersService', () => {
           isActive: false,
         }),
       );
+      expect(permissionsService.assignBaseRoleForEnumRole).toHaveBeenCalledWith(
+        user.id,
+        user.role,
+      );
     });
 
     it('should update an existing user without changing activation', async () => {
@@ -553,6 +581,10 @@ describe('UsersService', () => {
       expect(result.email).toBe('updated@example.com');
       // Profile updates must not re-enable a disabled account.
       expect(result.isActive).toBe(false);
+      // …and must not re-run the base-role hook.
+      expect(
+        permissionsService.assignBaseRoleForEnumRole,
+      ).not.toHaveBeenCalled();
     });
   });
 

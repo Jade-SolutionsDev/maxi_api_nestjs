@@ -10,8 +10,7 @@ import {
   Post,
 } from '@nestjs/common';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
-import { Roles } from '../common/decorators/roles.decorator';
-import { Role } from '../users/entities/user.entity';
+import { RequirePermission } from '../permissions/decorators/require-permission.decorator';
 import { CmsService } from './cms.service';
 import {
   CmsPageResponseDto,
@@ -24,17 +23,18 @@ import {
 @ApiTags('cms')
 @ApiBearerAuth()
 @Controller('cms/pages')
-@Roles(Role.SUPER_ADMIN, Role.ADMIN)
 export class CmsPagesController {
   constructor(private readonly cmsService: CmsService) {}
 
   @Get()
+  @RequirePermission({ module: 'cms-pages', action: 'list' })
   async findAll(): Promise<CmsPageResponseDto[]> {
     const pages = await this.cmsService.listPagesAdmin();
     return pages.map(CmsPageResponseDto.fromEntity);
   }
 
   @Get(':id')
+  @RequirePermission({ module: 'cms-pages', action: 'read' })
   async findOne(
     @Param('id', ParseUUIDPipe) id: string,
   ): Promise<CmsPageResponseDto> {
@@ -42,11 +42,13 @@ export class CmsPagesController {
   }
 
   @Post()
+  @RequirePermission({ module: 'cms-pages', action: 'create' })
   async create(@Body() dto: CreateCmsPageDto): Promise<CmsPageResponseDto> {
     return CmsPageResponseDto.fromEntity(await this.cmsService.createPage(dto));
   }
 
   @Patch(':id')
+  @RequirePermission({ module: 'cms-pages', action: 'update' })
   async update(
     @Param('id', ParseUUIDPipe) id: string,
     @Body() dto: UpdateCmsPageDto,
@@ -57,6 +59,7 @@ export class CmsPagesController {
   }
 
   @Delete(':id')
+  @RequirePermission({ module: 'cms-pages', action: 'delete' })
   @HttpCode(204)
   async remove(@Param('id', ParseUUIDPipe) id: string): Promise<void> {
     await this.cmsService.removePage(id);

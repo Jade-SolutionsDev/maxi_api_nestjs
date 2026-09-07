@@ -12,6 +12,7 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { createClerkClient } from '@clerk/backend';
 import { IsNull, Repository } from 'typeorm';
 import { CustomerProvisioningService } from '../clients/customer-provisioning.service';
+import { PermissionsService } from '../permissions/permissions.service';
 import {
   buildPaginatedResponse,
   getPaginationParams,
@@ -43,9 +44,11 @@ export class UsersService {
     private readonly invitationRepository: Repository<Invitation>,
     private readonly configService: ConfigService,
     private readonly customerProvisioning: CustomerProvisioningService,
+    private readonly permissionsService: PermissionsService,
   ) {}
 
-  /** Run a storefront-mirror side effect without ever failing the admin action. */
+  /** Run a side effect (storefront mirror, base-role assignment) without ever
+   *  failing the admin action it rides on. */
   private async safeMirror(
     fn: () => Promise<void>,
     context: string,
@@ -53,7 +56,7 @@ export class UsersService {
     try {
       await fn();
     } catch (err) {
-      this.logger.warn(`Storefront mirror (${context}) failed: ${String(err)}`);
+      this.logger.warn(`Side effect (${context}) failed: ${String(err)}`);
     }
   }
 
@@ -202,7 +205,15 @@ export class UsersService {
       email: createUserDto.email?.toLowerCase() ?? null,
     });
 
-    return this.usersRepository.save(user);
+    const saved = await this.usersRepository.save(user);
+    // Non-admins start with the editable base role of their system role (if the
+    // admins haven't deleted it) — without it they'd have zero permissions.
+    await this.safeMirror(
+      () =>
+        this.permissionsService.assignBaseRoleForEnumRole(saved.id, saved.role),
+      `assign base role ${saved.role}`,
+    );
+    return saved;
   }
 
   async update(
@@ -386,6 +397,7 @@ export class UsersService {
       where: { clerkId },
       withDeleted: true,
     });
+    const isNew = !user;
 
     if (!user) {
       if (data.email) {
@@ -418,7 +430,18 @@ export class UsersService {
       // explicit admin action, and a disabled account stays disabled.
     }
 
-    return this.usersRepository.save(user);
+    const saved = await this.usersRepository.save(user);
+    if (isNew) {
+      await this.safeMirror(
+        () =>
+          this.permissionsService.assignBaseRoleForEnumRole(
+            saved.id,
+            saved.role,
+          ),
+        `assign base role ${saved.role}`,
+      );
+    }
+    return saved;
   }
 
   async deactivateByClerkId(clerkId: string): Promise<void> {

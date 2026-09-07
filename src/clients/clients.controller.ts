@@ -8,8 +8,7 @@ import {
   Post,
   Query,
 } from '@nestjs/common';
-import { Roles } from '../common/decorators/roles.decorator';
-import { Role } from '../users/entities/user.entity';
+import { RequirePermission } from '../permissions/decorators/require-permission.decorator';
 import { ClientsService } from './clients.service';
 import { CreateClientDto } from './dto/create-client.dto';
 import { UpdateClientDto } from './dto/update-client.dto';
@@ -21,11 +20,11 @@ import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 @ApiTags('clients')
 @ApiBearerAuth()
 @Controller('clients')
-@Roles(Role.SUPER_ADMIN, Role.ADMIN)
 export class ClientsController {
   constructor(private readonly clientsService: ClientsService) {}
 
   @Get()
+  @RequirePermission({ module: 'clients', action: 'list' })
   async findAll(
     @Query() query: ListClientsQueryDto,
   ): Promise<PaginatedResponse<ClientResponseDto>> {
@@ -50,6 +49,7 @@ export class ClientsController {
   }
 
   @Get('lookup')
+  @RequirePermission({ module: 'clients', action: 'list' })
   async findByClerkId(
     @Query('clerkId') clerkId: string,
   ): Promise<ClientResponseDto | null> {
@@ -58,11 +58,13 @@ export class ClientsController {
   }
 
   @Get(':id')
+  @RequirePermission({ module: 'clients', action: 'read' })
   async findOne(@Param('id') id: string): Promise<ClientResponseDto> {
     return ClientResponseDto.fromEntity(await this.clientsService.findOne(id));
   }
 
   @Post()
+  @RequirePermission({ module: 'clients', action: 'create' })
   async create(
     @Body() createClientDto: CreateClientDto,
   ): Promise<ClientResponseDto> {
@@ -72,6 +74,7 @@ export class ClientsController {
   }
 
   @Patch(':id')
+  @RequirePermission({ module: 'clients', action: 'update' })
   async update(
     @Param('id') id: string,
     @Body() updateClientDto: UpdateClientDto,
@@ -82,6 +85,7 @@ export class ClientsController {
   }
 
   @Delete(':id')
+  @RequirePermission({ module: 'clients', action: 'delete' })
   async remove(@Param('id') id: string): Promise<void> {
     await this.clientsService.remove(id);
   }

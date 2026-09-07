@@ -11,8 +11,7 @@ import {
   Query,
 } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
-import { Roles } from '../common/decorators/roles.decorator';
-import { Role } from '../users/entities/user.entity';
+import { RequirePermission } from '../permissions/decorators/require-permission.decorator';
 import {
   CreateNomenclatorDto,
   NomenclatorResponseDto,
@@ -26,11 +25,11 @@ import { NomenclatorsService } from './nomenclators.service';
 @ApiTags('nomenclators')
 @ApiBearerAuth()
 @Controller('nomenclators')
-@Roles(Role.SUPER_ADMIN, Role.ADMIN)
 export class NomenclatorsController {
   constructor(private readonly nomenclatorsService: NomenclatorsService) {}
 
   @Get()
+  @RequirePermission({ module: 'nomenclators', action: 'list' })
   @ApiOperation({ summary: 'List a category (inactive included)' })
   async findAll(
     @Query() query: NomenclatorsQueryDto,
@@ -40,6 +39,7 @@ export class NomenclatorsController {
   }
 
   @Get(':id')
+  @RequirePermission({ module: 'nomenclators', action: 'read' })
   async findOne(
     @Param('id', ParseUUIDPipe) id: string,
   ): Promise<NomenclatorResponseDto> {
@@ -49,6 +49,7 @@ export class NomenclatorsController {
   }
 
   @Post()
+  @RequirePermission({ module: 'nomenclators', action: 'create' })
   async create(
     @Body() dto: CreateNomenclatorDto,
   ): Promise<NomenclatorResponseDto> {
@@ -58,6 +59,7 @@ export class NomenclatorsController {
   }
 
   @Patch(':id')
+  @RequirePermission({ module: 'nomenclators', action: 'update' })
   async update(
     @Param('id', ParseUUIDPipe) id: string,
     @Body() dto: UpdateNomenclatorDto,
@@ -68,6 +70,7 @@ export class NomenclatorsController {
   }
 
   @Delete(':id')
+  @RequirePermission({ module: 'nomenclators', action: 'delete' })
   @HttpCode(204)
   async remove(@Param('id', ParseUUIDPipe) id: string): Promise<void> {
     await this.nomenclatorsService.remove(id);

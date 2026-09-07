@@ -12,8 +12,7 @@ import {
   ApiOperation,
   ApiTags,
 } from '@nestjs/swagger';
-import { Roles } from '../common/decorators/roles.decorator';
-import { Role } from '../users/entities/user.entity';
+import { RequirePermission } from '../permissions/decorators/require-permission.decorator';
 import { PaymentMethodResponseDto } from './dto/payment-method-response.dto';
 import { UpdatePaymentMethodDto } from './dto/update-payment-method.dto';
 import { PaymentMethodsService } from './payment-methods.service';
@@ -23,11 +22,11 @@ import { PaymentMethodsService } from './payment-methods.service';
 @ApiTags('payment-methods')
 @ApiBearerAuth()
 @Controller('payment-methods')
-@Roles(Role.SUPER_ADMIN, Role.ADMIN)
 export class PaymentMethodsController {
   constructor(private readonly methodsService: PaymentMethodsService) {}
 
   @Get()
+  @RequirePermission({ module: 'payment-methods', action: 'list' })
   @ApiOperation({
     summary: 'Payment method catalog',
     description:
@@ -40,6 +39,7 @@ export class PaymentMethodsController {
   }
 
   @Patch(':id')
+  @RequirePermission({ module: 'payment-methods', action: 'update' })
   @ApiOperation({
     summary: 'Enable/disable a method or edit how it is presented',
   })

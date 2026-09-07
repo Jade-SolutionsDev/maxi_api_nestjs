@@ -1,6 +1,9 @@
-import { Column, Entity, PrimaryGeneratedColumn } from 'typeorm';
+import { Column, Entity, PrimaryGeneratedColumn, Unique } from 'typeorm';
 
+// The unique pair is enforced in the DB by the RbacManagedCatalog migration
+// (synchronize is off); declared here so the entity documents the invariant.
 @Entity('permissions')
+@Unique(['module', 'action'])
 export class Permission {
   @PrimaryGeneratedColumn('uuid')
   id: string;

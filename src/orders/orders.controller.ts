@@ -16,26 +16,27 @@ import {
   ApiTags,
 } from '@nestjs/swagger';
 import type { AuthenticatedUserRequest } from '../auth/types/authenticated-request';
-import { Roles } from '../common/decorators/roles.decorator';
 import { PaginatedResponse } from '../common/dto/pagination.dto';
-import { Role } from '../users/entities/user.entity';
+import { RequirePermission } from '../permissions/decorators/require-permission.decorator';
 import { AdminOrdersQueryDto } from './dto/admin-orders-query.dto';
 import { OrderResponseDto } from './dto/order-response.dto';
 import { UpdateOrderStatusDto } from './dto/update-order-status.dto';
 import { UpdatePaymentStatusDto } from './dto/update-payment-status.dto';
 import { OrdersService } from './orders.service';
 
-// Backoffice order management. GROCER reads and advances fulfillment
-// (processing/shipped/delivered — enforced in the service, since a decorator
-// can't see the target status); confirm/cancel and payment are ADMIN+.
+// Backoffice order management, gated per-action by managed permissions
+// (admins bypass). Non-admin staff granted `update-status` still only advance
+// fulfillment (processing/shipped/delivered — enforced in the service, since a
+// decorator can't see the target status); confirm/cancel and payment stay
+// admin-level.
 @ApiTags('orders')
 @ApiBearerAuth()
 @Controller('orders')
-@Roles(Role.SUPER_ADMIN, Role.ADMIN, Role.GROCER)
 export class OrdersController {
   constructor(private readonly ordersService: OrdersService) {}
 
   @Get()
+  @RequirePermission({ module: 'orders', action: 'list' })
   @ApiOperation({
     summary: 'List orders (server-paginated)',
     description:
@@ -50,6 +51,7 @@ export class OrdersController {
   }
 
   @Get(':id')
+  @RequirePermission({ module: 'orders', action: 'read' })
   @ApiOperation({ summary: 'Get an order with its lines' })
   @ApiOkResponse({ type: OrderResponseDto })
   findOne(@Param('id', ParseUUIDPipe) id: string): Promise<OrderResponseDto> {
@@ -57,6 +59,7 @@ export class OrdersController {
   }
 
   @Patch(':id/status')
+  @RequirePermission({ module: 'orders', action: 'update-status' })
   @ApiOperation({
     summary: 'Advance or cancel an order',
     description:
@@ -86,7 +89,7 @@ export class OrdersController {
   }
 
   @Patch(':id/payment-status')
-  @Roles(Role.SUPER_ADMIN, Role.ADMIN)
+  @RequirePermission({ module: 'orders', action: 'update-payment-status' })
   @ApiOperation({
     summary: 'Set the payment status (manual payments)',
     description:
