@@ -44,7 +44,9 @@ export const MODULE_ACTIONS: Record<string, readonly string[]> = {
   products: CRUD,
   categories: CRUD,
   departments: CRUD,
-  'stock-locations': CRUD,
+  // `view-all` lifts the assignment scoping: see every storage (and its
+  // inventory) without being assigned to it. Writes still require assignment.
+  'stock-locations': [...CRUD, 'view-all'],
   nomenclators: CRUD,
   'delivery-options': CRUD,
   clients: CRUD,
@@ -271,6 +273,34 @@ export class PermissionsService implements OnModuleInit {
     });
     // A soft-deleted role loads as a NULL relation — filter it, don't crash.
     return userRoles.filter((ur) => ur.role?.isActive).map((ur) => ur.roleId);
+  }
+
+  /**
+   * Distinct ids of users whose assigned ACTIVE roles grant any active
+   * permission of the module — "who can work with this module". Used to decide
+   * who is assignable to a stock location. Admins are not included (they
+   * bypass permissions and are never assignment-scoped).
+   */
+  async getUserIdsWithModuleGrant(module: string): Promise<string[]> {
+    const perms = await this.permissionRepository.find({
+      where: { module, isActive: true },
+    });
+    if (perms.length === 0) return [];
+
+    const grants = await this.rolePermissionRepository.find({
+      where: { permissionId: In(perms.map((p) => p.id)) },
+    });
+    if (grants.length === 0) return [];
+
+    const assignments = await this.userRoleRepository.find({
+      where: { roleId: In([...new Set(grants.map((g) => g.roleId))]) },
+      relations: { role: true },
+    });
+    return [
+      ...new Set(
+        assignments.filter((a) => a.role?.isActive).map((a) => a.userId),
+      ),
+    ];
   }
 
   async getUserRoles(userId: string): Promise<ManagedRole[]> {

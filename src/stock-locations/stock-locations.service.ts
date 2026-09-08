@@ -15,6 +15,10 @@ import {
 } from 'typeorm';
 import { GeographyService } from '../geography/geography.service';
 import {
+  isSystemAdmin,
+  PermissionsService,
+} from '../permissions/permissions.service';
+import {
   LOCATION_REVALIDATE_TAGS,
   RevalidationService,
 } from '../revalidation/revalidation.service';
@@ -58,6 +62,7 @@ export class StockLocationsService {
     @InjectRepository(User)
     private readonly userRepository: Repository<User>,
     private readonly geographyService: GeographyService,
+    private readonly permissionsService: PermissionsService,
     private readonly dataSource: DataSource,
     private readonly revalidationService: RevalidationService,
   ) {}
@@ -73,7 +78,7 @@ export class StockLocationsService {
     if (filters.isActive != null) {
       where.isActive = filters.isActive;
     }
-    if (!this.isManager(user)) {
+    if (!this.isManager(user) && !(await this.canViewAll(user))) {
       const assignedIds = await this.assignedLocationIds(user.id);
       if (assignedIds.length === 0) return [];
       where.id = In(assignedIds);
@@ -104,10 +109,35 @@ export class StockLocationsService {
 
   async findOne(user: User, id: string): Promise<StockLocationResponseDto> {
     const location = await this.getLocationOrThrow(id);
-    if (!this.isManager(user)) {
-      await this.assertGrocerAssigned(user, id);
-    }
+    await this.assertCanView(user, id);
     return this.buildResponse(location);
+  }
+
+  /**
+   * Users that an admin may assign to a storage: active, non-admin, and
+   * granted (via their roles) at least one stock-locations permission.
+   */
+  async listAssignableUsers(): Promise<
+    Array<Pick<User, 'id' | 'firstName' | 'lastName' | 'email' | 'role'>>
+  > {
+    const ids =
+      await this.permissionsService.getUserIdsWithModuleGrant(
+        'stock-locations',
+      );
+    if (ids.length === 0) return [];
+    const users = await this.userRepository.find({
+      where: { id: In(ids), isActive: true },
+      order: { firstName: 'ASC', lastName: 'ASC' },
+    });
+    return users
+      .filter((u) => !isSystemAdmin(u.role))
+      .map(({ id, firstName, lastName, email, role }) => ({
+        id,
+        firstName,
+        lastName,
+        email,
+        role,
+      }));
   }
 
   async create(
@@ -198,8 +228,9 @@ export class StockLocationsService {
 
   // ---------------- Public helpers (used by the inventory module) ----------------
 
-  // Ensures the user may operate on this storage: managers always may; a grocer
-  // must be assigned to it. Returns the location entity.
+  // Ensures the user may WRITE on this storage (inventory operations, storage
+  // edits): managers always may; anyone else must be assigned to it.
+  // `view-all` deliberately does NOT satisfy this — it grants visibility only.
   async assertCanManage(
     user: User,
     locationId: string,
@@ -209,6 +240,15 @@ export class StockLocationsService {
       await this.assertGrocerAssigned(user, locationId);
     }
     return location;
+  }
+
+  // Ensures the user may SEE this storage: managers and holders of the global
+  // `stock-locations:view-all` permission see everything; anyone else must be
+  // assigned to it.
+  async assertCanView(user: User, locationId: string): Promise<void> {
+    if (this.isManager(user)) return;
+    if (await this.canViewAll(user)) return;
+    await this.assertGrocerAssigned(user, locationId);
   }
 
   // For transfer destinations: the location must exist and be active.
@@ -224,6 +264,15 @@ export class StockLocationsService {
 
   private isManager(user: User): boolean {
     return user.role === Role.SUPER_ADMIN || user.role === Role.ADMIN;
+  }
+
+  private canViewAll(user: User): Promise<boolean> {
+    return this.permissionsService.hasPermission(
+      user.id,
+      user.role,
+      'stock-locations',
+      'view-all',
+    );
   }
 
   private async assignedLocationIds(grocerId: string): Promise<string[]> {
@@ -310,7 +359,8 @@ export class StockLocationsService {
     return rows;
   }
 
-  // Ensures every id is an existing GROCER; returns a deduped list.
+  // Any user with a stock-locations grant can be assigned (admins never are —
+  // they bypass scoping). Returns a deduped list.
   private async validateGrocerIds(ids: string[]): Promise<string[]> {
     const unique = [...new Set(ids)];
     if (unique.length === 0) return [];
@@ -319,12 +369,24 @@ export class StockLocationsService {
       where: { id: In(unique) },
     });
     if (users.length !== unique.length) {
-      throw new BadRequestException('One or more grocer ids do not exist');
+      throw new BadRequestException('One or more user ids do not exist');
     }
-    const nonGrocer = users.find((u) => u.role !== Role.GROCER);
-    if (nonGrocer) {
+    const admin = users.find((u) => isSystemAdmin(u.role));
+    if (admin) {
       throw new BadRequestException(
-        `User "${nonGrocer.id}" is not a GROCER and cannot be assigned`,
+        `User "${admin.id}" is an admin and does not need storage assignments`,
+      );
+    }
+
+    const permitted = new Set(
+      await this.permissionsService.getUserIdsWithModuleGrant(
+        'stock-locations',
+      ),
+    );
+    const unpermitted = users.find((u) => !permitted.has(u.id));
+    if (unpermitted) {
+      throw new BadRequestException(
+        `User "${unpermitted.id}" has no stock-locations permission and cannot be assigned`,
       );
     }
     return unique;

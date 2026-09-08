@@ -3,6 +3,7 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { getRepositoryToken } from '@nestjs/typeorm';
 import { DataSource } from 'typeorm';
 import { GeographyService } from '../geography/geography.service';
+import { PermissionsService } from '../permissions/permissions.service';
 import { RevalidationService } from '../revalidation/revalidation.service';
 import { Role, User } from '../users/entities/user.entity';
 import { StockLocation } from './entities/stock-location.entity';
@@ -50,6 +51,10 @@ describe('StockLocationsService', () => {
     getProvinceOrThrow: jest.Mock;
     getMunicipalityOrThrow: jest.Mock;
   };
+  let permissions: {
+    hasPermission: jest.Mock;
+    getUserIdsWithModuleGrant: jest.Mock;
+  };
 
   beforeEach(async () => {
     const repoMock = (): MockRepo => ({
@@ -68,6 +73,10 @@ describe('StockLocationsService', () => {
     geography = {
       getProvinceOrThrow: jest.fn().mockResolvedValue({ id: 'prov-1' }),
       getMunicipalityOrThrow: jest.fn(),
+    };
+    permissions = {
+      hasPermission: jest.fn().mockResolvedValue(false), // no view-all by default
+      getUserIdsWithModuleGrant: jest.fn().mockResolvedValue([]),
     };
 
     // Transaction manager resolves the same mock repos by entity.
@@ -108,6 +117,7 @@ describe('StockLocationsService', () => {
         },
         { provide: getRepositoryToken(User), useValue: userRepo },
         { provide: GeographyService, useValue: geography },
+        { provide: PermissionsService, useValue: permissions },
         { provide: DataSource, useValue: dataSource },
         { provide: RevalidationService, useValue: { notify: jest.fn() } },
       ],
@@ -159,7 +169,7 @@ describe('StockLocationsService', () => {
       ).rejects.toBeInstanceOf(BadRequestException);
     });
 
-    it('rejects grocerIds that are not GROCER users', async () => {
+    it('rejects assigning an admin (they bypass scoping)', async () => {
       userRepo.find.mockResolvedValue([{ id: 'u-1', role: Role.ADMIN }]);
 
       await expect(
@@ -171,6 +181,77 @@ describe('StockLocationsService', () => {
           grocerIds: ['u-1'],
         }),
       ).rejects.toBeInstanceOf(BadRequestException);
+    });
+
+    it('rejects assigning a user without any stock-locations grant', async () => {
+      userRepo.find.mockResolvedValue([{ id: 'u-1', role: Role.KARDIST }]);
+      permissions.getUserIdsWithModuleGrant.mockResolvedValue(['someone-else']);
+
+      await expect(
+        service.create(makeUser(), {
+          name: 'Almacén 1',
+          coverage: [
+            { coverageType: CoverageType.PROVINCE, provinceId: 'prov-1' },
+          ],
+          grocerIds: ['u-1'],
+        }),
+      ).rejects.toBeInstanceOf(BadRequestException);
+    });
+
+    it('accepts any non-admin with a stock-locations grant (not only GROCER)', async () => {
+      userRepo.find.mockResolvedValue([{ id: 'u-1', role: Role.KARDIST }]);
+      permissions.getUserIdsWithModuleGrant.mockResolvedValue(['u-1']);
+      locationRepo.save.mockResolvedValue(makeLocation());
+
+      await service.create(makeUser(), {
+        name: 'Almacén 1',
+        coverage: [],
+        grocerIds: ['u-1'],
+      });
+
+      expect(grocerRepo.save).toHaveBeenCalledWith([
+        { locationId: 'loc-1', grocerId: 'u-1' },
+      ]);
+    });
+  });
+
+  describe('listAssignableUsers', () => {
+    it('returns active non-admin users holding a stock-locations grant', async () => {
+      permissions.getUserIdsWithModuleGrant.mockResolvedValue(['u-1', 'u-2']);
+      userRepo.find.mockResolvedValue([
+        {
+          id: 'u-1',
+          firstName: 'Ana',
+          lastName: null,
+          email: 'a@x.com',
+          role: Role.KARDIST,
+        },
+        // Defensive: an admin id in the grant set is still filtered out.
+        {
+          id: 'u-2',
+          firstName: 'Root',
+          lastName: null,
+          email: 'r@x.com',
+          role: Role.ADMIN,
+        },
+      ]);
+
+      const result = await service.listAssignableUsers();
+      expect(result).toEqual([
+        {
+          id: 'u-1',
+          firstName: 'Ana',
+          lastName: null,
+          email: 'a@x.com',
+          role: Role.KARDIST,
+        },
+      ]);
+    });
+
+    it('short-circuits when nobody holds the module', async () => {
+      const result = await service.listAssignableUsers();
+      expect(result).toEqual([]);
+      expect(userRepo.find).not.toHaveBeenCalled();
     });
   });
 
@@ -195,6 +276,22 @@ describe('StockLocationsService', () => {
       expect(result).toEqual([]);
       expect(locationRepo.find).not.toHaveBeenCalled();
     });
+
+    it('returns every location for a non-admin with view-all', async () => {
+      const viewer = makeUser({ id: 'v-1', role: Role.KARDIST });
+      permissions.hasPermission.mockResolvedValue(true);
+      locationRepo.find.mockResolvedValue([makeLocation()]);
+
+      const result = await service.findAll(viewer);
+      expect(result).toHaveLength(1);
+      // No assignment lookup — the id filter was never applied.
+      expect(permissions.hasPermission).toHaveBeenCalledWith(
+        'v-1',
+        Role.KARDIST,
+        'stock-locations',
+        'view-all',
+      );
+    });
   });
 
   describe('findOne', () => {
@@ -204,6 +301,31 @@ describe('StockLocationsService', () => {
 
       await expect(
         service.findOne(makeUser({ id: 'g-1', role: Role.GROCER }), 'loc-1'),
+      ).rejects.toBeInstanceOf(ForbiddenException);
+    });
+
+    it('allows an unassigned non-admin with view-all', async () => {
+      locationRepo.findOne.mockResolvedValue(makeLocation());
+      permissions.hasPermission.mockResolvedValue(true);
+      grocerRepo.findOne.mockResolvedValue(null); // not assigned
+
+      await expect(
+        service.findOne(makeUser({ id: 'v-1', role: Role.KARDIST }), 'loc-1'),
+      ).resolves.toBeTruthy();
+    });
+  });
+
+  describe('assertCanManage', () => {
+    it('view-all does NOT grant write access', async () => {
+      locationRepo.findOne.mockResolvedValue(makeLocation());
+      permissions.hasPermission.mockResolvedValue(true); // view-all held
+      grocerRepo.findOne.mockResolvedValue(null); // not assigned
+
+      await expect(
+        service.assertCanManage(
+          makeUser({ id: 'v-1', role: Role.KARDIST }),
+          'loc-1',
+        ),
       ).rejects.toBeInstanceOf(ForbiddenException);
     });
   });

@@ -52,7 +52,7 @@ export class InventoryService {
     user: User,
     locationId: string,
   ): Promise<InventoryResponseDto[]> {
-    await this.stockLocationsService.assertCanManage(user, locationId);
+    await this.stockLocationsService.assertCanView(user, locationId);
     const rows = await this.inventoryRepository.find({
       where: { locationId },
       order: { createdAt: 'DESC' },
@@ -64,7 +64,7 @@ export class InventoryService {
     user: User,
     locationId: string,
   ): Promise<OperationResponseDto[]> {
-    await this.stockLocationsService.assertCanManage(user, locationId);
+    await this.stockLocationsService.assertCanView(user, locationId);
     const operations = await this.operationRepository.find({
       where: { locationId },
       order: { createdAt: 'DESC' },
@@ -349,12 +349,12 @@ export class InventoryService {
     return events.slice(0, 200);
   }
 
-  // Location timeline for the storage detail — grocer must manage the location.
+  // Location timeline for the storage detail — assigned or view-all users.
   async locationHistory(
     user: User,
     locationId: string,
   ): Promise<InventoryHistoryEventDto[]> {
-    await this.stockLocationsService.assertCanManage(user, locationId);
+    await this.stockLocationsService.assertCanView(user, locationId);
     return this.history({ locationId });
   }
 

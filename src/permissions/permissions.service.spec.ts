@@ -244,6 +244,35 @@ describe('PermissionsService', () => {
     });
   });
 
+  describe('getUserIdsWithModuleGrant', () => {
+    it('returns distinct users whose ACTIVE roles grant the module', async () => {
+      permissionRepo.find.mockResolvedValue([{ id: 'p1' }, { id: 'p2' }]);
+      rolePermissionRepo.find.mockResolvedValue([
+        { roleId: 'r1', permissionId: 'p1' },
+        { roleId: 'r2', permissionId: 'p2' },
+      ]);
+      userRoleRepo.find.mockResolvedValue([
+        { userId: 'u1', roleId: 'r1', role: { isActive: true } },
+        { userId: 'u1', roleId: 'r2', role: { isActive: true } }, // dupe user
+        { userId: 'u2', roleId: 'r2', role: { isActive: false } }, // inactive role
+        { userId: 'u3', roleId: 'r1', role: null }, // soft-deleted role
+      ]);
+
+      await expect(
+        service.getUserIdsWithModuleGrant('stock-locations'),
+      ).resolves.toEqual(['u1']);
+    });
+
+    it('short-circuits when nothing grants the module', async () => {
+      permissionRepo.find.mockResolvedValue([{ id: 'p1' }]);
+      rolePermissionRepo.find.mockResolvedValue([]);
+      await expect(
+        service.getUserIdsWithModuleGrant('stock-locations'),
+      ).resolves.toEqual([]);
+      expect(userRoleRepo.find).not.toHaveBeenCalled();
+    });
+  });
+
   describe('getUserPermissions', () => {
     it('returns the FULL catalog for an admin', async () => {
       userRepo.findOne.mockResolvedValue({ id: 'u1', role: Role.ADMIN });
