@@ -53,6 +53,7 @@ export class OrderResponseDto {
   pickupAddress: Record<string, unknown> | null;
   pickupLocationId: string | null;
   deliveryAddress: Record<string, unknown> | null;
+  contactSnapshot: Record<string, unknown> | null;
   customerNotes: string | null;
   /** Present on detail responses; omitted on lists. */
   items?: OrderItemResponseDto[];
@@ -115,6 +116,7 @@ export class OrderResponseDto {
     dto.pickupAddress = order.pickupAddressSnapshot;
     dto.pickupLocationId = order.pickupLocationId;
     dto.deliveryAddress = order.deliveryAddress;
+    dto.contactSnapshot = order.contactSnapshot;
     dto.customerNotes = order.customerNotes;
     dto.cancellationReason = order.cancellationReason;
     dto.items = order.items?.map(OrderItemResponseDto.fromEntity);

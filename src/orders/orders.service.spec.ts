@@ -65,6 +65,12 @@ const cartLine = {
   isAvailable: true,
 };
 
+const contacto = {
+  recipientName: 'Daniel Smith',
+  idCard: '91031512345',
+  contactPhone: '55512345',
+};
+
 describe('OrdersService', () => {
   let service: OrdersService;
   let orderRepo: {
@@ -238,7 +244,7 @@ describe('OrdersService', () => {
         pickupAddressSnapshot: { address: 'Calle 1' },
       });
 
-      await service.checkout(makeClient(), {});
+      await service.checkout(makeClient(), { contact: contacto });
 
       expect(cartService.getCart).toHaveBeenCalledWith('client-1', {
         municipalityId: 'mun-1',
@@ -259,6 +265,42 @@ describe('OrdersService', () => {
           pickupLocationId: 'loc-1',
         }),
       );
+    });
+
+    it('guarda a quien recoge, que en una recogida no viene de ninguna dirección', async () => {
+      fulfillmentService.resolveChoice.mockResolvedValue({
+        type: 'pickup',
+        fee: '0.00',
+        deliveryOptionId: null,
+        deliveryOptionLabel: null,
+        pickupLocationId: 'loc-1',
+        pickupAddressId: 'pick-1',
+        pickupAddressSnapshot: { address: 'Calle 1' },
+      });
+
+      await service.checkout(makeClient(), { contact: contacto });
+
+      expect(orderRepo.create).toHaveBeenCalledWith(
+        expect.objectContaining({ contactSnapshot: contacto }),
+      );
+    });
+
+    it('rechaza una recogida sin datos de quien la recoge', async () => {
+      fulfillmentService.resolveChoice.mockResolvedValue({
+        type: 'pickup',
+        fee: '0.00',
+        deliveryOptionId: null,
+        deliveryOptionLabel: null,
+        pickupLocationId: 'loc-1',
+        pickupAddressId: 'pick-1',
+        pickupAddressSnapshot: { address: 'Calle 1' },
+      });
+
+      await expect(service.checkout(makeClient(), {})).rejects.toThrow(
+        /quien recoge/i,
+      );
+      // Y no deja un pedido a medias: nada llegó a escribirse.
+      expect(orderRepo.save).not.toHaveBeenCalled();
     });
 
     it('charges the delivery fee of the chosen option', async () => {

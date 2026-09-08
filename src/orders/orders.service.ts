@@ -96,6 +96,26 @@ const snapshotAddress = (
   contactPhone: address.contactPhone ?? null,
 });
 
+/**
+ * Quién recibe el pedido. La dirección lo lleva cuando hay dirección; en una
+ * recogida no la hay, y entonces viene suelto en `contact`.
+ */
+const snapshotContact = (
+  source: {
+    recipientName?: string | null;
+    idCard?: string | null;
+    contactPhone?: string | null;
+  } | null,
+): Record<string, unknown> | null => {
+  if (!source) return null;
+  const recipientName = source.recipientName?.trim() || null;
+  const idCard = source.idCard?.trim() || null;
+  const contactPhone = source.contactPhone?.trim() || null;
+  // Un objeto con los tres campos en null no dice nada y ensucia el jsonb.
+  if (!recipientName && !idCard && !contactPhone) return null;
+  return { recipientName, idCard, contactPhone };
+};
+
 @Injectable()
 export class OrdersService {
   private readonly logger = new Logger(OrdersService.name);
@@ -181,6 +201,14 @@ export class OrdersService {
     // municipality — the same stock the catalog showed. A pickup order may
     // draw from sibling storages (the admin gets a transfer alert); pinning it
     // to the counter's own shelf would reject carts the shop can fulfil.
+    // En recogida no hay dirección ninguna, así que estos datos solo pueden
+    // llegar sueltos. Sin ellos nadie sabe a quién entregar en el mostrador.
+    if (fulfillment.type === FulfillmentType.PICKUP && !dto.contact) {
+      throw new BadRequestException(
+        'Faltan los datos de quien recoge el pedido',
+      );
+    }
+
     const cart = await this.cartService.getCart(client.id, {
       municipalityId: deliveryMunicipalityId,
     });
@@ -241,6 +269,10 @@ export class OrdersService {
           deliveryAddress: address
             ? snapshotAddress(address, place)
             : (dto.deliveryAddress ?? null),
+          // `contact` manda sobre la dirección: es lo que el cliente acaba de
+          // escribir en este checkout, mientras que la dirección guardada
+          // puede llevar meses ahí con otro destinatario.
+          contactSnapshot: snapshotContact(dto.contact ?? address),
           customerNotes: dto.customerNotes ?? null,
         }),
       );

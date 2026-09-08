@@ -153,6 +153,15 @@ export class Order {
   @Column({ name: 'delivery_address', type: 'jsonb', nullable: true })
   deliveryAddress: Record<string, unknown> | null;
 
+  /**
+   * Quién recibe el pedido: nombre, carnet y teléfono. Vive aparte de
+   * `deliveryAddress` porque también hace falta en las recogidas, donde
+   * `pickupAddressSnapshot` guarda la dirección **de la tienda** y no la de
+   * la persona que va a buscarlo.
+   */
+  @Column({ name: 'contact_snapshot', type: 'jsonb', nullable: true })
+  contactSnapshot: Record<string, unknown> | null;
+
   @Column({ name: 'customer_notes', type: 'text', nullable: true })
   customerNotes: string | null;
 
