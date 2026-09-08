@@ -14,6 +14,8 @@ export class ClientAddressResponseDto {
   municipalityName: string;
   provinceId: string;
   provinceName: string;
+  recipientName: string | null;
+  idCard: string | null;
   contactPhone: string | null;
   isDefault: boolean;
   createdAt: Date;
@@ -35,6 +37,8 @@ export class ClientAddressResponseDto {
     dto.municipalityName = municipality?.name ?? '';
     dto.provinceId = province?.id ?? '';
     dto.provinceName = province?.name ?? '';
+    dto.recipientName = address.recipientName;
+    dto.idCard = address.idCard;
     dto.contactPhone = address.contactPhone;
     dto.isDefault = address.isDefault;
     dto.createdAt = address.createdAt;

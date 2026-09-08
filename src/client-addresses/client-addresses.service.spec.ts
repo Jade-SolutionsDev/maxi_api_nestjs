@@ -18,6 +18,8 @@ function makeAddress(overrides: Partial<ClientAddress> = {}): ClientAddress {
     betweenStreets: 'entre 8 y 10',
     reference: 'Edificio azul',
     municipalityId: 'mun-1',
+    recipientName: 'Daniel Smith',
+    idCard: '91031512345',
     contactPhone: '55512345',
     isDefault: true,
     createdAt: new Date('2026-01-01'),

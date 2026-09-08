@@ -2,6 +2,7 @@ import { Type } from 'class-transformer';
 import {
   IsBoolean,
   IsEnum,
+  IsNotEmpty,
   IsObject,
   IsOptional,
   IsString,
@@ -10,7 +11,28 @@ import {
   ValidateNested,
 } from 'class-validator';
 import { CreateClientAddressDto } from '../../client-addresses/dto/create-client-address.dto';
+import { IsCubanIdCard } from '../../common/decorators/is-cuban-id.decorator';
 import { FulfillmentType } from '../entities/order.entity';
+
+/**
+ * Quién recibe el pedido. Hace falta también en las recogidas, donde no hay
+ * dirección ninguna que pueda llevar estos datos: alguien tiene que poder
+ * identificar en el mostrador a la persona que se lleva la mercancía.
+ */
+export class CheckoutContactDto {
+  @IsString()
+  @IsNotEmpty()
+  @MaxLength(150)
+  recipientName: string;
+
+  @IsCubanIdCard()
+  idCard: string;
+
+  @IsString()
+  @IsNotEmpty()
+  @MaxLength(20)
+  contactPhone: string;
+}
 
 export class CheckoutDto {
   /**
@@ -41,6 +63,15 @@ export class CheckoutDto {
   @ValidateNested()
   @Type(() => CreateClientAddressDto)
   address?: CreateClientAddressDto;
+
+  /**
+   * Datos de quien recibe. Obligatorio en recogida; en entrega puede venir
+   * dentro de `address`, y entonces este campo sobra.
+   */
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => CheckoutContactDto)
+  contact?: CheckoutContactDto;
 
   /** Keep `address` in the customer's address book. */
   @IsOptional()
