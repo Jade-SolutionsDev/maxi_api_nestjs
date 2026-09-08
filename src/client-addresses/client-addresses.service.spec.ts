@@ -158,6 +158,29 @@ describe('ClientAddressesService', () => {
     });
   });
 
+  it('guarda el destinatario y el carnet, no solo la calle', async () => {
+    // Se escapó una vez: el servicio construye la entidad campo a campo y los
+    // dos nuevos no estaban, asi que el pedido los llevaba y la libreta no.
+    repository.count.mockResolvedValue(0);
+    repository.create.mockImplementation((v) => v as never);
+    repository.save.mockImplementation((v) => Promise.resolve(v as never));
+
+    await service.create('client-1', {
+      street: 'Calle 12 #345',
+      municipalityId: 'mun-1',
+      recipientName: 'Merlinda Vargas',
+      idCard: '85072045678',
+      contactPhone: '55987654',
+    });
+
+    expect(repository.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        recipientName: 'Merlinda Vargas',
+        idCard: '85072045678',
+      }),
+    );
+  });
+
   describe('update', () => {
     it('validates a municipality only when it changes', async () => {
       repository.findOne.mockResolvedValue(makeAddress());
