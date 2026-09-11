@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   Body,
   Controller,
   Get,
@@ -7,8 +8,11 @@ import {
   Post,
   Query,
   Req,
+  UploadedFile,
   UseGuards,
+  UseInterceptors,
 } from '@nestjs/common';
+import { FileInterceptor } from '@nestjs/platform-express';
 import {
   ApiBearerAuth,
   ApiConflictResponse,
@@ -29,7 +33,13 @@ import { OrderResponseDto } from './dto/order-response.dto';
 import { OrdersService } from './orders.service';
 import { PaymentChargeResponseDto } from '../payments/dto/payment-charge-response.dto';
 import { StartPaymentDto } from '../payments/dto/start-payment.dto';
+import { SubmitPaymentProofDto } from '../payments/dto/payment-proof.dto';
 import { PaymentsService } from '../payments/payments.service';
+import {
+  ALLOWED_IMAGE_MIME_TYPES,
+  MAX_IMAGE_SIZE_BYTES,
+  StorageService,
+} from '../uploads/storage.service';
 
 // Authenticated storefront orders (same guard pattern as the cart).
 @ApiTags('storefront')
@@ -41,6 +51,7 @@ export class StorefrontOrdersController {
   constructor(
     private readonly ordersService: OrdersService,
     private readonly paymentsService: PaymentsService,
+    private readonly storageService: StorageService,
   ) {}
 
   @Post()
@@ -130,6 +141,58 @@ export class StorefrontOrdersController {
         req.client.id,
         id,
         dto.method,
+      ),
+    );
+  }
+
+  @Post(':id/payment/proof')
+  @UseInterceptors(
+    FileInterceptor('receipt', {
+      limits: { fileSize: MAX_IMAGE_SIZE_BYTES },
+      fileFilter: (_req, file, cb) => {
+        if (!ALLOWED_IMAGE_MIME_TYPES.includes(file.mimetype)) {
+          cb(
+            new BadRequestException(
+              `Tipo de imagen no admitido "${file.mimetype}"`,
+            ),
+            false,
+          );
+          return;
+        }
+        cb(null, true);
+      },
+    }),
+  )
+  @ApiOperation({
+    summary: 'Enviar el comprobante de un pago manual',
+    description:
+      'La referencia (nro. de transferencia, de Transfermóvil o hash) y, si ' +
+      'quiere, una captura. No marca el pedido como pagado: eso lo confirma ' +
+      'un admin cuando encuentra el dinero.',
+  })
+  @ApiOkResponse({ type: PaymentChargeResponseDto })
+  async submitProof(
+    @Req() req: AuthenticatedClientRequest,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: SubmitPaymentProofDto,
+    @UploadedFile() receipt?: Express.Multer.File,
+  ): Promise<PaymentChargeResponseDto> {
+    // El cliente no es usuario del back-office, así que POST /uploads/image
+    // (que exige permiso) no le sirve: subimos aquí con el mismo servicio.
+    const uploaded = receipt
+      ? await this.storageService.uploadImage(
+          receipt.buffer,
+          receipt.mimetype,
+          'comprobantes',
+        )
+      : null;
+
+    return this.paymentsService.toDto(
+      await this.paymentsService.submitProof(
+        req.client.id,
+        id,
+        dto.reference,
+        uploaded?.url ?? null,
       ),
     );
   }

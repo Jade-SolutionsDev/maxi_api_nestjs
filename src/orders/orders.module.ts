@@ -7,6 +7,7 @@ import { FulfillmentModule } from '../fulfillment/fulfillment.module';
 import { GeographyModule } from '../geography/geography.module';
 import { InventoryModule } from '../inventory/inventory.module';
 import { PaymentsModule } from '../payments/payments.module';
+import { UploadsModule } from '../uploads/uploads.module';
 import { ProductsModule } from '../products/products.module';
 import { OrderItem } from './entities/order-item.entity';
 import { Order } from './entities/order.entity';
@@ -24,6 +25,7 @@ import { StorefrontOrdersController } from './storefront-orders.controller';
     GeographyModule,
     InventoryModule,
     PaymentsModule,
+    UploadsModule,
     ProductsModule,
   ],
   controllers: [OrdersController, StorefrontOrdersController],

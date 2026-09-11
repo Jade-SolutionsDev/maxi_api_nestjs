@@ -12,9 +12,40 @@ import {
   PaymentMethodResponseDto,
   StorefrontPaymentMethodDto,
 } from './dto/payment-method-response.dto';
+import {
+  assertInstructions,
+  CreatePaymentMethodDto,
+  PaymentInstructionsDto,
+} from './dto/create-payment-method.dto';
 import { UpdatePaymentMethodDto } from './dto/update-payment-method.dto';
-import { PaymentMethod } from './entities/payment-method.entity';
+import {
+  PaymentInstructions,
+  PaymentMethod,
+} from './entities/payment-method.entity';
+import { CustomManualGateway } from './gateways/custom-manual/custom-manual.gateway';
 import { PAYMENT_GATEWAYS, PaymentGateway } from './payment-gateway.interface';
+
+/** Icono por defecto según el tipo de instrucción. */
+const ICON_BY_TYPE: Record<string, string> = {
+  bank: 'Landmark',
+  qr: 'QrCode',
+  link: 'Link',
+  crypto: 'Bitcoin',
+};
+
+const slugify = (value: string): string =>
+  value
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '');
+
+/** Una pasarela y la fila de catálogo que la eligió. */
+export interface ResolvedPaymentMethod {
+  gateway: PaymentGateway;
+  method: PaymentMethod;
+}
 
 /** Presentation defaults for a gateway's first appearance in the catalog. */
 const SEED: Record<
@@ -59,6 +90,7 @@ export class PaymentMethodsService implements OnModuleInit {
   private readonly logger = new Logger(PaymentMethodsService.name);
 
   constructor(
+    private readonly customManualGateway: CustomManualGateway,
     @InjectRepository(PaymentMethod)
     private readonly methodRepository: Repository<PaymentMethod>,
     @Inject(PAYMENT_GATEWAYS)
@@ -96,12 +128,17 @@ export class PaymentMethodsService implements OnModuleInit {
     return new Map(methods.map((method) => [method.code, method.label]));
   }
 
+  /**
+   * La pasarela que atiende un código. Un código sin clase registrada es un
+   * método que creó el admin, así que cae en la manual personalizada en vez de
+   * reventar: `resolve()` ya valida contra la base antes de cobrar, y los demás
+   * llamantes traen el `provider` de un cobro que fue válido al crearse — así
+   * un método ya borrado sigue mostrando sus pedidos viejos.
+   */
   gatewayFor(code: string): PaymentGateway {
-    const gateway = this.gateways.find((g) => g.code === code);
-    if (!gateway) {
-      throw new NotFoundException(`Unknown payment method "${code}"`);
-    }
-    return gateway;
+    return (
+      this.gateways.find((g) => g.code === code) ?? this.customManualGateway
+    );
   }
 
   // ---------------- Admin ----------------
@@ -153,6 +190,78 @@ export class PaymentMethodsService implements OnModuleInit {
     );
   }
 
+  /**
+   * Un método que define el admin. El código sale de la etiqueta y no puede
+   * chocar con una pasarela del código: si lo hiciera, `gatewayFor` devolvería
+   * la clase registrada y las instrucciones no se mostrarían nunca.
+   */
+  async create(dto: CreatePaymentMethodDto): Promise<PaymentMethodResponseDto> {
+    const code = await this.uniqueCodeFor(dto.label);
+    const instructions = this.validInstructions(dto.instructions);
+
+    const method = await this.methodRepository.save(
+      this.methodRepository.create({
+        code,
+        label: dto.label,
+        description: dto.description ?? null,
+        icon: dto.icon ?? ICON_BY_TYPE[instructions.type],
+        sortOrder: dto.sortOrder ?? 50,
+        enabled: dto.enabled ?? false,
+        isCustom: true,
+        instructions,
+      }),
+    );
+    return PaymentMethodResponseDto.fromEntity(method, true, 'manual');
+  }
+
+  /** Sólo lo que creó un admin: una pasarela del código se apaga, no se borra. */
+  async remove(id: string): Promise<void> {
+    const method = await this.methodRepository.findOne({ where: { id } });
+    if (!method) {
+      throw new NotFoundException(`Payment method with id "${id}" not found`);
+    }
+    if (!method.isCustom) {
+      throw new BadRequestException(
+        'Una pasarela integrada no se borra; desactívala.',
+      );
+    }
+    await this.methodRepository.softDelete(id);
+  }
+
+  /** Traduce el fallo de contrato del tipo en un 400 legible. */
+  private validInstructions(dto: PaymentInstructionsDto): PaymentInstructions {
+    try {
+      return assertInstructions(dto);
+    } catch (err) {
+      throw new BadRequestException(
+        err instanceof Error ? err.message : 'Instrucciones inválidas',
+      );
+    }
+  }
+
+  private async uniqueCodeFor(label: string): Promise<string> {
+    const base =
+      slugify(label).slice(0, 28) || `metodo-${Date.now().toString(36)}`;
+
+    if (this.gateways.some((gateway) => gateway.code === base)) {
+      throw new BadRequestException(
+        `"${label}" choca con una pasarela integrada; usa otro nombre.`,
+      );
+    }
+
+    let code = base;
+    let suffix = 2;
+    while (
+      await this.methodRepository.findOne({
+        where: { code },
+        withDeleted: true,
+      })
+    ) {
+      code = `${base}-${suffix++}`;
+    }
+    return code;
+  }
+
   // ---------------- Storefront ----------------
 
   /** Methods a customer may actually pick: enabled AND configured. */
@@ -178,8 +287,12 @@ export class PaymentMethodsService implements OnModuleInit {
    * Resolve the method for a payment attempt: the requested one when it is
    * available, otherwise the first available one. Falls back to `manual` so a
    * checkout never dies because every gateway is off.
+   *
+   * Devuelve también la fila: una sola pasarela manual sirve a todos los
+   * métodos personalizados, así que el cobro necesita saber cuál se eligió
+   * para guardar su código y copiar sus instrucciones.
    */
-  async resolve(requested?: string): Promise<PaymentGateway> {
+  async resolve(requested?: string): Promise<ResolvedPaymentMethod> {
     const available = await this.findAvailable();
     if (requested) {
       const match = available.find((method) => method.code === requested);
@@ -188,8 +301,15 @@ export class PaymentMethodsService implements OnModuleInit {
           `Payment method "${requested}" is not available`,
         );
       }
-      return this.gatewayFor(match.code);
+      return { gateway: this.gatewayFor(match.code), method: match };
     }
-    return this.gatewayFor(available[0]?.code ?? 'manual');
+
+    const fallback =
+      available[0] ??
+      (await this.methodRepository.findOne({ where: { code: 'manual' } }));
+    if (!fallback) {
+      throw new NotFoundException('No hay ningún método de pago disponible');
+    }
+    return { gateway: this.gatewayFor(fallback.code), method: fallback };
   }
 }

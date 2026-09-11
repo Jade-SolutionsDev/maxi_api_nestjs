@@ -25,8 +25,11 @@ import {
   PaymentCharge,
   TERMINAL_CHARGE_STATUSES,
 } from './entities/payment-charge.entity';
-import { PaymentMethodsService } from './payment-methods.service';
-import { GatewayCharge, PaymentGateway } from './payment-gateway.interface';
+import {
+  PaymentMethodsService,
+  ResolvedPaymentMethod,
+} from './payment-methods.service';
+import { GatewayCharge } from './payment-gateway.interface';
 
 /** Postgres reports a broken unique constraint as 23505. */
 const isUniqueViolation = (err: unknown): boolean =>
@@ -152,24 +155,28 @@ export class PaymentsService {
    */
   async createChargeForOrder(
     order: Order,
-    gateway: PaymentGateway,
+    resolved: ResolvedPaymentMethod,
   ): Promise<PaymentCharge> {
+    const { gateway, method } = resolved;
+    // El código de la FILA, no el de la clase: una sola pasarela manual sirve a
+    // todos los métodos personalizados, y el cobro tiene que decir cuál se usó.
+    const code = method.code;
     const attempt =
       (await this.chargeRepository.count({ where: { orderId: order.id } })) + 1;
-    const idempotencyKey = `order_${order.orderNumber ?? order.id}_${gateway.code}_${attempt}`;
+    const idempotencyKey = `order_${order.orderNumber ?? order.id}_${code}_${attempt}`;
 
-    const data = await this.callGateway(gateway.code, () =>
-      gateway.createCharge(order, idempotencyKey),
+    const data = await this.callGateway(code, () =>
+      gateway.createCharge(order, idempotencyKey, method),
     );
     // The full gateway answer, so a new method's payload shape can be traced
     // from the log alone (nothing in it is secret — it's shown to the customer).
     this.logger.log(
-      `Charge created via "${gateway.code}" for ${order.orderNumber ?? order.id}: ` +
+      `Charge created via "${code}" for ${order.orderNumber ?? order.id}: ` +
         `${data.reference} status=${data.status} ` +
         `action_payload=${JSON.stringify(data.actionPayload)} ` +
         `redirectUrl=${data.redirectUrl ?? 'null'}`,
     );
-    const charge = await this.storeCharge(order, gateway, idempotencyKey, data);
+    const charge = await this.storeCharge(order, code, idempotencyKey, data);
 
     order.paymentRef = data.reference;
     await this.orderRepository.save(order);
@@ -187,7 +194,7 @@ export class PaymentsService {
    */
   private async storeCharge(
     order: Order,
-    gateway: PaymentGateway,
+    code: string,
     idempotencyKey: string,
     data: GatewayCharge,
   ): Promise<PaymentCharge> {
@@ -195,7 +202,7 @@ export class PaymentsService {
       return await this.chargeRepository.save(
         this.chargeRepository.create({
           orderId: order.id,
-          provider: gateway.code,
+          provider: code,
           reference: data.reference,
           idempotencyKey,
           ...this.gatewayFields(data),
@@ -286,17 +293,17 @@ export class PaymentsService {
     if (order.paymentStatus === PaymentStatus.PAID) {
       throw new BadRequestException('Order is already paid');
     }
-    const gateway = await this.methodsService.resolve(method);
+    const resolved = await this.methodsService.resolve(method);
 
     const latest = await this.latestChargeFor(orderId);
-    if (latest && latest.provider === gateway.code) {
+    if (latest && latest.provider === resolved.method.code) {
       // Refresh first: a stale REQUIRES_ACTION may already be terminal.
       const synced = await this.syncCharge(latest);
       if (this.isLive(synced)) {
         return synced;
       }
     }
-    return this.createChargeForOrder(order, gateway);
+    return this.createChargeForOrder(order, resolved);
   }
 
   private async findClientOrder(
@@ -310,6 +317,38 @@ export class PaymentsService {
       throw new NotFoundException(`Order with id "${orderId}" not found`);
     }
     return order;
+  }
+
+  /**
+   * Guarda el comprobante que manda el cliente. No mueve el estado del cobro:
+   * confirmar sigue siendo un acto de un admin, que es justo lo que distingue
+   * a un método manual de una pasarela.
+   */
+  async submitProof(
+    clientId: string,
+    orderId: string,
+    reference: string,
+    receiptUrl: string | null,
+  ): Promise<PaymentCharge> {
+    const order = await this.findClientOrder(clientId, orderId);
+    if (order.paymentStatus === PaymentStatus.PAID) {
+      throw new BadRequestException('Este pedido ya está pagado');
+    }
+
+    const charge = await this.latestChargeFor(orderId);
+    if (!charge) {
+      throw new NotFoundException('Este pedido todavía no tiene un cobro');
+    }
+
+    charge.customerReference = reference;
+    if (receiptUrl) charge.receiptUrl = receiptUrl;
+    await this.chargeRepository.save(charge);
+
+    this.logger.log(
+      `Comprobante recibido para ${order.orderNumber ?? order.id} ` +
+        `(${charge.provider}): ${reference}`,
+    );
+    return charge;
   }
 
   // ---------------- Webhooks ----------------

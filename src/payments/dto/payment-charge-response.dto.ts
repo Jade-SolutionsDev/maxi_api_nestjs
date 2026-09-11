@@ -1,6 +1,7 @@
 import { ApiProperty } from '@nestjs/swagger';
 import type { PaymentActionKind } from '../payment-gateway.interface';
 import { PaymentCharge } from '../entities/payment-charge.entity';
+import { PaymentInstructions } from '../entities/payment-method.entity';
 
 /**
  * Customer/admin view of a payment attempt, shared by every gateway. Clients
@@ -63,6 +64,16 @@ export class PaymentChargeResponseDto {
   /** Net amount settled to the merchant account (admin reconciliation). */
   settlementAmount: string | null;
 
+  /**
+   * Dónde pagar, tal como estaba cuando se creó el cobro. Copia, no referencia:
+   * si mañana cambian la cuenta, este pedido sigue contando dónde se pagó.
+   */
+  instructions: PaymentInstructions | null;
+
+  /** Lo que el cliente dijo haber pagado, si ya lo mandó. */
+  customerReference: string | null;
+  receiptUrl: string | null;
+
   errorMessage: string | null;
   createdAt: Date;
 
@@ -93,6 +104,10 @@ export class PaymentChargeResponseDto {
       : null;
     dto.feeAmount = charge.feeAmount;
     dto.settlementAmount = charge.settlementAmount;
+    dto.instructions =
+      (action.instructions as PaymentInstructions | undefined) ?? null;
+    dto.customerReference = charge.customerReference;
+    dto.receiptUrl = charge.receiptUrl;
     dto.errorMessage = charge.errorMessage;
     dto.createdAt = charge.createdAt;
     return dto;
