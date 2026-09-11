@@ -95,14 +95,6 @@ describe('PermissionsService', () => {
         Promise.resolve({ ...r, id: `role-${r.systemKey}` }),
       );
       rolePermissionRepo.save.mockResolvedValue([]);
-      userRepo.find.mockImplementation(({ where }: { where: { role: Role } }) =>
-        Promise.resolve(
-          where.role === Role.GROCER
-            ? [{ id: 'u-g1' }, { id: 'u-g2' }]
-            : [{ id: 'u-k1' }],
-        ),
-      );
-      userRoleRepo.save.mockResolvedValue([]);
 
       await service.onModuleInit();
 
@@ -116,18 +108,19 @@ describe('PermissionsService', () => {
       expect(roleRepo.save).toHaveBeenCalledTimes(2);
       expect(roleRepo.save).toHaveBeenCalledWith(
         expect.objectContaining({
-          systemKey: Role.GROCER,
+          systemKey: 'GROCER',
           isSystem: false,
           isActive: true,
         }),
       );
       expect(roleRepo.save).toHaveBeenCalledWith(
-        expect.objectContaining({ systemKey: Role.KARDIST, isSystem: false }),
+        expect.objectContaining({ systemKey: 'KARDIST', isSystem: false }),
       );
 
-      // Grants mirror the old enum baselines: 19 for GROCER, 8 for KARDIST.
+      // Grants mirror the pre-collapse baselines (+ direct jump for the
+      // Almacenero template): 20 for GROCER, 8 for KARDIST.
       const grantCalls = rolePermissionRepo.save.mock.calls;
-      expect(grantCalls[0][0]).toHaveLength(19);
+      expect(grantCalls[0][0]).toHaveLength(20);
       expect(grantCalls[1][0]).toHaveLength(8);
       expect(grantCalls[0][0]).toContainEqual({
         roleId: 'role-GROCER',
@@ -138,14 +131,9 @@ describe('PermissionsService', () => {
         permissionId: 'inventory:aggregate',
       });
 
-      // Existing users of each enum role were auto-assigned.
-      expect(userRoleRepo.save).toHaveBeenCalledWith([
-        { userId: 'u-g1', roleId: 'role-GROCER', assignedBy: null },
-        { userId: 'u-g2', roleId: 'role-GROCER', assignedBy: null },
-      ]);
-      expect(userRoleRepo.save).toHaveBeenCalledWith([
-        { userId: 'u-k1', roleId: 'role-KARDIST', assignedBy: null },
-      ]);
+      // Nobody is auto-assigned anymore — invitations carry explicit roles.
+      expect(userRoleRepo.save).not.toHaveBeenCalled();
+      expect(userRepo.find).not.toHaveBeenCalled();
     });
 
     it('seeds only missing permission rows (diff, not blind insert)', async () => {
@@ -179,27 +167,58 @@ describe('PermissionsService', () => {
     });
   });
 
-  describe('assignBaseRoleForEnumRole', () => {
-    it('is a no-op for system admins', async () => {
-      await service.assignBaseRoleForEnumRole('u1', Role.ADMIN);
-      expect(roleRepo.findOne).not.toHaveBeenCalled();
+  describe('assignRolesLenient', () => {
+    it('is a no-op for an empty list', async () => {
+      await service.assignRolesLenient('u1', []);
+      expect(roleRepo.find).not.toHaveBeenCalled();
       expect(userRoleRepo.save).not.toHaveBeenCalled();
     });
 
-    it('is a no-op when no active base role exists', async () => {
-      roleRepo.findOne.mockResolvedValue(null);
-      await service.assignBaseRoleForEnumRole('u1', Role.GROCER);
-      expect(userRoleRepo.save).not.toHaveBeenCalled();
+    it('skips roles deleted/deactivated since the invitation', async () => {
+      roleRepo.find.mockResolvedValue([{ id: 'r1', isActive: true }]);
+      await service.assignRolesLenient('u1', ['r1', 'r-gone', 'r1']);
+      expect(userRoleRepo.save).toHaveBeenCalledWith([
+        { userId: 'u1', roleId: 'r1', assignedBy: null },
+      ]);
     });
 
-    it('assigns the matching base role to the new user', async () => {
-      roleRepo.findOne.mockResolvedValue({ id: 'role-GROCER' });
-      await service.assignBaseRoleForEnumRole('u1', Role.GROCER);
-      expect(userRoleRepo.save).toHaveBeenCalledWith({
-        userId: 'u1',
-        roleId: 'role-GROCER',
-        assignedBy: null,
+    it('writes nothing when no invited role survives', async () => {
+      roleRepo.find.mockResolvedValue([]);
+      await service.assignRolesLenient('u1', ['r-gone']);
+      expect(userRoleRepo.save).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('assertActiveRoles', () => {
+    it('passes when every id is an active role', async () => {
+      roleRepo.count.mockResolvedValue(2);
+      await expect(
+        service.assertActiveRoles(['r1', 'r2', 'r1']),
+      ).resolves.toBeUndefined();
+    });
+
+    it('throws when any id is unknown or inactive', async () => {
+      roleRepo.count.mockResolvedValue(1);
+      await expect(
+        service.assertActiveRoles(['r1', 'r2']),
+      ).rejects.toBeInstanceOf(NotFoundException);
+    });
+  });
+
+  describe('getRolesByUserIds', () => {
+    it('maps users to their ACTIVE roles in one query', async () => {
+      userRoleRepo.find.mockResolvedValue([
+        {
+          userId: 'u1',
+          role: { id: 'r1', name: 'Financista', isActive: true },
+        },
+        { userId: 'u1', role: { id: 'r2', name: 'Muerto', isActive: false } },
+        { userId: 'u2', role: null }, // soft-deleted relation
+      ]);
+      await expect(service.getRolesByUserIds(['u1', 'u2'])).resolves.toEqual({
+        u1: [{ id: 'r1', name: 'Financista' }],
       });
+      expect(userRoleRepo.find).toHaveBeenCalledTimes(1);
     });
   });
 
@@ -218,7 +237,7 @@ describe('PermissionsService', () => {
       permissionRepo.findOne.mockResolvedValue({ id: 'perm-1' });
       userRoleRepo.find.mockResolvedValue([]);
       await expect(
-        service.hasPermission('u1', Role.GROCER, 'products', 'create'),
+        service.hasPermission('u1', Role.STAFF, 'products', 'create'),
       ).resolves.toBe(false);
     });
 
@@ -229,7 +248,7 @@ describe('PermissionsService', () => {
       ]);
       rolePermissionRepo.count.mockResolvedValue(1);
       await expect(
-        service.hasPermission('u1', Role.KARDIST, 'products', 'update'),
+        service.hasPermission('u1', Role.STAFF, 'products', 'update'),
       ).resolves.toBe(true);
       expect(rolePermissionRepo.count).toHaveBeenCalled();
     });
@@ -238,7 +257,7 @@ describe('PermissionsService', () => {
       permissionRepo.findOne.mockResolvedValue({ id: 'perm-1' });
       userRoleRepo.find.mockResolvedValue([{ roleId: 'r1', role: null }]);
       await expect(
-        service.hasPermission('u1', Role.KARDIST, 'products', 'update'),
+        service.hasPermission('u1', Role.STAFF, 'products', 'update'),
       ).resolves.toBe(false);
       expect(rolePermissionRepo.count).not.toHaveBeenCalled();
     });
@@ -292,7 +311,7 @@ describe('PermissionsService', () => {
     });
 
     it('returns only managed grants for non-admins', async () => {
-      userRepo.findOne.mockResolvedValue({ id: 'u1', role: Role.KARDIST });
+      userRepo.findOne.mockResolvedValue({ id: 'u1', role: Role.STAFF });
       userRoleRepo.find.mockResolvedValue([
         {
           roleId: 'r1',
@@ -310,7 +329,7 @@ describe('PermissionsService', () => {
     });
 
     it('returns an empty map when the only assigned role was soft-deleted', async () => {
-      userRepo.findOne.mockResolvedValue({ id: 'u1', role: Role.KARDIST });
+      userRepo.findOne.mockResolvedValue({ id: 'u1', role: Role.STAFF });
       userRoleRepo.find.mockResolvedValue([{ roleId: 'r1', role: null }]);
       const result = await service.getUserPermissions('u1');
       expect(result.permissions).toEqual({});

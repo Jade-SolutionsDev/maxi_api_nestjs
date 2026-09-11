@@ -7,10 +7,13 @@ import {
   IsUUID,
   Length,
 } from 'class-validator';
+import { Transform } from 'class-transformer';
 import { Role } from '../entities/user.entity';
+import { legacyRoleToStaff } from './invite-user.dto';
 
 export class UpdateUserDto {
   @IsOptional()
+  @Transform(legacyRoleToStaff)
   @IsEnum(Role)
   role?: Role;
 

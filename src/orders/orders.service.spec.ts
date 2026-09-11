@@ -18,6 +18,7 @@ import { OrdersService } from './orders.service';
 import { ClientAddressesService } from '../client-addresses/client-addresses.service';
 import { FulfillmentService } from '../fulfillment/fulfillment.service';
 import { GeographyService } from '../geography/geography.service';
+import { PermissionsService } from '../permissions/permissions.service';
 import { PaymentMethodsService } from '../payments/payment-methods.service';
 import { PaymentsService } from '../payments/payments.service';
 
@@ -98,6 +99,7 @@ describe('OrdersService', () => {
     findOneForClient: jest.Mock;
     create: jest.Mock;
   };
+  let permissionsService: { hasPermission: jest.Mock };
   let orderItemRepo: { save: jest.Mock; create: jest.Mock };
   let cartItemRepo: { delete: jest.Mock };
 
@@ -148,6 +150,15 @@ describe('OrdersService', () => {
       findOneForClient: jest.fn(),
       create: jest.fn(),
     };
+    // Direct-jump is permission-based now. Mirror the real hasPermission
+    // contract: admins bypass; staff are denied unless a test grants it.
+    permissionsService = {
+      hasPermission: jest
+        .fn()
+        .mockImplementation((_userId: string, role: Role) =>
+          Promise.resolve(role === Role.SUPER_ADMIN || role === Role.ADMIN),
+        ),
+    };
     geographyService = {
       getMunicipalityOrThrow: jest
         .fn()
@@ -186,6 +197,7 @@ describe('OrdersService', () => {
         },
         { provide: ClientAddressesService, useValue: clientAddressesService },
         { provide: GeographyService, useValue: geographyService },
+        { provide: PermissionsService, useValue: permissionsService },
         { provide: DataSource, useValue: dataSource },
       ],
     }).compile();
@@ -648,10 +660,10 @@ describe('OrdersService', () => {
       ).rejects.toBeInstanceOf(ConflictException);
     });
 
-    it('forbids GROCER from confirming or cancelling', async () => {
+    it('forbids non-admin staff from confirming or cancelling', async () => {
       await expect(
         service.updateStatus(
-          makeUser(Role.GROCER),
+          makeUser(Role.STAFF),
           'order-1',
           OrderStatus.CONFIRMED,
         ),
@@ -663,21 +675,21 @@ describe('OrdersService', () => {
       );
       await expect(
         service.updateStatus(
-          makeUser(Role.GROCER),
+          makeUser(Role.STAFF),
           'order-1',
           OrderStatus.CANCELLED,
         ),
       ).rejects.toBeInstanceOf(ForbiddenException);
     });
 
-    it('lets GROCER advance fulfillment', async () => {
+    it('lets staff advance fulfillment', async () => {
       orderRepo.findOne.mockReset();
       orderRepo.findOne
         .mockResolvedValueOnce(makeOrder({ status: OrderStatus.CONFIRMED }))
         .mockResolvedValue(makeOrder({ items: [] }));
 
       await service.updateStatus(
-        makeUser(Role.GROCER),
+        makeUser(Role.STAFF),
         'order-1',
         OrderStatus.PROCESSING,
       );
@@ -715,8 +727,9 @@ describe('OrdersService', () => {
         .mockResolvedValueOnce(makeOrder({ status: OrderStatus.CONFIRMED }))
         .mockResolvedValue(makeOrder({ items: [] }));
 
+      permissionsService.hasPermission.mockResolvedValue(true);
       await service.updateStatus(
-        makeUser(Role.GROCER),
+        makeUser(Role.STAFF),
         'order-1',
         OrderStatus.DELIVERED,
         true,
@@ -744,21 +757,28 @@ describe('OrdersService', () => {
       expect(inventoryService.releaseReservations).toHaveBeenCalledTimes(1);
     });
 
-    it('lets GROCER jump past confirm (manual in-store sale)', async () => {
+    it('lets staff with the direct permission jump past confirm (manual in-store sale)', async () => {
+      permissionsService.hasPermission.mockResolvedValue(true);
       await service.updateStatus(
-        makeUser(Role.GROCER),
+        makeUser(Role.STAFF),
         'order-1',
         OrderStatus.DELIVERED,
         true,
       );
 
+      expect(permissionsService.hasPermission).toHaveBeenCalledWith(
+        'user-1',
+        Role.STAFF,
+        'orders',
+        'update-status-direct',
+      );
       expect(inventoryService.confirmReservations).toHaveBeenCalledTimes(1);
     });
 
-    it('rejects roles outside admin/grocer', async () => {
+    it('rejects staff without the direct permission', async () => {
       await expect(
         service.updateStatus(
-          makeUser(Role.KARDIST),
+          makeUser(Role.STAFF),
           'order-1',
           OrderStatus.DELIVERED,
           true,

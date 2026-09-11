@@ -66,9 +66,9 @@ export class OrdersController {
       'Legal transitions: pending→confirmed|cancelled, ' +
       'confirmed→processing|cancelled, processing→shipped|cancelled, ' +
       'shipped→delivered|cancelled. Confirming physically decrements the ' +
-      'reserved stock; cancelling releases (or restocks) it. GROCER may only ' +
+      'reserved stock; cancelling releases (or restocks) it. Non-admin staff may only ' +
       'target processing/shipped/delivered. With `direct: true` ' +
-      '(SUPER_ADMIN/ADMIN/GROCER) the order jumps straight to any later ' +
+      '(admins or the orders:update-status-direct permission) the order jumps straight to any later ' +
       'status or to cancelled — for manual in-store sales and pickups — and ' +
       'the skipped side effects still apply (stock commits once when passing ' +
       'confirmed).',

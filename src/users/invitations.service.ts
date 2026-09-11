@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   ConflictException,
   Injectable,
   Logger,
@@ -8,6 +9,10 @@ import { ConfigService } from '@nestjs/config';
 import { InjectRepository } from '@nestjs/typeorm';
 import { createClerkClient } from '@clerk/backend';
 import { Repository } from 'typeorm';
+import {
+  isSystemAdmin,
+  PermissionsService,
+} from '../permissions/permissions.service';
 import { InviteUserDto } from './dto/invite-user.dto';
 import { Invitation, InvitationStatus } from './entities/invitation.entity';
 import { Role, User } from './entities/user.entity';
@@ -22,6 +27,7 @@ export class InvitationsService {
     @InjectRepository(User)
     private readonly userRepository: Repository<User>,
     private readonly configService: ConfigService,
+    private readonly permissionsService: PermissionsService,
   ) {}
 
   async createAndSendInvitation(
@@ -29,6 +35,20 @@ export class InvitationsService {
     inviter: User,
   ): Promise<Invitation> {
     const normalizedEmail = dto.email.toLowerCase().trim();
+
+    // Admin tiers bypass permissions — roles on their invitation would be a
+    // client bug, so reject loudly instead of silently dropping them. STAFF
+    // role ids must exist and be active NOW; the webhook assigns leniently
+    // later (a role deleted in between is simply skipped).
+    const roleIds = [...new Set(dto.roleIds ?? [])];
+    if (isSystemAdmin(dto.role) && roleIds.length > 0) {
+      throw new BadRequestException(
+        'Admin tiers do not take managed roles on an invitation',
+      );
+    }
+    if (dto.role === Role.STAFF) {
+      await this.permissionsService.assertActiveRoles(roleIds);
+    }
 
     const existingUser = await this.userRepository.findOne({
       where: { email: normalizedEmail, isActive: true },
@@ -58,6 +78,7 @@ export class InvitationsService {
     const invitation = this.invitationRepository.create({
       email: normalizedEmail,
       role: dto.role,
+      roleIds,
       firstName: dto.firstName ?? null,
       lastName: dto.lastName ?? null,
       invitedById: inviter.id,

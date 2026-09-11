@@ -24,7 +24,7 @@ export class ManagedRole {
   description: string | null;
 
   // Non-null only on the seeded base roles that replace the old hard-coded enum
-  // baselines (value = the Role enum key, e.g. 'GROCER'). Lets the seeder find
+  // starter templates (historical keys, e.g. 'GROCER'). Lets the seeder find
   // them across renames and lets user-creation auto-assign the matching base
   // role. Partial-unique in the DB (see RbacManagedCatalog migration).
   @Column({ name: 'system_key', type: 'varchar', length: 50, nullable: true })

@@ -189,7 +189,7 @@ describe('Dashboard (e2e)', () => {
       users.create({
         clerkId: 'clerk_grocer_1',
         email: 'grocer@example.com',
-        role: Role.GROCER,
+        role: Role.STAFF,
         isActive: true,
       }),
     );

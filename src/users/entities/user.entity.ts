@@ -7,11 +7,16 @@ import {
   UpdateDateColumn,
 } from 'typeorm';
 
+/**
+ * Access TIER, not a job title. SUPER_ADMIN/ADMIN bypass permissions and own
+ * the admin-only surfaces; a STAFF user's access is exactly the union of their
+ * assigned managed roles (see the permissions module). The old GROCER/KARDIST
+ * values were collapsed into STAFF by migration 1789200000000.
+ */
 export enum Role {
   SUPER_ADMIN = 'SUPER_ADMIN',
   ADMIN = 'ADMIN',
-  GROCER = 'GROCER',
-  KARDIST = 'KARDIST',
+  STAFF = 'STAFF',
 }
 
 @Entity('users')
@@ -93,4 +98,8 @@ export class User {
 
   @DeleteDateColumn({ name: 'deleted_at', type: 'timestamptz' })
   deletedAt: Date | null;
+
+  /** Transient (no column): active managed roles, attached for list/detail
+   *  responses by UsersService via PermissionsService. */
+  managedRoles?: Array<{ id: string; name: string }>;
 }

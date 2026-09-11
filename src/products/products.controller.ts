@@ -28,7 +28,7 @@ const toBoolean = (value?: string): boolean | undefined => {
 };
 
 // Global catalog: access is gated per-action by managed permissions
-// (@RequirePermission). SUPER_ADMIN/ADMIN bypass; GROCER/KARDIST get their
+// (@RequirePermission). SUPER_ADMIN/ADMIN bypass; STAFF users get their
 // baseline via DEFAULT_ROLE_PERMISSIONS plus any assigned managed role.
 @ApiTags('products')
 @ApiBearerAuth()

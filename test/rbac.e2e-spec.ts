@@ -29,7 +29,7 @@ describe('RBAC default-deny (e2e)', () => {
   let customRoleId: string;
 
   const adminAuth = { Authorization: 'Bearer mock:clerk_rbac_admin' };
-  const kardistAuth = { Authorization: 'Bearer mock:clerk_rbac_kardist' };
+  const staffAuth = { Authorization: 'Bearer mock:clerk_rbac_staff' };
 
   beforeAll(async () => {
     const moduleRef = await Test.createTestingModule({
@@ -57,9 +57,9 @@ describe('RBAC default-deny (e2e)', () => {
     );
     await users.save(
       users.create({
-        clerkId: 'clerk_rbac_kardist',
-        email: 'rbac-kardist@example.com',
-        role: Role.KARDIST,
+        clerkId: 'clerk_rbac_staff',
+        email: 'rbac-staff@example.com',
+        role: Role.STAFF,
         isActive: true,
       }),
     );
@@ -78,24 +78,41 @@ describe('RBAC default-deny (e2e)', () => {
   it('boot seeded the full permission catalog and both base roles', async () => {
     const catalogSize = Object.values(MODULE_ACTIONS).flat().length;
     expect(await permissions.count()).toBeGreaterThanOrEqual(catalogSize);
-    for (const key of [Role.GROCER, Role.KARDIST]) {
+    // systemKey values are historical strings, not enum members anymore.
+    for (const key of ['GROCER', 'KARDIST']) {
       expect(
         await roles.findOne({ where: { systemKey: key }, withDeleted: true }),
       ).toBeTruthy();
     }
   });
 
+  it('the Almacenero base role holds the direct-jump grant (migration + seed)', async () => {
+    const almacenero = await roles.findOne({
+      where: { systemKey: 'GROCER' },
+      withDeleted: true,
+    });
+    const perm = await permissions.findOne({
+      where: { module: 'orders', action: 'update-status-direct' },
+    });
+    expect(perm).toBeTruthy();
+    expect(
+      await rolePermissions.findOne({
+        where: { roleId: almacenero!.id, permissionId: perm!.id },
+      }),
+    ).toBeTruthy();
+  });
+
   it('a zero-grant non-admin gets 403 on a permission-gated route', async () => {
     await request(app.getHttpServer())
       .get('/api/categories')
-      .set(kardistAuth)
+      .set(staffAuth)
       .expect(403);
   });
 
   it('…but /auth/me still answers 200 (empty shell, never an auth loop)', async () => {
     const res = await request(app.getHttpServer())
       .get('/api/auth/me')
-      .set(kardistAuth)
+      .set(staffAuth)
       .expect(200);
     expect(res.body.data.permissions).toEqual({});
   });
@@ -116,24 +133,24 @@ describe('RBAC default-deny (e2e)', () => {
     customRoleId = role.id;
     await rolePermissions.save({ roleId: role.id, permissionId: perm!.id });
 
-    const kardist = await users.findOne({
-      where: { clerkId: 'clerk_rbac_kardist' },
+    const staff = await users.findOne({
+      where: { clerkId: 'clerk_rbac_staff' },
     });
     await userRoles.save({
-      userId: kardist!.id,
+      userId: staff!.id,
       roleId: role.id,
       assignedBy: null,
     });
 
     await request(app.getHttpServer())
       .get('/api/categories')
-      .set(kardistAuth)
+      .set(staffAuth)
       .expect(200);
 
     // The grant is action-scoped: create is still denied.
     await request(app.getHttpServer())
       .post('/api/categories')
-      .set(kardistAuth)
+      .set(staffAuth)
       .send({ name: 'Nunca', slug: 'nunca' })
       .expect(403);
   });

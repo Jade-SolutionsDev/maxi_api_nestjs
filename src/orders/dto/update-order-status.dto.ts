@@ -10,7 +10,7 @@ export class UpdateOrderStatusDto {
    * Jump straight to the target, skipping intermediate steps (manual in-store
    * sales, pickups). Forward-only or to cancelled; the skipped side effects
    * (stock commit on passing confirmed, release on cancel) still apply.
-   * SUPER_ADMIN/ADMIN/GROCER only — the step-by-step path stays the safe
+   * admins or the orders:update-status-direct permission — the step-by-step path stays the safe
    * default for lower-privilege roles.
    */
   @IsOptional()

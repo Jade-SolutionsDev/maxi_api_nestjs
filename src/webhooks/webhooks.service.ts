@@ -199,6 +199,7 @@ export class WebhooksService {
       firstName,
       lastName,
       role: invitation.role,
+      roleIds: invitation.roleIds,
       phone,
       businessName,
     });

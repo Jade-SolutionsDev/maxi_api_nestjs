@@ -57,7 +57,15 @@ export const MODULE_ACTIONS: Record<string, readonly string[]> = {
   // Support inbox + reply templates share one module; `reply` is split from
   // `update` so triage and customer-facing replies are separately grantable.
   contact: [...CRUD, 'reply'],
-  orders: ['list', 'read', 'update-status', 'update-payment-status'],
+  // `update-status-direct` allows jumping straight to any status (manual
+  // warehouse sales); `update-status` alone only advances fulfillment.
+  orders: [
+    'list',
+    'read',
+    'update-status',
+    'update-status-direct',
+    'update-payment-status',
+  ],
   inventory: ['list', 'read', 'aggregate', 'history', 'create-operation'],
   'cms-settings': ['read', 'update'],
   'fulfillment-settings': ['read', 'update'],
@@ -71,22 +79,22 @@ export const isSystemAdmin = (role: string | null): boolean =>
   (role as Role) === Role.SUPER_ADMIN || (role as Role) === Role.ADMIN;
 
 /**
- * Seeded, EDITABLE base roles — they replace the old hard-coded enum baselines.
- * Created (with these grants) and auto-assigned to existing users of the enum
- * role exactly once: the first boot where no role with that `systemKey` has
- * ever existed. After that, admins own them completely — rename, regrant,
- * unassign or delete; the seeder never reasserts anything.
+ * Seeded, EDITABLE starter roles — templates an admin can assign, rename,
+ * regrant or delete. Created exactly once: the first boot where no role with
+ * that `systemKey` has ever existed; the seeder never reasserts anything.
  *
- * Grants mirror the access GROCER/KARDIST had under the old @Roles gating.
+ * The systemKeys are historical (they were the pre-collapse GROCER/KARDIST
+ * enum values) and only serve as the one-time-creation marker — nothing maps
+ * users to them automatically anymore; invitations carry explicit role ids.
  */
 const BASE_ROLES: ReadonlyArray<{
-  systemKey: Role;
+  systemKey: string;
   name: string;
   description: string;
   grants: Record<string, readonly string[]>;
 }> = [
   {
-    systemKey: Role.GROCER,
+    systemKey: 'GROCER',
     name: 'Almacenero — base',
     description:
       'Permisos iniciales del rol Almacenero. Ajústalos o retíralos según lo que necesite tu equipo.',
@@ -95,12 +103,12 @@ const BASE_ROLES: ReadonlyArray<{
       categories: ['list', 'read'],
       departments: ['list', 'read'],
       'stock-locations': ['list', 'read', 'update'],
-      orders: ['list', 'read', 'update-status'],
+      orders: ['list', 'read', 'update-status', 'update-status-direct'],
       inventory: ['list', 'read', 'history', 'create-operation'],
     },
   },
   {
-    systemKey: Role.KARDIST,
+    systemKey: 'KARDIST',
     name: 'Kardista — base',
     description:
       'Permisos iniciales del rol Kardista. Ajústalos o retíralos según lo que necesite tu equipo.',
@@ -160,9 +168,9 @@ export class PermissionsService implements OnModuleInit {
   }
 
   /**
-   * One-time creation of the editable base roles (+ grants + assignment to all
-   * existing users of the matching enum role). `withDeleted` makes deletion by
-   * an admin final — the seeder never resurrects a base role.
+   * One-time creation of the editable base roles (+ grants). `withDeleted`
+   * makes deletion by an admin final — the seeder never resurrects a base
+   * role. Nobody is auto-assigned: invitations carry explicit role ids.
    */
   private async seedBaseRoles(): Promise<void> {
     for (const base of BASE_ROLES) {
@@ -201,43 +209,74 @@ export class PermissionsService implements OnModuleInit {
           grants.map((p) => ({ roleId: role.id, permissionId: p.id })),
         );
       }
+      this.logger.log(`Seeded base role "${base.name}".`);
+    }
+  }
 
-      // Includes soft-deleted users so a later restore keeps their access.
-      const users = await this.userRepository.find({
-        where: { role: base.systemKey },
-        withDeleted: true,
+  /** Batch for list displays: active managed roles per user id. One query. */
+  async getRolesByUserIds(
+    userIds: string[],
+  ): Promise<Record<string, Array<{ id: string; name: string }>>> {
+    const result: Record<string, Array<{ id: string; name: string }>> = {};
+    if (userIds.length === 0) return result;
+    const rows = await this.userRoleRepository.find({
+      where: { userId: In(userIds) },
+      relations: { role: true },
+    });
+    for (const row of rows) {
+      if (!row.role?.isActive) continue;
+      (result[row.userId] ??= []).push({
+        id: row.role.id,
+        name: row.role.name,
       });
-      if (users.length > 0) {
-        await this.userRoleRepository.save(
-          users.map((u) => ({
-            userId: u.id,
-            roleId: role.id,
-            assignedBy: null,
-          })),
-        );
-      }
-      this.logger.log(
-        `Seeded base role "${base.name}" and assigned ${users.length} user(s).`,
-      );
+    }
+    return result;
+  }
+
+  /** Resolve role ids to {id, name}, dropping unknown/inactive ones. */
+  async getRoleSummariesByIds(
+    roleIds: string[],
+  ): Promise<Array<{ id: string; name: string }>> {
+    const unique = [...new Set(roleIds)];
+    if (unique.length === 0) return [];
+    const roles = await this.roleRepository.find({
+      where: { id: In(unique), isActive: true },
+    });
+    return roles.map((role) => ({ id: role.id, name: role.name }));
+  }
+
+  /** Throws unless every id is an existing ACTIVE role (invite validation). */
+  async assertActiveRoles(roleIds: string[]): Promise<void> {
+    const unique = [...new Set(roleIds)];
+    if (unique.length === 0) return;
+    const found = await this.roleRepository.count({
+      where: { id: In(unique), isActive: true },
+    });
+    if (found !== unique.length) {
+      throw new NotFoundException('One or more roles were not found');
     }
   }
 
   /**
-   * Give a newly created backoffice user the base role matching their enum
-   * role, if an active one exists. Composite-PK save makes it idempotent; a
-   * missing/deleted base role is simply a no-op (the admin's choice stands).
+   * Assign managed roles to a user, skipping anything that no longer exists
+   * or is inactive — a role can be deleted between an invitation and the
+   * registration webhook, and user creation must never fail over it.
+   * Composite-PK save makes it idempotent.
    */
-  async assignBaseRoleForEnumRole(userId: string, role: string): Promise<void> {
-    if (isSystemAdmin(role)) return;
-    const base = await this.roleRepository.findOne({
-      where: { systemKey: role, isActive: true },
+  async assignRolesLenient(userId: string, roleIds: string[]): Promise<void> {
+    const unique = [...new Set(roleIds)];
+    if (unique.length === 0) return;
+    const roles = await this.roleRepository.find({
+      where: { id: In(unique), isActive: true },
     });
-    if (!base) return;
-    await this.userRoleRepository.save({
-      userId,
-      roleId: base.id,
-      assignedBy: null,
-    });
+    if (roles.length === 0) return;
+    await this.userRoleRepository.save(
+      roles.map((role) => ({
+        userId,
+        roleId: role.id,
+        assignedBy: null,
+      })),
+    );
   }
 
   /**

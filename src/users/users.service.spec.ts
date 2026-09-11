@@ -31,6 +31,7 @@ describe('UsersService', () => {
   let qb: {
     withDeleted: jest.Mock;
     andWhere: jest.Mock;
+    innerJoin: jest.Mock;
     orderBy: jest.Mock;
     addOrderBy: jest.Mock;
     skip: jest.Mock;
@@ -63,6 +64,7 @@ describe('UsersService', () => {
     qb = {
       withDeleted: jest.fn().mockReturnThis(),
       andWhere: jest.fn().mockReturnThis(),
+      innerJoin: jest.fn().mockReturnThis(),
       orderBy: jest.fn().mockReturnThis(),
       addOrderBy: jest.fn().mockReturnThis(),
       skip: jest.fn().mockReturnThis(),
@@ -116,7 +118,11 @@ describe('UsersService', () => {
         },
         {
           provide: PermissionsService,
-          useValue: { assignBaseRoleForEnumRole: jest.fn() },
+          useValue: {
+            assignRolesLenient: jest.fn(),
+            getRolesByUserIds: jest.fn().mockResolvedValue({}),
+            getRoleSummariesByIds: jest.fn().mockResolvedValue([]),
+          },
         },
       ],
     }).compile();
@@ -156,7 +162,7 @@ describe('UsersService', () => {
         {
           id: 'inv-1',
           email: 'pending@example.com',
-          role: Role.KARDIST,
+          role: Role.STAFF,
           organizationId: null,
           invitedById: null,
           firstName: null,
@@ -172,6 +178,53 @@ describe('UsersService', () => {
       expect(result.data).toHaveLength(2);
       expect(result.data[0].email).toBe('pending@example.com');
       expect(result.data[0].isActive).toBe(false);
+    });
+
+    it('attaches managed roles to the page in one batched call', async () => {
+      // Fresh copy without the property — attach only fills unattached rows.
+      qb.getManyAndCount.mockResolvedValue([
+        [{ ...user, managedRoles: undefined }],
+        1,
+      ]);
+      permissionsService.getRolesByUserIds.mockResolvedValue({
+        [user.id]: [{ id: 'r1', name: 'Financista' }],
+      });
+
+      const result = await service.findAll();
+
+      expect(permissionsService.getRolesByUserIds).toHaveBeenCalledTimes(1);
+      expect(result.data[0].managedRoles).toEqual([
+        { id: 'r1', name: 'Financista' },
+      ]);
+    });
+
+    it('treats a uuid role filter as a managed-role join', async () => {
+      qb.getManyAndCount.mockResolvedValue([[], 0]);
+      const rid = '3f8b8f60-1111-4222-8333-444455556666';
+
+      await service.findAll({ role: rid });
+
+      expect(qb.innerJoin).toHaveBeenCalledWith(
+        'user_roles',
+        'ur',
+        'ur.user_id = user.id AND ur.role_id = :managedRoleId',
+        { managedRoleId: rid },
+      );
+    });
+
+    it('treats a tier role filter as the enum column', async () => {
+      qb.getManyAndCount.mockResolvedValue([[], 0]);
+      await service.findAll({ role: Role.STAFF });
+      expect(qb.andWhere).toHaveBeenCalledWith('user.role = :role', {
+        role: Role.STAFF,
+      });
+      expect(qb.innerJoin).not.toHaveBeenCalled();
+    });
+
+    it('rejects a role filter that is neither a tier nor a uuid', async () => {
+      await expect(
+        service.findAll({ role: 'nonsense' }),
+      ).rejects.toBeInstanceOf(BadRequestException);
     });
 
     it('should NOT append pending invitations when a status facet is set', async () => {
@@ -190,7 +243,7 @@ describe('UsersService', () => {
         {
           id: 'inv-1',
           email: 'p@example.com',
-          role: Role.GROCER,
+          role: Role.STAFF,
           createdAt: new Date('2026-01-02'),
         } as Invitation,
       ]);
@@ -277,23 +330,9 @@ describe('UsersService', () => {
           email: 'jane@example.com',
         }),
       );
-      // Every new user goes through the base-role hook (no-op for admins,
-      // decided inside PermissionsService).
-      expect(permissionsService.assignBaseRoleForEnumRole).toHaveBeenCalledWith(
-        user.id,
-        user.role,
-      );
-    });
-
-    it('should still create the user when the base-role hook fails', async () => {
-      repository.findOne.mockResolvedValue(null);
-      repository.create.mockReturnValue(user);
-      repository.save.mockResolvedValue(user);
-      permissionsService.assignBaseRoleForEnumRole.mockRejectedValue(
-        new Error('db down'),
-      );
-
-      await expect(service.create(createDto)).resolves.toEqual(user);
+      // Nothing automatic: roles are assigned explicitly (invitation roleIds
+      // via the webhook, or an admin through the roles endpoint).
+      expect(permissionsService.assignRolesLenient).not.toHaveBeenCalled();
     });
 
     it('should throw ConflictException for duplicate email', async () => {
@@ -372,7 +411,7 @@ describe('UsersService', () => {
       const self = { ...user };
       repository.findOne.mockResolvedValue({ ...self });
       await expect(
-        service.update(self.id, { role: Role.KARDIST }, self),
+        service.update(self.id, { role: Role.STAFF }, self),
       ).rejects.toBeInstanceOf(ForbiddenException);
     });
 
@@ -543,7 +582,7 @@ describe('UsersService', () => {
   });
 
   describe('createOrUpdateFromClerk', () => {
-    it('should create a new user defaulting to KARDIST', async () => {
+    it('should create a new user defaulting to STAFF and assign the invited roles', async () => {
       repository.findOne.mockResolvedValue(null);
       repository.create.mockReturnValue(user);
       repository.save.mockResolvedValue(user);
@@ -552,6 +591,7 @@ describe('UsersService', () => {
         email: 'NEW@EXAMPLE.COM',
         firstName: 'New',
         lastName: 'User',
+        roleIds: ['r1', 'r2'],
       });
 
       // Invited users register disabled, awaiting admin approval.
@@ -559,14 +599,31 @@ describe('UsersService', () => {
         expect.objectContaining({
           clerkId: 'clerk_new',
           email: 'new@example.com',
-          role: Role.KARDIST,
+          role: Role.STAFF,
           isActive: false,
         }),
       );
-      expect(permissionsService.assignBaseRoleForEnumRole).toHaveBeenCalledWith(
+      // The invitation chose the roles; assignment is lenient + never fatal.
+      expect(permissionsService.assignRolesLenient).toHaveBeenCalledWith(
         user.id,
-        user.role,
+        ['r1', 'r2'],
       );
+    });
+
+    it('should still create the user when role assignment fails', async () => {
+      repository.findOne.mockResolvedValue(null);
+      repository.create.mockReturnValue(user);
+      repository.save.mockResolvedValue(user);
+      permissionsService.assignRolesLenient.mockRejectedValue(
+        new Error('db down'),
+      );
+
+      await expect(
+        service.createOrUpdateFromClerk('clerk_new', {
+          email: 'new@example.com',
+          roleIds: ['r1'],
+        }),
+      ).resolves.toEqual(user);
     });
 
     it('should update an existing user without changing activation', async () => {
@@ -581,10 +638,8 @@ describe('UsersService', () => {
       expect(result.email).toBe('updated@example.com');
       // Profile updates must not re-enable a disabled account.
       expect(result.isActive).toBe(false);
-      // …and must not re-run the base-role hook.
-      expect(
-        permissionsService.assignBaseRoleForEnumRole,
-      ).not.toHaveBeenCalled();
+      // …and must not re-assign invited roles.
+      expect(permissionsService.assignRolesLenient).not.toHaveBeenCalled();
     });
   });
 

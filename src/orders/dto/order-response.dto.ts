@@ -35,7 +35,7 @@ export class OrderResponseDto {
   id: string;
   orderNumber: string | null;
   clientId: string;
-  // Denormalized so the admin list needs no /clients lookups (GROCER can't
+  // Denormalized so the admin list needs no /clients lookups (staff can't
   // read that resource).
   clientName: string | null;
   clientEmail: string | null;

@@ -1,9 +1,14 @@
-import { ConflictException } from '@nestjs/common';
+import {
+  BadRequestException,
+  ConflictException,
+  NotFoundException,
+} from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { Test, TestingModule } from '@nestjs/testing';
 import { getRepositoryToken } from '@nestjs/typeorm';
 import { createClerkClient } from '@clerk/backend';
 import { Repository } from 'typeorm';
+import { PermissionsService } from '../permissions/permissions.service';
 import { InviteUserDto } from './dto/invite-user.dto';
 import { Invitation, InvitationStatus } from './entities/invitation.entity';
 import { Role, User } from './entities/user.entity';
@@ -19,6 +24,7 @@ describe('InvitationsService', () => {
   let userRepository: jest.Mocked<Repository<User>>;
   let configService: jest.Mocked<ConfigService>;
   let revokeInvitation: jest.Mock;
+  let permissionsService: { assertActiveRoles: jest.Mock };
   const createClerkClientMock = createClerkClient as jest.MockedFunction<
     typeof createClerkClient
   >;
@@ -44,6 +50,7 @@ describe('InvitationsService', () => {
   };
 
   beforeEach(async () => {
+    permissionsService = { assertActiveRoles: jest.fn() };
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         InvitationsService,
@@ -66,6 +73,10 @@ describe('InvitationsService', () => {
           useValue: {
             get: jest.fn(),
           },
+        },
+        {
+          provide: PermissionsService,
+          useValue: permissionsService,
         },
       ],
     }).compile();
@@ -115,7 +126,7 @@ describe('InvitationsService', () => {
 
       const dto: InviteUserDto = {
         email: 'new@example.com',
-        role: Role.KARDIST,
+        role: Role.STAFF,
       };
 
       const result = await service.createAndSendInvitation(dto, inviter);
@@ -124,12 +135,62 @@ describe('InvitationsService', () => {
       expect(invitationRepository.create).toHaveBeenCalledWith(
         expect.objectContaining({
           email: 'new@example.com',
-          role: Role.KARDIST,
+          role: Role.STAFF,
           invitedById: inviter.id,
           clerkInvitationId: 'clerk_app_invite_id',
           status: InvitationStatus.PENDING,
         }),
       );
+    });
+
+    it('stores the invited managed roles after validating them', async () => {
+      userRepository.findOne.mockResolvedValue(null);
+      invitationRepository.findOne.mockResolvedValue(null);
+      invitationRepository.create.mockReturnValue({
+        id: 'invite-id',
+      } as Invitation);
+      invitationRepository.save.mockResolvedValue({
+        id: 'invite-id',
+      } as Invitation);
+
+      await service.createAndSendInvitation(
+        {
+          email: 'new@example.com',
+          role: Role.STAFF,
+          roleIds: ['r1', 'r2', 'r1'], // dupes collapse
+        },
+        inviter,
+      );
+
+      expect(permissionsService.assertActiveRoles).toHaveBeenCalledWith([
+        'r1',
+        'r2',
+      ]);
+      expect(invitationRepository.create).toHaveBeenCalledWith(
+        expect.objectContaining({ roleIds: ['r1', 'r2'] }),
+      );
+    });
+
+    it('rejects managed roles on an admin-tier invitation', async () => {
+      await expect(
+        service.createAndSendInvitation(
+          { email: 'new@example.com', role: Role.ADMIN, roleIds: ['r1'] },
+          inviter,
+        ),
+      ).rejects.toBeInstanceOf(BadRequestException);
+      expect(invitationRepository.save).not.toHaveBeenCalled();
+    });
+
+    it('propagates unknown role ids from validation', async () => {
+      permissionsService.assertActiveRoles.mockRejectedValue(
+        new NotFoundException('One or more roles were not found'),
+      );
+      await expect(
+        service.createAndSendInvitation(
+          { email: 'new@example.com', role: Role.STAFF, roleIds: ['nope'] },
+          inviter,
+        ),
+      ).rejects.toBeInstanceOf(NotFoundException);
     });
 
     it('should create an organization invitation when organizationId is provided', async () => {
@@ -166,7 +227,7 @@ describe('InvitationsService', () => {
 
       const dto: InviteUserDto = {
         email: inviter.email!,
-        role: Role.KARDIST,
+        role: Role.STAFF,
       };
 
       await expect(
@@ -182,7 +243,7 @@ describe('InvitationsService', () => {
 
       const dto: InviteUserDto = {
         email: 'new@example.com',
-        role: Role.KARDIST,
+        role: Role.STAFF,
       };
 
       await expect(
@@ -195,7 +256,7 @@ describe('InvitationsService', () => {
 
       const dto: InviteUserDto = {
         email: 'new@example.com',
-        role: Role.KARDIST,
+        role: Role.STAFF,
       };
 
       await expect(

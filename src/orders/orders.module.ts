@@ -12,6 +12,7 @@ import { OrderItem } from './entities/order-item.entity';
 import { Order } from './entities/order.entity';
 import { OrdersController } from './orders.controller';
 import { OrdersService } from './orders.service';
+import { PermissionsModule } from '../permissions/permissions.module';
 import { StorefrontOrdersController } from './storefront-orders.controller';
 
 @Module({
@@ -24,6 +25,7 @@ import { StorefrontOrdersController } from './storefront-orders.controller';
     GeographyModule,
     InventoryModule,
     PaymentsModule,
+    PermissionsModule,
     ProductsModule,
   ],
   controllers: [OrdersController, StorefrontOrdersController],

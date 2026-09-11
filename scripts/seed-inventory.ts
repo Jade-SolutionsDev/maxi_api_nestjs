@@ -74,7 +74,7 @@ async function main() {
     process.exit(1);
   }
   const provinceIdByCode = new Map(provinces.map((p) => [p.code, p.id]));
-  const grocer = await userRepo.findOne({ where: { role: Role.GROCER } });
+  const grocer = await userRepo.findOne({ where: { role: Role.STAFF } });
 
   // 1) Ensure the storages + coverage (+ grocer assignment on active ones).
   const locations: StockLocation[] = [];

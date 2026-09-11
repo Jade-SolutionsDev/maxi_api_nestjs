@@ -30,6 +30,10 @@ export class Invitation {
   })
   role: Role;
 
+  /** Managed roles to assign when the invited STAFF user registers. */
+  @Column('uuid', { name: 'role_ids', array: true, default: () => "'{}'" })
+  roleIds: string[];
+
   @Column({ name: 'invited_by', type: 'uuid', nullable: true })
   invitedById: string | null;
 

@@ -18,8 +18,12 @@ import {
   PaginatedResponse,
 } from '../common/dto/pagination.dto';
 import { InventoryService } from '../inventory/inventory.service';
+import {
+  isSystemAdmin,
+  PermissionsService,
+} from '../permissions/permissions.service';
 import { ProductsService } from '../products/products.service';
-import { Role, User } from '../users/entities/user.entity';
+import { User } from '../users/entities/user.entity';
 import {
   AdminOrdersQueryDto,
   SIN_METODO_DE_PAGO,
@@ -59,9 +63,9 @@ const PAYMENT_TRANSITIONS: Record<PaymentStatus, PaymentStatus[]> = {
   [PaymentStatus.REFUNDED]: [],
 };
 
-// Fulfillment steps a GROCER may drive; confirm/cancel (which move stock and
-// commit the sale) and payment stay with ADMIN+.
-const GROCER_TARGETS = [
+// Fulfillment steps non-admin staff may drive; confirm/cancel (which move
+// stock and commit the sale) and payment stay with ADMIN+.
+const STAFF_TARGETS = [
   OrderStatus.PROCESSING,
   OrderStatus.SHIPPED,
   OrderStatus.DELIVERED,
@@ -75,9 +79,6 @@ const FORWARD_CHAIN = [
   OrderStatus.SHIPPED,
   OrderStatus.DELIVERED,
 ];
-
-// Roles trusted to skip the step-by-step path (manual in-store sales, pickups).
-const DIRECT_JUMP_ROLES = [Role.SUPER_ADMIN, Role.ADMIN, Role.GROCER];
 
 /** What the order keeps of an address, independent of the address book. */
 const snapshotAddress = (
@@ -131,6 +132,7 @@ export class OrdersService {
     private readonly productsService: ProductsService,
     private readonly clientAddressesService: ClientAddressesService,
     private readonly geographyService: GeographyService,
+    private readonly permissionsService: PermissionsService,
     private readonly dataSource: DataSource,
   ) {}
 
@@ -645,7 +647,7 @@ export class OrdersService {
     }
 
     if (direct) {
-      this.assertDirectJump(user, order, status);
+      await this.assertDirectJump(user, order, status);
     } else {
       if (!TRANSITIONS[order.status].includes(status)) {
         throw new ConflictException(
@@ -653,11 +655,9 @@ export class OrdersService {
         );
       }
       // Confirm/cancel commit or release stock — admin-level decisions. Any
-      // non-admin granted `orders:update-status` (grocer or custom role) is
-      // limited to advancing fulfillment.
-      const isAdmin =
-        user.role === Role.SUPER_ADMIN || user.role === Role.ADMIN;
-      if (!isAdmin && !GROCER_TARGETS.includes(status)) {
+      // non-admin granted `orders:update-status` is limited to advancing
+      // fulfillment.
+      if (!isSystemAdmin(user.role) && !STAFF_TARGETS.includes(status)) {
         throw new ForbiddenException(
           'Non-admin staff can only advance fulfillment (processing, shipped, delivered)',
         );
@@ -697,16 +697,22 @@ export class OrdersService {
 
   // Direct jumps skip the step chain but never its rules of physics: forward
   // only (or to cancelled), never out of a terminal state, and reserved for
-  // the roles that run manual in-store sales. The step-by-step path stays the
-  // safe default for future lower-privilege roles.
-  private assertDirectJump(
+  // whoever runs manual in-store sales — a grantable permission, so admins
+  // decide per role. The step-by-step path stays the safe default.
+  private async assertDirectJump(
     user: User,
     order: Order,
     status: OrderStatus,
-  ): void {
-    if (!DIRECT_JUMP_ROLES.includes(user.role)) {
+  ): Promise<void> {
+    const allowed = await this.permissionsService.hasPermission(
+      user.id,
+      user.role,
+      'orders',
+      'update-status-direct',
+    );
+    if (!allowed) {
       throw new ForbiddenException(
-        'Only admins and grocers can change the status directly',
+        'You need the direct status-change permission to do this',
       );
     }
     if (TRANSITIONS[order.status].length === 0) {

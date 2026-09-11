@@ -23,6 +23,8 @@ export class UserResponseDto {
   createdBy: string | null;
   createdAt: Date;
   updatedAt: Date;
+  /** Active managed roles (empty when not attached — e.g. lookup endpoints). */
+  managedRoles: Array<{ id: string; name: string }>;
 
   static fromEntity(user: User, isPending = false): UserResponseDto {
     const dto = new UserResponseDto();
@@ -56,6 +58,7 @@ export class UserResponseDto {
     dto.createdBy = user.createdBy;
     dto.createdAt = user.createdAt;
     dto.updatedAt = user.updatedAt;
+    dto.managedRoles = user.managedRoles ?? [];
     return dto;
   }
 }

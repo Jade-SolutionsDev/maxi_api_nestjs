@@ -27,11 +27,15 @@ import { Invitation, InvitationStatus } from './entities/invitation.entity';
 
 export interface FindUsersFilter {
   q?: string;
-  role?: Role;
+  /** Access tier (Role value) OR a managed-role uuid — one overloaded param. */
+  role?: string;
   status?: UserStatusFilter;
   includeInvitations?: boolean;
   includeDeleted?: boolean;
 }
+
+const UUID_RE =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 @Injectable()
 export class UsersService {
@@ -66,6 +70,19 @@ export class UsersService {
   ): Promise<PaginatedResponse<User>> {
     const { page, limit, skip } = getPaginationParams(pagination);
 
+    // The "Rol" filter is one param carrying either an access tier or a
+    // managed-role uuid (the list UI mixes both in one dropdown).
+    const tierFilter = Object.values(Role).includes(filter.role as Role)
+      ? (filter.role as Role)
+      : undefined;
+    const managedRoleFilter =
+      !tierFilter && filter.role && UUID_RE.test(filter.role)
+        ? filter.role
+        : undefined;
+    if (filter.role && !tierFilter && !managedRoleFilter) {
+      throw new BadRequestException(`Unknown role filter "${filter.role}"`);
+    }
+
     // "Pending" (the "Awaiting approval" tab) combines two not-yet-usable
     // states: pending invitations (not registered) and registered users that
     // haven't been approved yet (isActive=false, never approved).
@@ -80,12 +97,11 @@ export class UsersService {
       const combined = [...invitations, ...awaiting].sort(
         (a, b) => b.createdAt.getTime() - a.createdAt.getTime(),
       );
-      return buildPaginatedResponse(
-        combined.slice(skip, skip + limit),
-        combined.length,
-        page,
-        limit,
+      const pageItems = combined.slice(skip, skip + limit);
+      await this.attachManagedRoles(
+        pageItems.filter((u) => u.managedRoles === undefined),
       );
+      return buildPaginatedResponse(pageItems, combined.length, page, limit);
     }
 
     const qb = this.usersRepository.createQueryBuilder('user');
@@ -99,8 +115,16 @@ export class UsersService {
         { q: `%${filter.q}%` },
       );
     }
-    if (filter.role) {
-      qb.andWhere('user.role = :role', { role: filter.role });
+    if (tierFilter) {
+      qb.andWhere('user.role = :role', { role: tierFilter });
+    }
+    if (managedRoleFilter) {
+      qb.innerJoin(
+        'user_roles',
+        'ur',
+        'ur.user_id = user.id AND ur.role_id = :managedRoleId',
+        { managedRoleId: managedRoleFilter },
+      );
     }
     if (filter.status === 'active') {
       qb.andWhere('user.isActive = true');
@@ -132,16 +156,39 @@ export class UsersService {
     let total = usersTotal;
 
     // Only the unfiltered ("all") view mixes in pending invitations, pinned to
-    // the first page. Status facets are exclusive.
+    // the first page. Status facets are exclusive. The role filter applies to
+    // invitations too — by tier, or by invited managed role.
     if (!filter.status && filter.includeInvitations) {
-      const pendingUsers = await this.loadPendingInvitationUsers();
+      let pendingUsers = await this.loadPendingInvitationUsers();
+      if (tierFilter) {
+        pendingUsers = pendingUsers.filter((u) => u.role === tierFilter);
+      }
+      if (managedRoleFilter) {
+        pendingUsers = pendingUsers.filter((u) =>
+          u.managedRoles?.some((r) => r.id === managedRoleFilter),
+        );
+      }
       total += pendingUsers.length;
       if (page === 1) {
         items = [...pendingUsers, ...users];
       }
     }
 
+    await this.attachManagedRoles(
+      items.filter((u) => u.managedRoles === undefined),
+    );
     return buildPaginatedResponse(items, total, page, limit);
+  }
+
+  /** One batched query: attach active managed roles to the given users. */
+  private async attachManagedRoles(users: User[]): Promise<void> {
+    if (users.length === 0) return;
+    const byUser = await this.permissionsService.getRolesByUserIds(
+      users.map((u) => u.id),
+    );
+    for (const user of users) {
+      user.managedRoles = byUser[user.id] ?? [];
+    }
   }
 
   private async loadPendingInvitationUsers(): Promise<User[]> {
@@ -149,6 +196,13 @@ export class UsersService {
       where: { status: InvitationStatus.PENDING },
       order: { createdAt: 'DESC', id: 'DESC' },
     });
+
+    // Resolve the invited managed roles in one batch so the list can show
+    // what the person was invited AS (their fake ids have no user_roles).
+    const summaries = await this.permissionsService.getRoleSummariesByIds(
+      invitations.flatMap((i) => i.roleIds ?? []),
+    );
+    const roleById = new Map(summaries.map((r) => [r.id, r]));
 
     return invitations.map((invitation) => {
       const user = new User();
@@ -169,6 +223,9 @@ export class UsersService {
       user.createdBy = invitation.invitedById;
       user.createdAt = invitation.createdAt;
       user.updatedAt = invitation.updatedAt;
+      user.managedRoles = (invitation.roleIds ?? [])
+        .map((id) => roleById.get(id))
+        .filter((r): r is { id: string; name: string } => Boolean(r));
       return user;
     });
   }
@@ -178,6 +235,7 @@ export class UsersService {
     if (!user) {
       throw new NotFoundException(`User with id "${id}" not found`);
     }
+    await this.attachManagedRoles([user]);
     return user;
   }
 
@@ -205,15 +263,9 @@ export class UsersService {
       email: createUserDto.email?.toLowerCase() ?? null,
     });
 
-    const saved = await this.usersRepository.save(user);
-    // Non-admins start with the editable base role of their system role (if the
-    // admins haven't deleted it) — without it they'd have zero permissions.
-    await this.safeMirror(
-      () =>
-        this.permissionsService.assignBaseRoleForEnumRole(saved.id, saved.role),
-      `assign base role ${saved.role}`,
-    );
-    return saved;
+    // Roles are assigned explicitly (invitation roleIds via the webhook, or
+    // an admin through PUT /permissions/users/:id/roles) — nothing automatic.
+    return this.usersRepository.save(user);
   }
 
   async update(
@@ -389,6 +441,8 @@ export class UsersService {
       firstName?: string;
       lastName?: string;
       role?: Role;
+      /** Managed roles from the invitation, assigned on first creation. */
+      roleIds?: string[];
       phone?: string;
       businessName?: string;
     },
@@ -413,7 +467,7 @@ export class UsersService {
         lastName: data.lastName ?? null,
         phone: data.phone ?? null,
         businessName: data.businessName ?? null,
-        role: data.role ?? Role.KARDIST,
+        role: data.role ?? Role.STAFF,
         isActive: false,
       });
     } else {
@@ -432,13 +486,15 @@ export class UsersService {
 
     const saved = await this.usersRepository.save(user);
     if (isNew) {
+      // The invitation chose the managed roles; assign them leniently (a role
+      // deleted since the invite is skipped, and this never fails creation).
       await this.safeMirror(
         () =>
-          this.permissionsService.assignBaseRoleForEnumRole(
+          this.permissionsService.assignRolesLenient(
             saved.id,
-            saved.role,
+            data.roleIds ?? [],
           ),
-        `assign base role ${saved.role}`,
+        `assign invited roles`,
       );
     }
     return saved;
