@@ -1,5 +1,6 @@
 import { Order } from '../orders/entities/order.entity';
 import { ChargeStatus, PaymentCharge } from './entities/payment-charge.entity';
+import { PaymentMethod } from './entities/payment-method.entity';
 
 /**
  * How the customer completes the payment. The storefront branches on this and
@@ -50,9 +51,15 @@ export abstract class PaymentGateway {
   /** Credentials present in the environment. A method cannot be enabled without this. */
   abstract get configured(): boolean;
 
+  /**
+   * `method` es la fila de catálogo que eligió el cliente. Las pasarelas con
+   * clase propia la ignoran; la manual personalizada la necesita, porque una
+   * sola instancia sirve a todas las filas que crea el admin.
+   */
   abstract createCharge(
     order: Order,
     idempotencyKey: string,
+    method?: PaymentMethod,
   ): Promise<GatewayCharge>;
 
   /** Refresh a non-terminal charge from the gateway. */

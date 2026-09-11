@@ -96,6 +96,23 @@ export class PaymentCharge {
   @Column({ name: 'last_payload', type: 'jsonb', nullable: true })
   lastPayload: Record<string, unknown> | null;
 
+  /**
+   * Lo que el cliente dice haber pagado: nro. de transferencia, de
+   * Transfermóvil o hash de la transacción. En un método manual es el único
+   * dato con el que alguien puede casar el pago con el pedido.
+   */
+  @Column({
+    name: 'customer_reference',
+    type: 'varchar',
+    length: 200,
+    nullable: true,
+  })
+  customerReference: string | null;
+
+  /** Captura del comprobante que subió el cliente, si subió alguna. */
+  @Column({ name: 'receipt_url', type: 'text', nullable: true })
+  receiptUrl: string | null;
+
   @Column({ name: 'error_message', type: 'text', nullable: true })
   errorMessage: string | null;
 
