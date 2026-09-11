@@ -17,6 +17,10 @@ import { CmsService as CmsServiceEntity } from './entities/cms-service.entity';
 import { CmsSiteSettings } from './entities/cms-site-settings.entity';
 import { CmsStaffMember } from './entities/cms-staff-member.entity';
 import { PublicCmsController } from './public-cms.controller';
+import { CmsFaqCategory } from './entities/cms-faq-category.entity';
+import { CmsFaqQuestion } from './entities/cms-faq-question.entity';
+import { CmsFaqController } from './cms-faq.controller';
+import { CmsFaqService } from './cms-faq.service';
 
 @Module({
   imports: [
@@ -26,6 +30,8 @@ import { PublicCmsController } from './public-cms.controller';
       CmsServiceEntity,
       CmsStaffMember,
       CmsSiteSettings,
+      CmsFaqCategory,
+      CmsFaqQuestion,
       Category,
       Product,
     ]),
@@ -39,9 +45,10 @@ import { PublicCmsController } from './public-cms.controller';
     CmsServicesController,
     CmsStaffController,
     CmsSettingsController,
+    CmsFaqController,
     PublicCmsController,
   ],
-  providers: [CmsService],
-  exports: [CmsService],
+  providers: [CmsService, CmsFaqService],
+  exports: [CmsService, CmsFaqService],
 })
 export class CmsModule {}

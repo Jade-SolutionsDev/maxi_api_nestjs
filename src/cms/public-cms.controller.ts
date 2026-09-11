@@ -3,11 +3,13 @@ import { ApiOperation, ApiTags } from '@nestjs/swagger';
 import { TAXONOMY_CACHE } from '../common/constants/cache-control';
 import { Public } from '../common/decorators/public.decorator';
 import { CmsService } from './cms.service';
+import { CmsFaqService } from './cms-faq.service';
 import { PublicCmsBannerResponseDto } from './dto/cms-banner.dto';
 import { CmsPageResponseDto } from './dto/cms-page.dto';
 import { CmsServiceResponseDto } from './dto/cms-service.dto';
 import { SiteSettingsData } from './entities/cms-site-settings.entity';
 import { CmsStaffMemberResponseDto } from './dto/cms-staff-member.dto';
+import { PublicCmsFaqCategoryDto } from './dto/cms-faq.dto';
 
 // Unauthenticated storefront content. Editorial data is small and stable:
 // every route returns the full active set (no pagination) and shares the
@@ -17,7 +19,10 @@ import { CmsStaffMemberResponseDto } from './dto/cms-staff-member.dto';
 @Controller('public/cms')
 @Public()
 export class PublicCmsController {
-  constructor(private readonly cmsService: CmsService) {}
+  constructor(
+    private readonly cmsService: CmsService,
+    private readonly faqService: CmsFaqService,
+  ) {}
 
   @Get('settings')
   @Header('Cache-Control', TAXONOMY_CACHE)
@@ -48,6 +53,13 @@ export class PublicCmsController {
   async staff(): Promise<CmsStaffMemberResponseDto[]> {
     const staff = await this.cmsService.listStaffPublic();
     return staff.map(CmsStaffMemberResponseDto.fromEntity);
+  }
+
+  @Get('faqs')
+  @Header('Cache-Control', TAXONOMY_CACHE)
+  @ApiOperation({ summary: 'Active FAQ categories and questions in order' })
+  faqs(): Promise<PublicCmsFaqCategoryDto[]> {
+    return this.faqService.listPublic();
   }
 
   @Get('pages')
