@@ -30,10 +30,10 @@ class FaqLinkPairConstraint implements ValidatorConstraintInterface {
     if (!label && !href) return true;
     return Boolean(
       label &&
-        label.length <= 120 &&
-        href &&
-        href.length <= 500 &&
-        SAFE_FAQ_HREF.test(href),
+      label.length <= 120 &&
+      href &&
+      href.length <= 500 &&
+      SAFE_FAQ_HREF.test(href),
     );
   }
 

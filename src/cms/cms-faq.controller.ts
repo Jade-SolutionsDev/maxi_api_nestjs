@@ -67,9 +67,7 @@ export class CmsFaqController {
 
   @Delete('categories/:id')
   @HttpCode(204)
-  async removeCategory(
-    @Param('id', ParseUUIDPipe) id: string,
-  ): Promise<void> {
+  async removeCategory(@Param('id', ParseUUIDPipe) id: string): Promise<void> {
     await this.faqService.removeCategory(id);
   }
 
@@ -113,9 +111,7 @@ export class CmsFaqController {
 
   @Delete('questions/:id')
   @HttpCode(204)
-  async removeQuestion(
-    @Param('id', ParseUUIDPipe) id: string,
-  ): Promise<void> {
+  async removeQuestion(@Param('id', ParseUUIDPipe) id: string): Promise<void> {
     await this.faqService.removeQuestion(id);
   }
 }
