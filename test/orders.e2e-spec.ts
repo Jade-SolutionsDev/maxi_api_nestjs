@@ -22,6 +22,13 @@ const TABLES =
 const CRON_SECRET = 'orders_e2e_cron';
 process.env.CRON_SECRET = CRON_SECRET;
 
+// Obligatorio en toda recogida desde MxH-0104: quién pasa a buscar el pedido.
+const CONTACTO_RECOGIDA = {
+  recipientName: 'Daniel Smith',
+  idCard: '91031512345',
+  contactPhone: '55512345',
+};
+
 describe('Orders (e2e)', () => {
   let app: INestApplication;
   let clients: Repository<Client>;
@@ -522,6 +529,7 @@ describe('Orders (e2e)', () => {
         .send({
           fulfillmentType: 'pickup',
           pickupAddressId: offer.pickupPoints[0].id,
+          contact: CONTACTO_RECOGIDA,
         })
         .expect(201);
 
@@ -664,6 +672,7 @@ describe('Orders (e2e)', () => {
           fulfillmentType: 'pickup',
           pickupAddressId: counter.id,
           deliveryMunicipalityId: municipalityId,
+          contact: CONTACTO_RECOGIDA,
         })
         .expect(201);
       const orderId = res.body.data.id as string;
@@ -738,6 +747,7 @@ describe('Orders (e2e)', () => {
           fulfillmentType: 'pickup',
           pickupAddressId: counter.id,
           deliveryMunicipalityId: municipalityId,
+          contact: CONTACTO_RECOGIDA,
         })
         .expect(201);
       const orderId = res.body.data.id as string;
