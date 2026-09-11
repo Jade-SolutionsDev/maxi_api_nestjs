@@ -53,9 +53,7 @@ export class CmsFaqService {
     return category;
   }
 
-  async createCategory(
-    dto: CreateCmsFaqCategoryDto,
-  ): Promise<CmsFaqCategory> {
+  async createCategory(dto: CreateCmsFaqCategoryDto): Promise<CmsFaqCategory> {
     const category = this.categoryRepository.create({
       title: text(dto.title),
       sortOrder: dto.sortOrder ?? 0,
@@ -102,9 +100,7 @@ export class CmsFaqService {
     return question;
   }
 
-  async createQuestion(
-    dto: CreateCmsFaqQuestionDto,
-  ): Promise<CmsFaqQuestion> {
+  async createQuestion(dto: CreateCmsFaqQuestionDto): Promise<CmsFaqQuestion> {
     await this.getCategory(dto.categoryId);
     const question = this.questionRepository.create({
       categoryId: dto.categoryId,

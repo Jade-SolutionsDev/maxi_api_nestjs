@@ -22,24 +22,19 @@ const repo = (): RepoMock => ({
   softDelete: jest.fn(),
 });
 
-const category = (
-  overrides: Partial<CmsFaqCategory> = {},
-): CmsFaqCategory =>
-  ({
-    id: '11111111-1111-4111-8111-111111111111',
-    title: 'Pagos',
-    sortOrder: 10,
-    isActive: true,
-    questions: [],
-    createdAt: new Date('2026-01-01'),
-    updatedAt: new Date('2026-01-01'),
-    deletedAt: null,
-    ...overrides,
-  }) as CmsFaqCategory;
+const category = (overrides: Partial<CmsFaqCategory> = {}): CmsFaqCategory => ({
+  id: '11111111-1111-4111-8111-111111111111',
+  title: 'Pagos',
+  sortOrder: 10,
+  isActive: true,
+  questions: [],
+  createdAt: new Date('2026-01-01'),
+  updatedAt: new Date('2026-01-01'),
+  deletedAt: null,
+  ...overrides,
+});
 
-const question = (
-  overrides: Partial<CmsFaqQuestion> = {},
-): CmsFaqQuestion =>
+const question = (overrides: Partial<CmsFaqQuestion> = {}): CmsFaqQuestion =>
   ({
     id: '22222222-2222-4222-8222-222222222222',
     categoryId: '11111111-1111-4111-8111-111111111111',
@@ -87,10 +82,7 @@ describe('CmsFaqService', () => {
   it('returns only active questions and omits empty public categories', async () => {
     categoryRepo.find.mockResolvedValue([
       category({
-        questions: [
-          question(),
-          question({ id: 'inactive', isActive: false }),
-        ],
+        questions: [question(), question({ id: 'inactive', isActive: false })],
       }),
       category({ id: 'empty', title: 'Vacía', questions: [] }),
     ]);
