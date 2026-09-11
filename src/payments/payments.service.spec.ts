@@ -2,6 +2,7 @@ import {
   BadGatewayException,
   BadRequestException,
   ConflictException,
+  NotFoundException,
 } from '@nestjs/common';
 import { Test, TestingModule } from '@nestjs/testing';
 import { getRepositoryToken } from '@nestjs/typeorm';
@@ -100,6 +101,9 @@ class FakeGateway extends PaymentGateway {
   }
 }
 
+/** La fila de catálogo que acompaña a la pasarela en cada cobro. */
+const methodRow = (code = 'fake') => ({ code, label: code }) as never;
+
 describe('PaymentsService', () => {
   let service: PaymentsService;
   let gateway: FakeGateway;
@@ -113,6 +117,9 @@ describe('PaymentsService', () => {
   let methods: { gatewayFor: jest.Mock; resolve: jest.Mock };
   let orderItemRepo: { find: jest.Mock };
   let inventory: { reserve: jest.Mock };
+
+  // `createChargeForOrder` recibe la pasarela y la fila que la eligió.
+  const resolved = () => ({ gateway, method: methodRow(gateway.code) });
 
   beforeEach(async () => {
     gateway = new FakeGateway();
@@ -128,7 +135,7 @@ describe('PaymentsService', () => {
     };
     methods = {
       gatewayFor: jest.fn().mockReturnValue(gateway),
-      resolve: jest.fn().mockResolvedValue(gateway),
+      resolve: jest.fn().mockResolvedValue({ gateway, method: methodRow() }),
     };
     orderItemRepo = {
       find: jest.fn().mockResolvedValue([{ productId: 'prod-1', quantity: 2 }]),
@@ -165,11 +172,12 @@ describe('PaymentsService', () => {
     it('keys each attempt by provider and attempt number', async () => {
       chargeRepo.count.mockResolvedValue(2); // two prior attempts
 
-      await service.createChargeForOrder(makeOrder(), gateway);
+      await service.createChargeForOrder(makeOrder(), resolved());
 
       expect(gateway.createCharge).toHaveBeenCalledWith(
         expect.anything(),
         'order_ORD-20260001_fake_3',
+        expect.objectContaining({ code: 'fake' }),
       );
     });
 
@@ -177,7 +185,7 @@ describe('PaymentsService', () => {
       gateway.createCharge.mockRejectedValue(new Error('ECONNREFUSED'));
 
       await expect(
-        service.createChargeForOrder(makeOrder(), gateway),
+        service.createChargeForOrder(makeOrder(), resolved()),
       ).rejects.toBeInstanceOf(BadGatewayException);
     });
 
@@ -187,12 +195,12 @@ describe('PaymentsService', () => {
       );
 
       await expect(
-        service.createChargeForOrder(makeOrder(), gateway),
+        service.createChargeForOrder(makeOrder(), resolved()),
       ).rejects.toBeInstanceOf(BadRequestException);
     });
 
     it('stamps the provider on the charge and the reference on the order', async () => {
-      await service.createChargeForOrder(makeOrder(), gateway);
+      await service.createChargeForOrder(makeOrder(), resolved());
 
       expect(chargeRepo.save).toHaveBeenCalledWith(
         expect.objectContaining({
@@ -299,6 +307,7 @@ describe('PaymentsService', () => {
       expect(gateway.createCharge).toHaveBeenCalledWith(
         expect.anything(),
         'order_ORD-20260001_fake_2',
+        expect.objectContaining({ code: 'fake' }),
       );
     });
 
@@ -532,7 +541,10 @@ describe('PaymentsService', () => {
       chargeRepo.save.mockRejectedValueOnce(uniqueViolation);
       chargeRepo.findOne.mockResolvedValue(stored);
 
-      const result = await service.createChargeForOrder(makeOrder(), gateway);
+      const result = await service.createChargeForOrder(
+        makeOrder(),
+        resolved(),
+      );
 
       expect(result).toBe(stored);
       expect(chargeRepo.findOne).toHaveBeenCalledWith({
@@ -545,7 +557,7 @@ describe('PaymentsService', () => {
       chargeRepo.findOne.mockResolvedValue(null);
 
       await expect(
-        service.createChargeForOrder(makeOrder(), gateway),
+        service.createChargeForOrder(makeOrder(), resolved()),
       ).rejects.toBe(uniqueViolation);
     });
 
@@ -556,9 +568,59 @@ describe('PaymentsService', () => {
       chargeRepo.save.mockRejectedValueOnce(boom);
 
       await expect(
-        service.createChargeForOrder(makeOrder(), gateway),
+        service.createChargeForOrder(makeOrder(), resolved()),
       ).rejects.toBe(boom);
       expect(chargeRepo.findOne).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('comprobante del cliente', () => {
+    it('guarda la referencia sin dar el pedido por pagado', async () => {
+      orderRepo.findOne.mockResolvedValue(makeOrder());
+      chargeRepo.findOne.mockResolvedValue(makeCharge());
+
+      await service.submitProof('client-1', 'order-1', 'TM-998877', null);
+
+      expect(chargeRepo.save).toHaveBeenCalledWith(
+        expect.objectContaining({ customerReference: 'TM-998877' }),
+      );
+      // Confirmar sigue siendo un acto de un admin: eso distingue lo manual.
+      expect(orderRepo.save).not.toHaveBeenCalled();
+    });
+
+    it('guarda la captura cuando la manda', async () => {
+      orderRepo.findOne.mockResolvedValue(makeOrder());
+      chargeRepo.findOne.mockResolvedValue(makeCharge());
+
+      await service.submitProof(
+        'client-1',
+        'order-1',
+        'TM-1',
+        'https://cdn/recibo.png',
+      );
+
+      expect(chargeRepo.save).toHaveBeenCalledWith(
+        expect.objectContaining({ receiptUrl: 'https://cdn/recibo.png' }),
+      );
+    });
+
+    it('no acepta comprobantes de un pedido ya pagado', async () => {
+      orderRepo.findOne.mockResolvedValue(
+        makeOrder({ paymentStatus: PaymentStatus.PAID }),
+      );
+
+      await expect(
+        service.submitProof('client-1', 'order-1', 'TM-1', null),
+      ).rejects.toBeInstanceOf(BadRequestException);
+    });
+
+    it('404 si el pedido todavía no tiene cobro', async () => {
+      orderRepo.findOne.mockResolvedValue(makeOrder());
+      chargeRepo.findOne.mockResolvedValue(null);
+
+      await expect(
+        service.submitProof('client-1', 'order-1', 'TM-1', null),
+      ).rejects.toBeInstanceOf(NotFoundException);
     });
   });
 });

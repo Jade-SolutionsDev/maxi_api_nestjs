@@ -41,8 +41,10 @@ import { ClientAddressesService } from '../client-addresses/client-addresses.ser
 import { ClientAddress } from '../client-addresses/entities/client-address.entity';
 import { FulfillmentService } from '../fulfillment/fulfillment.service';
 import { GeographyService } from '../geography/geography.service';
-import { PaymentGateway } from '../payments/payment-gateway.interface';
-import { PaymentMethodsService } from '../payments/payment-methods.service';
+import {
+  PaymentMethodsService,
+  ResolvedPaymentMethod,
+} from '../payments/payment-methods.service';
 import { PaymentsService } from '../payments/payments.service';
 
 const TRANSITIONS: Record<OrderStatus, OrderStatus[]> = {
@@ -232,7 +234,9 @@ export class OrdersService {
     // Resolved before anything is written: an unknown or disabled method must
     // 400 rather than silently produce an order nobody can pay. DB-only, no
     // gateway call.
-    const gateway = await this.paymentMethodsService.resolve(dto.paymentMethod);
+    const resolvedPayment = await this.paymentMethodsService.resolve(
+      dto.paymentMethod,
+    );
 
     const total = (cart.subtotal + Number(fulfillment.fee)).toFixed(2);
 
@@ -330,7 +334,7 @@ export class OrdersService {
       }
     }
 
-    void this.initiatePayment(orderId, gateway);
+    void this.initiatePayment(orderId, resolvedPayment);
 
     return this.findOneForClient(client.id, orderId);
   }
@@ -386,13 +390,13 @@ export class OrdersService {
   // order unpaid with no attempt, which the order page offers to retry.
   private async initiatePayment(
     orderId: string,
-    gateway: PaymentGateway,
+    resolved: ResolvedPaymentMethod,
   ): Promise<void> {
     try {
       const order = (await this.orderRepository.findOne({
         where: { id: orderId },
       })) as Order;
-      await this.paymentsService.createChargeForOrder(order, gateway);
+      await this.paymentsService.createChargeForOrder(order, resolved);
     } catch (err) {
       this.logger.error(
         `Payment initiation failed for order ${orderId}`,

@@ -55,7 +55,7 @@ export class UploadsController {
     // Storage folder allowlist: an arbitrary prefix would let a client write
     // anywhere in the bucket namespace. Default keeps the historical folder.
     const folder = prefix ?? 'taxonomy';
-    if (!['taxonomy', 'cms'].includes(folder)) {
+    if (!['taxonomy', 'cms', 'payments'].includes(folder)) {
       throw new BadRequestException(`Unsupported prefix "${prefix}"`);
     }
     return this.storageService.uploadImage(file.buffer, file.mimetype, folder);

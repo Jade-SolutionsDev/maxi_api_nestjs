@@ -69,7 +69,6 @@ export const MODULE_ACTIONS: Record<string, readonly string[]> = {
   inventory: ['list', 'read', 'aggregate', 'history', 'create-operation'],
   'cms-settings': ['read', 'update'],
   'fulfillment-settings': ['read', 'update'],
-  'payment-methods': ['list', 'update'],
   dashboard: ['view'],
   uploads: ['create'],
 };

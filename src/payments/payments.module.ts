@@ -7,6 +7,7 @@ import { OrderItem } from '../orders/entities/order-item.entity';
 import { Order } from '../orders/entities/order.entity';
 import { PaymentCharge } from './entities/payment-charge.entity';
 import { PaymentMethod } from './entities/payment-method.entity';
+import { CustomManualGateway } from './gateways/custom-manual/custom-manual.gateway';
 import { ManualGateway } from './gateways/manual/manual.gateway';
 import { MibiClient } from './gateways/mibilletera/mibi-client';
 import { MibilleteraGateway } from './gateways/mibilletera/mibilletera.gateway';
@@ -50,6 +51,7 @@ import { StorefrontPaymentMethodsController } from './storefront-payment-methods
     MibiClient,
     TropipayClient,
     ManualGateway,
+    CustomManualGateway,
     MibilleteraGateway,
     MibilleteraWalletGateway,
     TropipayGateway,
