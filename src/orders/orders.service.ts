@@ -28,6 +28,7 @@ import { CheckoutDto } from './dto/checkout.dto';
 import { OrderResponseDto } from './dto/order-response.dto';
 import { OrderItem } from './entities/order-item.entity';
 import {
+  CancellationReason,
   FulfillmentType,
   Order,
   OrderStatus,
@@ -628,6 +629,82 @@ export class OrdersService {
       order.status = status;
       await manager.getRepository(Order).save(order);
     });
+    return this.findOneAdmin(id);
+  }
+
+  /**
+   * «Restablecer orden»: devuelve a `pending` un pedido cancelado y vuelve a
+   * apartar su stock. Toca SOLO el estado del pedido — el del pago queda como
+   * estaba — y reinicia el plazo de pago vía `reinstatedAt`: si nadie lo paga
+   * dentro de la ventana, la caducidad lo vuelve a cancelar. Si falta stock de
+   * alguna línea no se cambia nada y se responde 409 nombrando el producto.
+   * Solo administradores (el controlador lo exige por rol).
+   */
+  async reinstate(user: User, id: string): Promise<OrderResponseDto> {
+    const order = await this.orderRepository.findOne({ where: { id } });
+    if (!order) {
+      throw new NotFoundException(`Order with id "${id}" not found`);
+    }
+    if (order.status !== OrderStatus.CANCELLED) {
+      throw new ConflictException(
+        `Only cancelled orders can be reinstated (current status: "${order.status}")`,
+      );
+    }
+    if (
+      order.cancellationReason ===
+      CancellationReason.PAID_AFTER_EXPIRY_OUT_OF_STOCK
+    ) {
+      throw new ConflictException(
+        'This order was paid after expiring and its stock was gone: it needs a refund, not a reinstatement',
+      );
+    }
+
+    // Same storage rules as a fresh checkout: only storages covering the
+    // delivery municipality, and the pickup counter first for a pickup.
+    const coveringIds = order.deliveryMunicipalityId
+      ? await this.productsService.coveringLocationIds({
+          municipalityId: order.deliveryMunicipalityId,
+        })
+      : undefined;
+    const allowedLocationIds =
+      coveringIds && order.pickupLocationId
+        ? [...new Set([...coveringIds, order.pickupLocationId])]
+        : coveringIds;
+
+    await this.dataSource.transaction(async (manager) => {
+      const items = await manager
+        .getRepository(OrderItem)
+        .find({ where: { orderId: order.id } });
+      for (const item of items) {
+        try {
+          await this.inventoryService.reserve(
+            manager,
+            order.id,
+            item.productId,
+            item.quantity,
+            {
+              allowedLocationIds,
+              preferredLocationId: order.pickupLocationId ?? undefined,
+            },
+          );
+        } catch (err) {
+          if (err instanceof ConflictException) {
+            throw new ConflictException(
+              `No hay stock suficiente de "${item.productNameSnapshot}" (${item.quantity}) para restablecer el pedido`,
+            );
+          }
+          throw err;
+        }
+      }
+      order.status = OrderStatus.PENDING;
+      order.cancellationReason = null;
+      order.reinstatedAt = new Date();
+      order.reinstatedBy = user.id;
+      await manager.getRepository(Order).save(order);
+    });
+    this.logger.log(
+      `Order ${order.orderNumber ?? order.id} reinstated by user ${user.id}: back to pending, stock re-reserved`,
+    );
     return this.findOneAdmin(id);
   }
 

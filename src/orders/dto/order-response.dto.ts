@@ -74,6 +74,13 @@ export class OrderResponseDto {
    */
   cancellationReason: CancellationReason | null;
   /**
+   * Set when an admin brought the order back from cancelled to pending
+   * («Restablecer orden»). The payment window restarts from this instant.
+   */
+  reinstatedAt: Date | null;
+  /** Admin user id who reinstated the order; null when it never was. */
+  reinstatedBy: string | null;
+  /**
    * Pickup order still holding reserved stock at a storage other than its
    * counter: the admin must coordinate a transfer before the customer arrives.
    * Present on list rows and detail responses alike.
@@ -117,6 +124,8 @@ export class OrderResponseDto {
     dto.deliveryAddress = order.deliveryAddress;
     dto.customerNotes = order.customerNotes;
     dto.cancellationReason = order.cancellationReason;
+    dto.reinstatedAt = order.reinstatedAt ?? null;
+    dto.reinstatedBy = order.reinstatedBy ?? null;
     dto.items = order.items?.map(OrderItemResponseDto.fromEntity);
     dto.createdAt = order.createdAt;
     dto.updatedAt = order.updatedAt;
