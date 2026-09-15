@@ -13,7 +13,12 @@ import { InventoryService } from '../inventory/inventory.service';
 import { ProductsService } from '../products/products.service';
 import { Role, User } from '../users/entities/user.entity';
 import { OrderItem } from './entities/order-item.entity';
-import { Order, OrderStatus, PaymentStatus } from './entities/order.entity';
+import {
+  CancellationReason,
+  Order,
+  OrderStatus,
+  PaymentStatus,
+} from './entities/order.entity';
 import { OrdersService } from './orders.service';
 import { ClientAddressesService } from '../client-addresses/client-addresses.service';
 import { FulfillmentService } from '../fulfillment/fulfillment.service';
@@ -100,7 +105,7 @@ describe('OrdersService', () => {
     create: jest.Mock;
   };
   let permissionsService: { hasPermission: jest.Mock };
-  let orderItemRepo: { save: jest.Mock; create: jest.Mock };
+  let orderItemRepo: { save: jest.Mock; create: jest.Mock; find: jest.Mock };
   let cartItemRepo: { delete: jest.Mock };
 
   beforeEach(async () => {
@@ -119,6 +124,7 @@ describe('OrdersService', () => {
     orderItemRepo = {
       save: jest.fn().mockImplementation((o: unknown) => Promise.resolve(o)),
       create: jest.fn().mockImplementation((o: unknown) => o),
+      find: jest.fn().mockResolvedValue([]),
     };
     cartItemRepo = { delete: jest.fn() };
     cartService = { getCart: jest.fn() };
@@ -852,6 +858,93 @@ describe('OrdersService', () => {
       expect(orderRepo.save).toHaveBeenCalledWith(
         expect.objectContaining({ paymentStatus: PaymentStatus.REFUNDED }),
       );
+    });
+  });
+
+  describe('reinstate («Restablecer orden»)', () => {
+    const admin = makeUser(Role.ADMIN);
+    const expired = () =>
+      makeOrder({
+        status: OrderStatus.CANCELLED,
+        cancellationReason: CancellationReason.PAYMENT_NOT_RECEIVED,
+        pickupLocationId: 'loc-counter',
+        createdAt: new Date(Date.now() - 12 * 24 * 3_600_000),
+      });
+    const lines = [
+      {
+        productId: 'prod-1',
+        quantity: 1,
+        productNameSnapshot: 'Balita de gas',
+      },
+      { productId: 'prod-2', quantity: 3, productNameSnapshot: 'Cerveza' },
+    ];
+
+    beforeEach(() => {
+      orderItemRepo.find.mockResolvedValue(lines);
+      orderRepo.findOne
+        .mockResolvedValueOnce(expired())
+        .mockResolvedValue(makeOrder({ items: [] }));
+    });
+
+    it('re-reserves every line and puts the order back to pending', async () => {
+      await service.reinstate(admin, 'order-1');
+
+      expect(inventoryService.reserve).toHaveBeenCalledTimes(2);
+      expect(inventoryService.reserve).toHaveBeenCalledWith(
+        expect.anything(),
+        'order-1',
+        'prod-1',
+        1,
+        expect.objectContaining({ preferredLocationId: 'loc-counter' }),
+      );
+      const saved = orderRepo.save.mock.calls[0][0] as Order;
+      expect(saved.status).toBe(OrderStatus.PENDING);
+      expect(saved.cancellationReason).toBeNull();
+      expect(saved.reinstatedBy).toBe('user-1');
+      expect(saved.reinstatedAt).toBeInstanceOf(Date);
+    });
+
+    it('leaves the payment status exactly as it was', async () => {
+      await service.reinstate(admin, 'order-1');
+
+      const saved = orderRepo.save.mock.calls[0][0] as Order;
+      expect(saved.paymentStatus).toBe(PaymentStatus.PENDING);
+    });
+
+    it('409s naming the product when its stock is gone, without saving', async () => {
+      inventoryService.reserve
+        .mockResolvedValueOnce(undefined)
+        .mockRejectedValueOnce(new ConflictException('Insufficient stock'));
+
+      await expect(service.reinstate(admin, 'order-1')).rejects.toThrow(
+        /Cerveza/,
+      );
+      expect(orderRepo.save).not.toHaveBeenCalled();
+    });
+
+    it('refuses an order that is not cancelled', async () => {
+      orderRepo.findOne.mockReset();
+      orderRepo.findOne.mockResolvedValue(makeOrder());
+
+      await expect(service.reinstate(admin, 'order-1')).rejects.toBeInstanceOf(
+        ConflictException,
+      );
+      expect(inventoryService.reserve).not.toHaveBeenCalled();
+    });
+
+    it('refuses the paid-after-expiry case, which needs a refund instead', async () => {
+      orderRepo.findOne.mockReset();
+      orderRepo.findOne.mockResolvedValue(
+        makeOrder({
+          status: OrderStatus.CANCELLED,
+          cancellationReason: CancellationReason.PAID_AFTER_EXPIRY_OUT_OF_STOCK,
+        }),
+      );
+
+      await expect(service.reinstate(admin, 'order-1')).rejects.toBeInstanceOf(
+        ConflictException,
+      );
+      expect(inventoryService.reserve).not.toHaveBeenCalled();
     });
   });
 

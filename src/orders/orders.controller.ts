@@ -2,9 +2,11 @@ import {
   Body,
   Controller,
   Get,
+  HttpCode,
   Param,
   ParseUUIDPipe,
   Patch,
+  Post,
   Query,
   Req,
 } from '@nestjs/common';
@@ -17,7 +19,9 @@ import {
 } from '@nestjs/swagger';
 import type { AuthenticatedUserRequest } from '../auth/types/authenticated-request';
 import { PaginatedResponse } from '../common/dto/pagination.dto';
+import { Roles } from '../common/decorators/roles.decorator';
 import { RequirePermission } from '../permissions/decorators/require-permission.decorator';
+import { Role } from '../users/entities/user.entity';
 import { AdminOrdersQueryDto } from './dto/admin-orders-query.dto';
 import { OrderResponseDto } from './dto/order-response.dto';
 import { UpdateOrderStatusDto } from './dto/update-order-status.dto';
@@ -86,6 +90,29 @@ export class OrdersController {
       dto.status,
       dto.direct ?? false,
     );
+  }
+
+  @Post(':id/reinstate')
+  @HttpCode(200)
+  @Roles(Role.SUPER_ADMIN, Role.ADMIN)
+  @ApiOperation({
+    summary: 'Reinstate a cancelled order («Restablecer orden»)',
+    description:
+      'Moves a cancelled order back to pending and re-reserves its stock. ' +
+      'Only the order status changes: the payment status is untouched, and ' +
+      'the payment window restarts now, so an order nobody pays expires ' +
+      'again. Admins only. 409 when the order is not cancelled, was paid ' +
+      'after expiring (refund instead), or the stock is gone.',
+  })
+  @ApiOkResponse({ type: OrderResponseDto })
+  @ApiConflictResponse({
+    description: 'Not cancelled, needs a refund instead, or out of stock.',
+  })
+  reinstate(
+    @Req() req: AuthenticatedUserRequest,
+    @Param('id', ParseUUIDPipe) id: string,
+  ): Promise<OrderResponseDto> {
+    return this.ordersService.reinstate(req.user, id);
   }
 
   @Patch(':id/payment-status')

@@ -174,6 +174,26 @@ describe('OrderExpiryService', () => {
   });
 
   // The race the whole design exists to avoid.
+  it('measures from the reinstatement when an admin brought the order back', async () => {
+    // Twelve days old, no payment attempt, reinstated two hours ago: the
+    // manual window (24h) counts from the reinstatement, not from creation.
+    await sweepWith(
+      makeOrder({
+        createdAt: ago(12 * 24 * HOUR),
+        reinstatedAt: ago(2 * HOUR),
+      }),
+    );
+    expect(inventory.releaseReservations).not.toHaveBeenCalled();
+
+    await sweepWith(
+      makeOrder({
+        createdAt: ago(12 * 24 * HOUR),
+        reinstatedAt: ago(25 * HOUR),
+      }),
+    );
+    expect(inventory.releaseReservations).toHaveBeenCalledTimes(1);
+  });
+
   it('never cancels while money is in flight at the gateway', async () => {
     await sweepWith(
       makeOrder(),

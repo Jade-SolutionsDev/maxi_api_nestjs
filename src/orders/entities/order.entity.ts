@@ -175,6 +175,17 @@ export class Order {
   })
   cancellationReason: CancellationReason | null;
 
+  /**
+   * Cuándo y quién devolvió el pedido de «cancelado» a «pendiente» desde la
+   * administración («Restablecer orden»). Además de dejar rastro, reinicia el
+   * plazo de pago: la caducidad cuenta desde aquí y no desde `createdAt`.
+   */
+  @Column({ name: 'reinstated_at', type: 'timestamptz', nullable: true })
+  reinstatedAt: Date | null;
+
+  @Column({ name: 'reinstated_by', type: 'uuid', nullable: true })
+  reinstatedBy: string | null;
+
   @OneToMany(() => OrderItem, (item) => item.order)
   items?: OrderItem[];
 
