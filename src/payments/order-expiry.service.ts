@@ -116,7 +116,15 @@ export class OrderExpiryService {
     // Counted from the last payment attempt, so retrying earns a fresh window.
     // With no attempt at all (initiation failed) the order's own age is all we
     // have, and it gets the longer manual window.
-    const startedAt = charge?.createdAt ?? order.createdAt;
+    // The clock starts at the latest payment attempt (or the order itself when
+    // there was none) — unless an admin reinstated the order («Restablecer
+    // orden») after that: then it restarts there, or a days-old reinstated
+    // order would expire again on the very next sweep.
+    const base = charge?.createdAt ?? order.createdAt;
+    const startedAt =
+      order.reinstatedAt && order.reinstatedAt > base
+        ? order.reinstatedAt
+        : base;
     return now - startedAt.getTime() >= window;
   }
 
