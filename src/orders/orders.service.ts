@@ -23,6 +23,8 @@ import {
   PermissionsService,
 } from '../permissions/permissions.service';
 import { ProductsService } from '../products/products.service';
+import { OrderEventKind } from '../order-events/entities/order-event.entity';
+import { OrderEventsService } from '../order-events/order-events.service';
 import { User } from '../users/entities/user.entity';
 import {
   AdminOrdersQueryDto,
@@ -136,6 +138,7 @@ export class OrdersService {
     private readonly clientAddressesService: ClientAddressesService,
     private readonly geographyService: GeographyService,
     private readonly permissionsService: PermissionsService,
+    private readonly orderEvents: OrderEventsService,
     private readonly dataSource: DataSource,
   ) {}
 
@@ -315,6 +318,18 @@ export class OrdersService {
       }
 
       await manager.getRepository(CartItem).delete({ clientId: client.id });
+      await this.orderEvents.record(manager, {
+        orderId: order.id,
+        kind: OrderEventKind.CREATED,
+        actor: { clientId: client.id },
+        field: 'status',
+        nextValue: OrderStatus.PENDING,
+        meta: {
+          total,
+          fulfillmentType: fulfillment.type,
+          paymentMethod: dto.paymentMethod ?? null,
+        },
+      });
       return order.id;
     });
 
@@ -468,8 +483,18 @@ export class OrdersService {
     }
     await this.dataSource.transaction(async (manager) => {
       await this.inventoryService.releaseReservations(manager, order.id);
+      const previous = order.status;
       order.status = OrderStatus.CANCELLED;
       await manager.getRepository(Order).save(order);
+      await this.orderEvents.record(manager, {
+        orderId: order.id,
+        kind: OrderEventKind.STATUS_CHANGED,
+        actor: { clientId },
+        field: 'status',
+        previousValue: previous,
+        nextValue: OrderStatus.CANCELLED,
+        reason: 'Cancelado por el cliente desde la tienda',
+      });
     });
     return this.findOneForClient(clientId, id);
   }
@@ -694,8 +719,18 @@ export class OrdersService {
           user.id,
         );
       }
+      const previous = order.status;
       order.status = status;
       await manager.getRepository(Order).save(order);
+      await this.orderEvents.record(manager, {
+        orderId: order.id,
+        kind: OrderEventKind.STATUS_CHANGED,
+        actor: { userId: user.id },
+        field: 'status',
+        previousValue: previous,
+        nextValue: status,
+        meta: direct ? { direct: true } : null,
+      });
     });
     return this.findOneAdmin(id);
   }
@@ -802,11 +837,22 @@ export class OrdersService {
           throw err;
         }
       }
+      const previous = order.status;
       order.status = OrderStatus.PENDING;
       order.cancellationReason = null;
       order.reinstatedAt = new Date();
       order.reinstatedBy = user.id;
       await manager.getRepository(Order).save(order);
+      await this.orderEvents.record(manager, {
+        orderId: order.id,
+        kind: OrderEventKind.REINSTATED,
+        actor: { userId: user.id },
+        field: 'status',
+        previousValue: previous,
+        nextValue: OrderStatus.PENDING,
+        reason:
+          'Restablecida desde la administración; el plazo de pago vuelve a empezar',
+      });
     });
     this.logger.log(
       `Order ${order.orderNumber ?? order.id} reinstated by user ${user.id}: back to pending, stock re-reserved`,
@@ -817,6 +863,7 @@ export class OrdersService {
   // Manual override (refunds, gateway-outage corrections). Guarded so an
   // admin can't produce nonsense like paid -> pending.
   async updatePaymentStatus(
+    user: User,
     id: string,
     paymentStatus: PaymentStatus,
   ): Promise<OrderResponseDto> {
@@ -829,8 +876,30 @@ export class OrdersService {
         `Cannot move payment from "${order.paymentStatus}" to "${paymentStatus}"`,
       );
     }
+    const previous = order.paymentStatus;
     order.paymentStatus = paymentStatus;
     await this.orderRepository.save(order);
+    await this.orderEvents.record(null, {
+      orderId: order.id,
+      kind: OrderEventKind.PAYMENT_STATUS_CHANGED,
+      actor: { userId: user.id },
+      field: 'paymentStatus',
+      previousValue: previous,
+      nextValue: paymentStatus,
+      reason: 'Marcado a mano desde la administración',
+    });
     return this.findOneAdmin(id);
+  }
+
+  /** Historial del pedido, del más antiguo al más reciente. */
+  async listEvents(id: string) {
+    const exists = await this.orderRepository.findOne({
+      where: { id },
+      select: { id: true },
+    });
+    if (!exists) {
+      throw new NotFoundException(`Order with id "${id}" not found`);
+    }
+    return this.orderEvents.listForOrder(id);
   }
 }

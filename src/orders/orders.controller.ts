@@ -23,6 +23,7 @@ import { Roles } from '../common/decorators/roles.decorator';
 import { RequirePermission } from '../permissions/decorators/require-permission.decorator';
 import { Role } from '../users/entities/user.entity';
 import { AdminOrdersQueryDto } from './dto/admin-orders-query.dto';
+import { OrderEventResponseDto } from '../order-events/dto/order-event-response.dto';
 import { OrderResponseDto } from './dto/order-response.dto';
 import { UpdateOrderStatusDto } from './dto/update-order-status.dto';
 import { UpdatePaymentStatusDto } from './dto/update-payment-status.dto';
@@ -125,9 +126,30 @@ export class OrdersController {
   })
   @ApiOkResponse({ type: OrderResponseDto })
   updatePaymentStatus(
+    @Req() req: AuthenticatedUserRequest,
     @Param('id', ParseUUIDPipe) id: string,
     @Body() dto: UpdatePaymentStatusDto,
   ): Promise<OrderResponseDto> {
-    return this.ordersService.updatePaymentStatus(id, dto.paymentStatus);
+    return this.ordersService.updatePaymentStatus(
+      req.user,
+      id,
+      dto.paymentStatus,
+    );
+  }
+
+  @Get(':id/events')
+  @RequirePermission({ module: 'orders', action: 'read' })
+  @ApiOperation({
+    summary: 'Order history',
+    description:
+      'Every change the order went through, oldest first: creation, status ' +
+      'and payment changes, payment attempts, proofs, reinstatements and ' +
+      'expiry, each with who did it (admin, client or the system).',
+  })
+  @ApiOkResponse({ type: OrderEventResponseDto, isArray: true })
+  listEvents(
+    @Param('id', ParseUUIDPipe) id: string,
+  ): Promise<OrderEventResponseDto[]> {
+    return this.ordersService.listEvents(id);
   }
 }
