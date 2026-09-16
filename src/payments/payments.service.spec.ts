@@ -55,6 +55,8 @@ function makeCharge(overrides: Partial<PaymentCharge> = {}): PaymentCharge {
     errorMessage: null,
     expiresAt: new Date(Date.now() + 300_000),
     completedAt: null,
+    customerReference: null,
+    receiptUrl: null,
     createdAt: new Date(),
     updatedAt: new Date(),
     ...overrides,
