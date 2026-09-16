@@ -2,6 +2,7 @@ import {
   BadRequestException,
   ConflictException,
   ForbiddenException,
+  NotFoundException,
 } from '@nestjs/common';
 import { Test, TestingModule } from '@nestjs/testing';
 import { getRepositoryToken } from '@nestjs/typeorm';
@@ -26,6 +27,8 @@ import { GeographyService } from '../geography/geography.service';
 import { PermissionsService } from '../permissions/permissions.service';
 import { PaymentMethodsService } from '../payments/payment-methods.service';
 import { PaymentsService } from '../payments/payments.service';
+import { OrderEventsService } from '../order-events/order-events.service';
+import { OrderEventKind } from '../order-events/entities/order-event.entity';
 
 function makeClient(): Client {
   return { id: 'client-1', defaultMunicipalityId: 'mun-1' } as Client;
@@ -105,6 +108,7 @@ describe('OrdersService', () => {
     create: jest.Mock;
   };
   let permissionsService: { hasPermission: jest.Mock };
+  let orderEvents: { record: jest.Mock; listForOrder: jest.Mock };
   let orderItemRepo: { save: jest.Mock; create: jest.Mock; find: jest.Mock };
   let cartItemRepo: { delete: jest.Mock };
 
@@ -165,6 +169,10 @@ describe('OrdersService', () => {
           Promise.resolve(role === Role.SUPER_ADMIN || role === Role.ADMIN),
         ),
     };
+    orderEvents = {
+      record: jest.fn().mockResolvedValue(undefined),
+      listForOrder: jest.fn().mockResolvedValue([]),
+    };
     geographyService = {
       getMunicipalityOrThrow: jest
         .fn()
@@ -204,6 +212,7 @@ describe('OrdersService', () => {
         { provide: ClientAddressesService, useValue: clientAddressesService },
         { provide: GeographyService, useValue: geographyService },
         { provide: PermissionsService, useValue: permissionsService },
+        { provide: OrderEventsService, useValue: orderEvents },
         { provide: DataSource, useValue: dataSource },
       ],
     }).compile();
@@ -831,7 +840,11 @@ describe('OrdersService', () => {
         .mockResolvedValueOnce(makeOrder())
         .mockResolvedValue(makeOrder({ items: [] }));
 
-      await service.updatePaymentStatus('order-1', PaymentStatus.PAID);
+      await service.updatePaymentStatus(
+        makeUser(Role.ADMIN),
+        'order-1',
+        PaymentStatus.PAID,
+      );
 
       expect(orderRepo.save).toHaveBeenCalledWith(
         expect.objectContaining({ paymentStatus: PaymentStatus.PAID }),
@@ -844,7 +857,11 @@ describe('OrdersService', () => {
       );
 
       await expect(
-        service.updatePaymentStatus('order-1', PaymentStatus.PENDING),
+        service.updatePaymentStatus(
+          makeUser(Role.ADMIN),
+          'order-1',
+          PaymentStatus.PENDING,
+        ),
       ).rejects.toBeInstanceOf(ConflictException);
     });
 
@@ -853,7 +870,11 @@ describe('OrdersService', () => {
         .mockResolvedValueOnce(makeOrder({ paymentStatus: PaymentStatus.PAID }))
         .mockResolvedValue(makeOrder({ items: [] }));
 
-      await service.updatePaymentStatus('order-1', PaymentStatus.REFUNDED);
+      await service.updatePaymentStatus(
+        makeUser(Role.ADMIN),
+        'order-1',
+        PaymentStatus.REFUNDED,
+      );
 
       expect(orderRepo.save).toHaveBeenCalledWith(
         expect.objectContaining({ paymentStatus: PaymentStatus.REFUNDED }),
@@ -945,6 +966,102 @@ describe('OrdersService', () => {
         ConflictException,
       );
       expect(inventoryService.reserve).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('historial del pedido', () => {
+    it('anota quién cambió el estado, y de qué a qué', async () => {
+      orderRepo.findOne
+        .mockResolvedValueOnce(makeOrder())
+        .mockResolvedValue(makeOrder({ items: [] }));
+
+      await service.updateStatus(
+        makeUser(Role.ADMIN),
+        'order-1',
+        OrderStatus.CONFIRMED,
+      );
+
+      expect(orderEvents.record).toHaveBeenCalledWith(
+        expect.anything(),
+        expect.objectContaining({
+          orderId: 'order-1',
+          kind: OrderEventKind.STATUS_CHANGED,
+          actor: { userId: 'user-1' },
+          field: 'status',
+          previousValue: OrderStatus.PENDING,
+          nextValue: OrderStatus.CONFIRMED,
+        }),
+      );
+    });
+
+    it('anota el cambio de pago hecho a mano por un admin', async () => {
+      orderRepo.findOne
+        .mockResolvedValueOnce(makeOrder())
+        .mockResolvedValue(makeOrder({ items: [] }));
+
+      await service.updatePaymentStatus(
+        makeUser(Role.ADMIN),
+        'order-1',
+        PaymentStatus.PAID,
+      );
+
+      expect(orderEvents.record).toHaveBeenCalledWith(
+        null,
+        expect.objectContaining({
+          kind: OrderEventKind.PAYMENT_STATUS_CHANGED,
+          actor: { userId: 'user-1' },
+          previousValue: PaymentStatus.PENDING,
+          nextValue: PaymentStatus.PAID,
+        }),
+      );
+    });
+
+    it('anota el restablecimiento con su motivo', async () => {
+      orderItemRepo.find.mockResolvedValue([]);
+      orderRepo.findOne
+        .mockResolvedValueOnce(
+          makeOrder({
+            status: OrderStatus.CANCELLED,
+            cancellationReason: CancellationReason.PAYMENT_NOT_RECEIVED,
+          }),
+        )
+        .mockResolvedValue(makeOrder({ items: [] }));
+
+      await service.reinstate(makeUser(Role.ADMIN), 'order-1');
+
+      expect(orderEvents.record).toHaveBeenCalledWith(
+        expect.anything(),
+        expect.objectContaining({
+          kind: OrderEventKind.REINSTATED,
+          previousValue: OrderStatus.CANCELLED,
+          nextValue: OrderStatus.PENDING,
+        }),
+      );
+    });
+
+    it('anota la cancelación hecha por el cliente', async () => {
+      orderRepo.findOne
+        .mockResolvedValueOnce(makeOrder())
+        .mockResolvedValue(makeOrder({ items: [] }));
+
+      await service.cancelByClient('client-1', 'order-1');
+
+      expect(orderEvents.record).toHaveBeenCalledWith(
+        expect.anything(),
+        expect.objectContaining({
+          kind: OrderEventKind.STATUS_CHANGED,
+          actor: { clientId: 'client-1' },
+          nextValue: OrderStatus.CANCELLED,
+        }),
+      );
+    });
+
+    it('lista el historial solo de pedidos que existen', async () => {
+      orderRepo.findOne.mockResolvedValue(null);
+      await expect(service.listEvents('nope')).rejects.toBeInstanceOf(
+        NotFoundException,
+      );
+      expect(orderEvents.listForOrder).not.toHaveBeenCalled();
     });
   });
 

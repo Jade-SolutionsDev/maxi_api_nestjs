@@ -8,6 +8,7 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { getRepositoryToken } from '@nestjs/typeorm';
 import { DataSource } from 'typeorm';
 import { InventoryService } from '../inventory/inventory.service';
+import { OrderEventsService } from '../order-events/order-events.service';
 import { ProductsService } from '../products/products.service';
 import { OrderItem } from '../orders/entities/order-item.entity';
 import {
@@ -150,6 +151,10 @@ describe('PaymentsService', () => {
         { provide: getRepositoryToken(OrderItem), useValue: orderItemRepo },
         { provide: PaymentMethodsService, useValue: methods },
         { provide: InventoryService, useValue: inventory },
+        {
+          provide: OrderEventsService,
+          useValue: { record: jest.fn().mockResolvedValue(undefined) },
+        },
         {
           provide: ProductsService,
           useValue: { coveringLocationIds: jest.fn().mockResolvedValue([]) },

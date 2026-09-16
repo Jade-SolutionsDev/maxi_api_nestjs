@@ -11,6 +11,7 @@ import {
   PaymentStatus,
 } from '../orders/entities/order.entity';
 import { InventoryService } from '../inventory/inventory.service';
+import { OrderEventsService } from '../order-events/order-events.service';
 import { ChargeStatus, PaymentCharge } from './entities/payment-charge.entity';
 import { OrderExpiryService } from './order-expiry.service';
 import { PaymentMethodsService } from './payment-methods.service';
@@ -80,6 +81,10 @@ describe('OrderExpiryService', () => {
         { provide: PaymentsService, useValue: payments },
         { provide: PaymentMethodsService, useValue: methods },
         { provide: InventoryService, useValue: inventory },
+        {
+          provide: OrderEventsService,
+          useValue: { record: jest.fn().mockResolvedValue(undefined) },
+        },
         {
           provide: ConfigService,
           useValue: {

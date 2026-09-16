@@ -5,6 +5,8 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { DataSource, In, IsNull, LessThan, Repository } from 'typeorm';
 import { ExpiryConfig, PaymentsConfig } from '../config/configuration';
 import { InventoryService } from '../inventory/inventory.service';
+import { OrderEventKind } from '../order-events/entities/order-event.entity';
+import { OrderEventsService } from '../order-events/order-events.service';
 import {
   CancellationReason,
   Order,
@@ -45,6 +47,7 @@ export class OrderExpiryService {
     private readonly methodsService: PaymentMethodsService,
     private readonly inventoryService: InventoryService,
     private readonly configService: ConfigService,
+    private readonly orderEvents: OrderEventsService,
     private readonly dataSource: DataSource,
   ) {}
 
@@ -163,6 +166,15 @@ export class OrderExpiryService {
         fresh.status = OrderStatus.CANCELLED;
         fresh.cancellationReason = CancellationReason.PAYMENT_NOT_RECEIVED;
         await repo.save(fresh);
+        await this.orderEvents.record(manager, {
+          orderId: fresh.id,
+          kind: OrderEventKind.EXPIRED,
+          actor: { system: true },
+          field: 'status',
+          previousValue: OrderStatus.PENDING,
+          nextValue: OrderStatus.CANCELLED,
+          reason: 'No se recibió el pago a tiempo; el stock se liberó',
+        });
         return true;
       });
     } catch (err) {

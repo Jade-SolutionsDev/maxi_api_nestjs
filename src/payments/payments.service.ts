@@ -10,6 +10,8 @@ import {
 import { InjectRepository } from '@nestjs/typeorm';
 import { DataSource, In, Repository } from 'typeorm';
 import { InventoryService } from '../inventory/inventory.service';
+import { OrderEventKind } from '../order-events/entities/order-event.entity';
+import { OrderEventsService } from '../order-events/order-events.service';
 import { ProductsService } from '../products/products.service';
 import { OrderItem } from '../orders/entities/order-item.entity';
 import {
@@ -62,6 +64,7 @@ export class PaymentsService {
     private readonly methodsService: PaymentMethodsService,
     private readonly inventoryService: InventoryService,
     private readonly productsService: ProductsService,
+    private readonly orderEvents: OrderEventsService,
     private readonly dataSource: DataSource,
   ) {}
 
@@ -180,6 +183,18 @@ export class PaymentsService {
 
     order.paymentRef = data.reference;
     await this.orderRepository.save(order);
+    await this.orderEvents.record(null, {
+      orderId: order.id,
+      kind: OrderEventKind.PAYMENT_ATTEMPT,
+      actor: { clientId: order.clientId },
+      meta: {
+        provider: code,
+        methodLabel: method.label,
+        reference: data.reference,
+        chargeStatus: data.status,
+        attempt,
+      },
+    });
     return charge;
   }
 
@@ -343,6 +358,16 @@ export class PaymentsService {
     charge.customerReference = reference;
     if (receiptUrl) charge.receiptUrl = receiptUrl;
     await this.chargeRepository.save(charge);
+    await this.orderEvents.record(null, {
+      orderId: order.id,
+      kind: OrderEventKind.PROOF_SUBMITTED,
+      actor: { clientId },
+      meta: {
+        provider: charge.provider,
+        reference,
+        hasReceipt: !!receiptUrl,
+      },
+    });
 
     this.logger.log(
       `Comprobante recibido para ${order.orderNumber ?? order.id} ` +
@@ -425,6 +450,7 @@ export class PaymentsService {
     });
     if (!order || order.paymentStatus === PaymentStatus.PAID) return;
 
+    const previous = order.paymentStatus;
     if (charge.status === ChargeStatus.SUCCEEDED) {
       order.paymentStatus = PaymentStatus.PAID;
     } else if (charge.status === ChargeStatus.FAILED) {
@@ -433,6 +459,16 @@ export class PaymentsService {
       return;
     }
     await this.orderRepository.save(order);
+    await this.orderEvents.record(null, {
+      orderId: order.id,
+      kind: OrderEventKind.PAYMENT_STATUS_CHANGED,
+      actor: { system: true },
+      field: 'paymentStatus',
+      previousValue: previous,
+      nextValue: order.paymentStatus,
+      reason: `Notificado por la pasarela ${charge.provider}`,
+      meta: { provider: charge.provider, reference: charge.reference },
+    });
 
     if (order.paymentStatus === PaymentStatus.PAID) {
       await this.reinstateIfExpired(order);
@@ -491,9 +527,20 @@ export class PaymentsService {
         // The one sanctioned cancelled -> pending move: TRANSITIONS forbids it
         // everywhere else, but here the order was only cancelled because we
         // had not been paid, and now we have been.
+        const previous = order.status;
         order.status = OrderStatus.PENDING;
         order.cancellationReason = null;
         await manager.getRepository(Order).save(order);
+        await this.orderEvents.record(manager, {
+          orderId: order.id,
+          kind: OrderEventKind.REINSTATED,
+          actor: { system: true },
+          field: 'status',
+          previousValue: previous,
+          nextValue: OrderStatus.PENDING,
+          reason:
+            'El pago llegó después de caducar y el stock seguía disponible',
+        });
       });
       this.logger.log(
         `Order ${order.orderNumber ?? order.id} reinstated: payment arrived after expiry and the stock was still there`,
@@ -512,10 +559,21 @@ export class PaymentsService {
       }
     }
 
+    const previousReason = order.cancellationReason;
     order.status = OrderStatus.CANCELLED;
     order.cancellationReason =
       CancellationReason.PAID_AFTER_EXPIRY_OUT_OF_STOCK;
     await this.orderRepository.save(order);
+    await this.orderEvents.record(null, {
+      orderId: order.id,
+      kind: OrderEventKind.STATUS_CHANGED,
+      actor: { system: true },
+      field: 'cancellationReason',
+      previousValue: previousReason,
+      nextValue: CancellationReason.PAID_AFTER_EXPIRY_OUT_OF_STOCK,
+      reason:
+        'El pago llegó después de caducar y ya no había stock: hay que reembolsar',
+    });
     this.logger.warn(
       `Order ${order.orderNumber ?? order.id} was paid after expiring but the stock is gone — refund required`,
     );
