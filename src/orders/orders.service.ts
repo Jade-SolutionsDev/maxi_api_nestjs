@@ -25,6 +25,7 @@ import {
 import { ProductsService } from '../products/products.service';
 import { OrderEventKind } from '../order-events/entities/order-event.entity';
 import { OrderEventsService } from '../order-events/order-events.service';
+import { OrderMailerService } from '../mail/order-mailer.service';
 import { Role, User } from '../users/entities/user.entity';
 import {
   AdminOrdersQueryDto,
@@ -155,6 +156,7 @@ export class OrdersService {
     private readonly geographyService: GeographyService,
     private readonly permissionsService: PermissionsService,
     private readonly orderEvents: OrderEventsService,
+    private readonly orderMailer: OrderMailerService,
     private readonly dataSource: DataSource,
   ) {}
 
@@ -898,6 +900,17 @@ export class OrdersService {
       nextValue: paymentStatus,
       reason: 'Marcado a mano desde la administración',
     });
+    // Marcar pagado a mano es hoy la vía normal —la pasarela lleva semanas
+    // rechazando—, así que el cliente tiene que enterarse igual que si hubiera
+    // entrado por webhook. La corrección de superadmin no avisa: ahí se está
+    // arreglando un dato, no confirmando un cobro.
+    if (
+      paymentStatus === PaymentStatus.PAID &&
+      previous !== PaymentStatus.PAID &&
+      order.status !== OrderStatus.CANCELLED
+    ) {
+      void this.orderMailer.paymentReceived(order.id);
+    }
     return this.findOneAdmin(id);
   }
 
