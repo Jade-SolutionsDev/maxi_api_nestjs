@@ -59,6 +59,14 @@ export class MailService {
     return count > 0;
   }
 
+  /** ¿Se le mandó ya esta plantilla a esta dirección? Candado de los correos sin pedido. */
+  async alreadySentTo(toAddress: string, template: string): Promise<boolean> {
+    const count = await this.emailLogRepository.count({
+      where: { toAddress, template, status: EmailStatus.SENT },
+    });
+    return count > 0;
+  }
+
   async send(email: OutgoingEmail): Promise<SendResult> {
     const resend = this.configService.get<ResendConfig>('resend');
     if (!resend?.configured || !resend.apiKey || !resend.fromAddress) {

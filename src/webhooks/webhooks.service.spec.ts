@@ -11,6 +11,7 @@ import { Role, User } from '../users/entities/user.entity';
 import { InvitationsService } from '../users/invitations.service';
 import { UsersService } from '../users/users.service';
 import { WebhooksService } from './webhooks.service';
+import { ClientMailerService } from '../mail/client-mailer.service';
 
 jest.mock('@clerk/backend/webhooks', () => ({
   verifyWebhook: jest.fn(),
@@ -19,6 +20,7 @@ jest.mock('@clerk/backend/webhooks', () => ({
 describe('WebhooksService', () => {
   let service: WebhooksService;
   let clientsService: jest.Mocked<ClientsService>;
+  let clientMailer: { welcome: jest.Mock };
   let usersService: jest.Mocked<UsersService>;
   let invitationsService: jest.Mocked<InvitationsService>;
   let configService: jest.Mocked<ConfigService>;
@@ -27,9 +29,11 @@ describe('WebhooksService', () => {
   >;
 
   beforeEach(async () => {
+    clientMailer = { welcome: jest.fn().mockResolvedValue(null) };
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         WebhooksService,
+        { provide: ClientMailerService, useValue: clientMailer },
         {
           provide: ClientsService,
           useValue: {
@@ -113,6 +117,63 @@ describe('WebhooksService', () => {
           lastName: 'User',
         },
       );
+    });
+
+    it('da la bienvenida a la cuenta recién creada', async () => {
+      const cliente = { id: 'cli-1', email: 'client@example.com' };
+      clientsService.createOrUpdateFromClerk.mockResolvedValueOnce(
+        cliente as never,
+      );
+      verifyWebhookMock.mockResolvedValueOnce({
+        type: 'user.created',
+        data: {
+          id: 'client_clerk_id',
+          email_addresses: [
+            { id: 'email_1', email_address: 'client@example.com' },
+          ],
+          primary_email_address_id: 'email_1',
+        },
+      } as never);
+
+      await service.handleStoreWebhook('raw-body', {});
+
+      expect(clientMailer.welcome).toHaveBeenCalledWith(cliente);
+    });
+
+    it('no da la bienvenida cuando la cuenta solo se actualiza', async () => {
+      verifyWebhookMock.mockResolvedValueOnce({
+        type: 'user.updated',
+        data: {
+          id: 'client_clerk_id',
+          email_addresses: [
+            { id: 'email_1', email_address: 'client@example.com' },
+          ],
+          primary_email_address_id: 'email_1',
+        },
+      } as never);
+
+      await service.handleStoreWebhook('raw-body', {});
+
+      expect(clientMailer.welcome).not.toHaveBeenCalled();
+    });
+
+    it('un fallo del correo no impide crear la cuenta', async () => {
+      clientMailer.welcome.mockRejectedValueOnce(new Error('sin dominio'));
+      verifyWebhookMock.mockResolvedValueOnce({
+        type: 'user.created',
+        data: {
+          id: 'client_clerk_id',
+          email_addresses: [
+            { id: 'email_1', email_address: 'client@example.com' },
+          ],
+          primary_email_address_id: 'email_1',
+        },
+      } as never);
+
+      const result = await service.handleStoreWebhook('raw-body', {});
+
+      expect(result.processed).toBe(true);
+      expect(clientsService.createOrUpdateFromClerk).toHaveBeenCalled();
     });
 
     it('should delete a client on user.deleted', async () => {
