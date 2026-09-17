@@ -8,7 +8,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { DataSource, IsNull, Repository } from 'typeorm';
+import { DataSource, EntityManager, IsNull, Repository } from 'typeorm';
 import { CartService } from '../cart/cart.service';
 import { CartItem } from '../cart/entities/cart-item.entity';
 import { Client } from '../clients/entities/client.entity';
@@ -25,12 +25,13 @@ import {
 import { ProductsService } from '../products/products.service';
 import { OrderEventKind } from '../order-events/entities/order-event.entity';
 import { OrderEventsService } from '../order-events/order-events.service';
-import { User } from '../users/entities/user.entity';
+import { Role, User } from '../users/entities/user.entity';
 import {
   AdminOrdersQueryDto,
   SIN_METODO_DE_PAGO,
 } from './dto/admin-orders-query.dto';
 import { CheckoutDto } from './dto/checkout.dto';
+import { CorrectOrderDto } from './dto/correct-order.dto';
 import { OrderResponseDto } from './dto/order-response.dto';
 import { OrderItem } from './entities/order-item.entity';
 import {
@@ -49,6 +50,19 @@ import {
   ResolvedPaymentMethod,
 } from '../payments/payment-methods.service';
 import { PaymentsService } from '../payments/payments.service';
+
+/**
+ * Qué hace el stock en cada estado: retenido (reserva viva), comprometido
+ * (ya descontado del almacén) o liberado. La corrección de superadmin mueve
+ * el stock entre fases, no entre estados.
+ */
+type StockPhase = 'held' | 'committed' | 'released';
+const stockPhase = (status: OrderStatus): StockPhase =>
+  status === OrderStatus.PENDING
+    ? 'held'
+    : status === OrderStatus.CANCELLED
+      ? 'released'
+      : 'committed';
 
 const TRANSITIONS: Record<OrderStatus, OrderStatus[]> = {
   [OrderStatus.PENDING]: [OrderStatus.CONFIRMED, OrderStatus.CANCELLED],
@@ -802,41 +816,15 @@ export class OrdersService {
 
     // Same storage rules as a fresh checkout: only storages covering the
     // delivery municipality, and the pickup counter first for a pickup.
-    const coveringIds = order.deliveryMunicipalityId
-      ? await this.productsService.coveringLocationIds({
-          municipalityId: order.deliveryMunicipalityId,
-        })
-      : undefined;
-    const allowedLocationIds =
-      coveringIds && order.pickupLocationId
-        ? [...new Set([...coveringIds, order.pickupLocationId])]
-        : coveringIds;
+    const allowedLocationIds = await this.allowedLocationsFor(order);
 
     await this.dataSource.transaction(async (manager) => {
-      const items = await manager
-        .getRepository(OrderItem)
-        .find({ where: { orderId: order.id } });
-      for (const item of items) {
-        try {
-          await this.inventoryService.reserve(
-            manager,
-            order.id,
-            item.productId,
-            item.quantity,
-            {
-              allowedLocationIds,
-              preferredLocationId: order.pickupLocationId ?? undefined,
-            },
-          );
-        } catch (err) {
-          if (err instanceof ConflictException) {
-            throw new ConflictException(
-              `No hay stock suficiente de "${item.productNameSnapshot}" (${item.quantity}) para restablecer el pedido`,
-            );
-          }
-          throw err;
-        }
-      }
+      await this.reserveOrderItems(
+        manager,
+        order,
+        allowedLocationIds,
+        'restablecer el pedido',
+      );
       const previous = order.status;
       order.status = OrderStatus.PENDING;
       order.cancellationReason = null;
@@ -887,6 +875,241 @@ export class OrdersService {
       previousValue: previous,
       nextValue: paymentStatus,
       reason: 'Marcado a mano desde la administración',
+    });
+    return this.findOneAdmin(id);
+  }
+
+  /** Almacenes donde este pedido puede apartar stock: los que cubren su municipio, y su mostrador. */
+  private async allowedLocationsFor(
+    order: Order,
+  ): Promise<string[] | undefined> {
+    const coveringIds = order.deliveryMunicipalityId
+      ? await this.productsService.coveringLocationIds({
+          municipalityId: order.deliveryMunicipalityId,
+        })
+      : undefined;
+    return coveringIds && order.pickupLocationId
+      ? [...new Set([...coveringIds, order.pickupLocationId])]
+      : coveringIds;
+  }
+
+  /** Vuelve a apartar cada línea del pedido; 409 nombrando el producto si falta. */
+  private async reserveOrderItems(
+    manager: EntityManager,
+    order: Order,
+    allowedLocationIds: string[] | undefined,
+    purpose: string,
+  ): Promise<void> {
+    const items = await manager
+      .getRepository(OrderItem)
+      .find({ where: { orderId: order.id } });
+    for (const item of items) {
+      try {
+        await this.inventoryService.reserve(
+          manager,
+          order.id,
+          item.productId,
+          item.quantity,
+          {
+            allowedLocationIds,
+            preferredLocationId: order.pickupLocationId ?? undefined,
+          },
+        );
+      } catch (err) {
+        if (err instanceof ConflictException) {
+          throw new ConflictException(
+            `No hay stock suficiente de "${item.productNameSnapshot}" (${item.quantity}) para ${purpose}`,
+          );
+        }
+        throw err;
+      }
+    }
+  }
+
+  /**
+   * Corrección de superadministrador: cualquier estado de pedido y de pago,
+   * en cualquier dirección, con el efecto que toca sobre el stock:
+   *
+   *   liberado (cancelado)        → retenido (pendiente): vuelve a apartar
+   *   liberado                    → comprometido (confirmado en adelante): aparta y descuenta
+   *   retenido                    → comprometido: descuenta
+   *   retenido                    → liberado: libera
+   *   comprometido                → retenido: devuelve al almacén y vuelve a apartar
+   *   comprometido                → liberado: devuelve al almacén
+   *
+   * Si el resultado es «pendiente y sin pagar», el plazo de pago vuelve a
+   * empezar desde ahora, como en un restablecimiento: si no, un pedido viejo
+   * caducaría en el siguiente barrido. Todo queda en el historial con el
+   * motivo y la marca de corrección.
+   */
+  async correct(
+    user: User,
+    id: string,
+    dto: CorrectOrderDto,
+  ): Promise<OrderResponseDto> {
+    if (user.role !== Role.SUPER_ADMIN) {
+      throw new ForbiddenException(
+        'Only a super admin can correct an order freely',
+      );
+    }
+    if (dto.status === undefined && dto.paymentStatus === undefined) {
+      throw new BadRequestException(
+        'Nothing to correct: pass a status, a payment status, or both',
+      );
+    }
+    const order = await this.orderRepository.findOne({ where: { id } });
+    if (!order) {
+      throw new NotFoundException(`Order with id "${id}" not found`);
+    }
+    const fromStatus = order.status;
+    const toStatus = dto.status ?? order.status;
+    const fromPayment = order.paymentStatus;
+    const toPayment = dto.paymentStatus ?? order.paymentStatus;
+    if (fromStatus === toStatus && fromPayment === toPayment) {
+      throw new ConflictException('The order is already in that state');
+    }
+
+    const allowedLocationIds =
+      stockPhase(fromStatus) !== stockPhase(toStatus) &&
+      stockPhase(toStatus) !== 'released'
+        ? await this.allowedLocationsFor(order)
+        : undefined;
+
+    await this.dataSource.transaction(async (manager) => {
+      if (fromStatus !== toStatus) {
+        const from = stockPhase(fromStatus);
+        const to = stockPhase(toStatus);
+        if (from !== to) {
+          if (from === 'committed') {
+            // Devuelve al almacén lo que ya se había descontado (queda como IN).
+            await this.inventoryService.releaseReservations(
+              manager,
+              order.id,
+              user.id,
+            );
+          } else if (from === 'held' && to === 'released') {
+            await this.inventoryService.releaseReservations(
+              manager,
+              order.id,
+              user.id,
+            );
+          }
+          if (to === 'held' || to === 'committed') {
+            if (from !== 'held') {
+              await this.reserveOrderItems(
+                manager,
+                order,
+                allowedLocationIds,
+                'corregir el pedido',
+              );
+            }
+            if (to === 'committed') {
+              await this.inventoryService.confirmReservations(
+                manager,
+                order.id,
+                user.id,
+              );
+            }
+          }
+        }
+        order.status = toStatus;
+        if (toStatus === OrderStatus.CANCELLED) {
+          order.cancellationReason = null;
+        } else if (fromStatus === OrderStatus.CANCELLED) {
+          order.cancellationReason = null;
+        }
+      }
+      if (fromPayment !== toPayment) {
+        order.paymentStatus = toPayment;
+      }
+      if (
+        order.status === OrderStatus.PENDING &&
+        order.paymentStatus !== PaymentStatus.PAID &&
+        (fromStatus !== OrderStatus.PENDING ||
+          fromPayment === PaymentStatus.PAID)
+      ) {
+        order.reinstatedAt = new Date();
+        order.reinstatedBy = user.id;
+      }
+      await manager.getRepository(Order).save(order);
+
+      if (fromStatus !== toStatus) {
+        await this.orderEvents.record(manager, {
+          orderId: order.id,
+          kind: OrderEventKind.STATUS_CHANGED,
+          actor: { userId: user.id },
+          field: 'status',
+          previousValue: fromStatus,
+          nextValue: toStatus,
+          reason: dto.reason,
+          meta: { correction: true },
+        });
+      }
+      if (fromPayment !== toPayment) {
+        await this.orderEvents.record(manager, {
+          orderId: order.id,
+          kind: OrderEventKind.PAYMENT_STATUS_CHANGED,
+          actor: { userId: user.id },
+          field: 'paymentStatus',
+          previousValue: fromPayment,
+          nextValue: toPayment,
+          reason: dto.reason,
+          meta: { correction: true },
+        });
+      }
+    });
+    this.logger.warn(
+      `Order ${order.orderNumber ?? order.id} corrected by super admin ${user.id}: ` +
+        `${fromStatus}/${fromPayment} -> ${toStatus}/${toPayment} (${dto.reason})`,
+    );
+    return this.findOneAdmin(id);
+  }
+
+  /** Todos los intentos de pago del pedido, del más reciente al más antiguo. */
+  async listPaymentAttempts(id: string) {
+    const exists = await this.orderRepository.findOne({
+      where: { id },
+      select: { id: true },
+    });
+    if (!exists) {
+      throw new NotFoundException(`Order with id "${id}" not found`);
+    }
+    const charges = await this.paymentsService.listChargesFor(id);
+    return charges.map((charge) => this.paymentsService.toDto(charge));
+  }
+
+  /** Quita un intento de pago que nunca se completó. Solo superadministradores. */
+  async removePaymentAttempt(
+    user: User,
+    id: string,
+    chargeId: string,
+    reason: string,
+  ): Promise<OrderResponseDto> {
+    if (user.role !== Role.SUPER_ADMIN) {
+      throw new ForbiddenException(
+        'Only a super admin can remove a payment attempt',
+      );
+    }
+    const order = await this.orderRepository.findOne({ where: { id } });
+    if (!order) {
+      throw new NotFoundException(`Order with id "${id}" not found`);
+    }
+    const removed = await this.paymentsService.removeAttempt(id, chargeId);
+    if (order.paymentRef === removed.reference) {
+      order.paymentRef = null;
+      await this.orderRepository.save(order);
+    }
+    await this.orderEvents.record(null, {
+      orderId: order.id,
+      kind: OrderEventKind.PAYMENT_ATTEMPT_REMOVED,
+      actor: { userId: user.id },
+      reason,
+      meta: {
+        correction: true,
+        provider: removed.provider,
+        reference: removed.reference,
+        chargeStatus: removed.status,
+      },
     });
     return this.findOneAdmin(id);
   }
