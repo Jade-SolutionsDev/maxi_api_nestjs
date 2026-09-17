@@ -89,7 +89,8 @@ describe('OrdersService', () => {
     save: jest.Mock;
     create: jest.Mock;
     createQueryBuilder: jest.Mock;
-    manager: { query: jest.Mock };
+    update: jest.Mock;
+    manager: { query: jest.Mock; getRepository: (entity: unknown) => unknown };
   };
   let cartService: { getCart: jest.Mock };
   let inventoryService: {
@@ -139,7 +140,14 @@ describe('OrdersService', () => {
         ),
       create: jest.fn().mockImplementation((o: unknown) => o),
       createQueryBuilder: jest.fn(),
-      manager: { query: jest.fn().mockResolvedValue([]) },
+      update: jest.fn().mockResolvedValue({ affected: 1 }),
+      // El servicio lee las líneas por su propio repositorio, nunca como
+      // relación cargada del pedido.
+      manager: {
+        query: jest.fn().mockResolvedValue([]),
+        getRepository: (entity: unknown) =>
+          entity === OrderItem ? orderItemRepo : orderRepo,
+      },
     };
     orderItemRepo = {
       save: jest.fn().mockImplementation((o: unknown) => Promise.resolve(o)),
@@ -1198,11 +1206,12 @@ describe('OrdersService', () => {
         ...over,
       }) as OrderItem;
 
+    // El pedido se carga SIN sus líneas (ver updateItems): las líneas llegan por
+    // su propio repositorio, y por eso se preparan aquí por separado.
     const stubOrder = (over: Partial<Order> = {}, items?: OrderItem[]) => {
-      const order = makeOrder({
-        subtotal: '20.00',
-        total: '20.00',
-        items: items ?? [
+      const order = makeOrder({ subtotal: '20.00', total: '20.00', ...over });
+      orderItemRepo.find.mockResolvedValue(
+        items ?? [
           linea(),
           linea({
             id: 'item-2',
@@ -1213,8 +1222,7 @@ describe('OrdersService', () => {
             lineTotal: '5.00',
           }),
         ],
-        ...over,
-      });
+      );
       orderRepo.findOne
         .mockResolvedValueOnce(order)
         .mockResolvedValue(makeOrder({ items: [] }));
@@ -1419,9 +1427,48 @@ describe('OrdersService', () => {
         ],
         reason,
       });
-      const saved = orderRepo.save.mock.calls[0][0] as Order;
-      expect(saved.subtotal).toBe('35.00');
-      expect(saved.total).toBe('38.00');
+      expect(orderRepo.update).toHaveBeenCalledWith('order-1', {
+        subtotal: '35.00',
+        total: '38.00',
+      });
+    });
+
+    // La regresión de ORD-20260134 en staging: la línea nueva se insertaba y
+    // acto seguido desaparecía, porque el pedido se guardaba como entidad con
+    // su colección de líneas cargada y TypeORM la reconciliaba contra la base.
+    // El pedido se actualiza por campos y jamás se guarda con `items` encima.
+    it('no guarda el pedido como entidad, para no llevarse por delante la línea nueva', async () => {
+      stubOrder();
+      await service.updateItems(superAdmin, 'order-1', {
+        items: [
+          { productId: 'prod-1', quantity: 2 },
+          { productId: 'prod-3', quantity: 1 },
+          { productId: 'prod-2', quantity: 1 },
+        ],
+        reason,
+      });
+      expect(orderRepo.update).toHaveBeenCalled();
+      expect(orderRepo.save).not.toHaveBeenCalled();
+      // Y la línea nueva se inserta de verdad.
+      expect(orderItemRepo.save).toHaveBeenCalledWith(
+        expect.objectContaining({ productId: 'prod-2', quantity: 1 }),
+      );
+    });
+
+    it('lee las líneas por su repositorio, no como relación del pedido', async () => {
+      stubOrder();
+      await service.updateItems(superAdmin, 'order-1', {
+        items: [{ productId: 'prod-1', quantity: 2 }],
+        reason,
+      });
+      expect(orderItemRepo.find).toHaveBeenCalledWith({
+        where: { orderId: 'order-1' },
+      });
+      // findOne del pedido, sin pedir la relación items.
+      const [args] = orderRepo.findOne.mock.calls[0] as [
+        { relations?: unknown },
+      ];
+      expect(args.relations).toBeUndefined();
     });
 
     it('deja el cambio y la diferencia en el historial', async () => {

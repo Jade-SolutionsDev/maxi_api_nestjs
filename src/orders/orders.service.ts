@@ -1159,16 +1159,23 @@ export class OrdersService {
         'Un producto no puede aparecer dos veces; súmalo en una sola línea',
       );
     }
-    const order = await this.orderRepository.findOne({
-      where: { id },
-      relations: { items: true },
-    });
+    // **Sin `relations: { items }` a propósito.** Guardar más abajo un pedido que
+    // lleva su colección de líneas cargada hace que TypeORM reconcilie esa
+    // colección contra la base y borre lo que no esté en ella — incluida la
+    // línea que esta misma transacción acaba de insertar. Pasó en staging el
+    // 17-sep-2026 con ORD-20260134: la reserva de stock quedó hecha y la línea
+    // desapareció. Las líneas se leen aparte y el pedido se actualiza por campos.
+    const order = await this.orderRepository.findOne({ where: { id } });
     if (!order) {
       throw new NotFoundException(`Order with id "${id}" not found`);
     }
 
+    const itemsRepo = this.orderRepository.manager.getRepository(OrderItem);
     const current = new Map(
-      (order.items ?? []).map((item) => [item.productId, item]),
+      (await itemsRepo.find({ where: { orderId: id } })).map((item) => [
+        item.productId,
+        item,
+      ]),
     );
     // El catálogo solo hace falta para las líneas nuevas: las que ya estaban
     // conservan su nombre y su precio de entonces.
@@ -1316,7 +1323,12 @@ export class OrdersService {
 
       order.subtotal = nextSubtotal;
       order.total = nextTotal;
-      await manager.getRepository(Order).save(order);
+      // Por campos, no por entidad: ver el comentario de arriba. `save` de un
+      // pedido cuya relación `items` pueda estar cargada se lleva por delante
+      // las líneas recién insertadas.
+      await manager
+        .getRepository(Order)
+        .update(order.id, { subtotal: nextSubtotal, total: nextTotal });
 
       await this.orderEvents.record(manager, {
         orderId: order.id,
