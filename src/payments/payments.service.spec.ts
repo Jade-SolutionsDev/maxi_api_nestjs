@@ -24,6 +24,8 @@ import {
   PaymentGateway,
 } from './payment-gateway.interface';
 import { PaymentMethodsService } from './payment-methods.service';
+import { OrderMailerService } from '../mail/order-mailer.service';
+import { RefundsService } from '../refunds/refunds.service';
 import { PaymentsService } from './payments.service';
 
 function makeOrder(overrides: Partial<Order> = {}): Order {
@@ -118,6 +120,8 @@ describe('PaymentsService', () => {
   let methods: { gatewayFor: jest.Mock; resolve: jest.Mock };
   let orderItemRepo: { find: jest.Mock };
   let inventory: { reserve: jest.Mock };
+  let refunds: { requestForLatePaymentWithoutStock: jest.Mock };
+  let mailer: { paymentReceived: jest.Mock };
 
   // `createChargeForOrder` recibe la pasarela y la fila que la eligió.
   const resolved = () => ({ gateway, method: methodRow(gateway.code) });
@@ -142,6 +146,10 @@ describe('PaymentsService', () => {
       find: jest.fn().mockResolvedValue([{ productId: 'prod-1', quantity: 2 }]),
     };
     inventory = { reserve: jest.fn() };
+    refunds = {
+      requestForLatePaymentWithoutStock: jest.fn().mockResolvedValue(undefined),
+    };
+    mailer = { paymentReceived: jest.fn().mockResolvedValue(null) };
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
@@ -167,6 +175,8 @@ describe('PaymentsService', () => {
             ),
           },
         },
+        { provide: RefundsService, useValue: refunds },
+        { provide: OrderMailerService, useValue: mailer },
       ],
     }).compile();
 

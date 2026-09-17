@@ -34,6 +34,14 @@ export enum OrderEventKind {
   ITEMS_CHANGED = 'items_changed',
   /** El total del pedido cambió a consecuencia de lo anterior. */
   TOTAL_CHANGED = 'total_changed',
+  /** Se registró que el pedido se entregó, con quién lo retiró. */
+  DELIVERED = 'delivered',
+  /** Se comprometió una devolución de dinero; todavía no salió. */
+  REFUND_REQUESTED = 'refund_requested',
+  /** El dinero salió de verdad. */
+  REFUND_COMPLETED = 'refund_completed',
+  /** La devolución no procedía. */
+  REFUND_REJECTED = 'refund_rejected',
 }
 
 /**

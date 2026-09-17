@@ -3,6 +3,7 @@ import { TypeOrmModule } from '@nestjs/typeorm';
 import { AuthModule } from '../auth/auth.module';
 import { NomenclatorsModule } from '../nomenclators/nomenclators.module';
 import { User } from '../users/entities/user.entity';
+import { MailModule } from '../mail/mail.module';
 import { ContactMailService } from './contact-mail.service';
 import { ContactMessagesController } from './contact-messages.controller';
 import { ContactService } from './contact.service';
@@ -14,6 +15,7 @@ import { PublicContactController } from './public-contact.controller';
 
 @Module({
   imports: [
+    MailModule,
     TypeOrmModule.forFeature([
       ContactMessage,
       ContactReply,

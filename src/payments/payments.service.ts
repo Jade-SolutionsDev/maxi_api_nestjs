@@ -12,6 +12,8 @@ import { DataSource, In, Repository } from 'typeorm';
 import { InventoryService } from '../inventory/inventory.service';
 import { OrderEventKind } from '../order-events/entities/order-event.entity';
 import { OrderEventsService } from '../order-events/order-events.service';
+import { OrderMailerService } from '../mail/order-mailer.service';
+import { RefundsService } from '../refunds/refunds.service';
 import { ProductsService } from '../products/products.service';
 import { OrderItem } from '../orders/entities/order-item.entity';
 import {
@@ -66,6 +68,8 @@ export class PaymentsService {
     private readonly productsService: ProductsService,
     private readonly orderEvents: OrderEventsService,
     private readonly dataSource: DataSource,
+    private readonly refunds: RefundsService,
+    private readonly orderMailer: OrderMailerService,
   ) {}
 
   /** Todos los intentos de un pedido, del más reciente al más antiguo. */
@@ -484,6 +488,9 @@ export class PaymentsService {
     const previous = order.paymentStatus;
     if (charge.status === ChargeStatus.SUCCEEDED) {
       order.paymentStatus = PaymentStatus.PAID;
+      // Desde aquí cuentan la custodia y sus recordatorios: la hora del cobro,
+      // no la de este barrido.
+      order.paidAt = charge.completedAt ?? new Date();
     } else if (charge.status === ChargeStatus.FAILED) {
       order.paymentStatus = PaymentStatus.FAILED;
     } else {
@@ -503,6 +510,11 @@ export class PaymentsService {
 
     if (order.paymentStatus === PaymentStatus.PAID) {
       await this.reinstateIfExpired(order);
+      // Un pedido que quedó cancelado por falta de mercancía no está listo
+      // para recoger: ese cliente recibe el aviso de su devolución, no este.
+      if (order.status !== OrderStatus.CANCELLED) {
+        void this.orderMailer.paymentReceived(order.id);
+      }
     }
   }
 
@@ -608,6 +620,9 @@ export class PaymentsService {
     this.logger.warn(
       `Order ${order.orderNumber ?? order.id} was paid after expiring but the stock is gone — refund required`,
     );
+    // El dinero entró y no hay nada que entregar: la devolución se abre sola,
+    // sin esperar a que alguien repase la lista de cancelados.
+    await this.refunds.requestForLatePaymentWithoutStock(order);
   }
 
   /**

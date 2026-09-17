@@ -66,6 +66,10 @@ export const MODULE_ACTIONS: Record<string, readonly string[]> = {
     'update-status-direct',
     'update-payment-status',
   ],
+  // Devoluciones de dinero. `request` deja el compromiso en la cola;
+  // `complete` confirma que el dinero salió y es el que mueve el pedido a
+  // «reembolsado», así que se conceden por separado.
+  refunds: ['list', 'read', 'request', 'complete', 'reject'],
   inventory: ['list', 'read', 'aggregate', 'history', 'create-operation'],
   'cms-settings': ['read', 'update'],
   'fulfillment-settings': ['read', 'update'],

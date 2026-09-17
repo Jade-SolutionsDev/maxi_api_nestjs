@@ -186,6 +186,39 @@ export class Order {
   @Column({ name: 'reinstated_by', type: 'uuid', nullable: true })
   reinstatedBy: string | null;
 
+  /**
+   * Cuándo se cobró el pedido. Se sella en el momento en que el pago pasa a
+   * `paid`, venga de la pasarela o de la administración.
+   *
+   * Es el reloj de la custodia: los recordatorios de recogida y los 30 días
+   * que el pedido se guarda cuentan desde aquí. Sin esta fecha, la política
+   * de custodia no se puede aplicar a nada.
+   */
+  @Column({ name: 'paid_at', type: 'timestamptz', nullable: true })
+  paidAt: Date | null;
+
+  /**
+   * Cuándo se entregó de verdad. Se sella al pasar el pedido a `delivered`.
+   *
+   * También es un reloj: el plazo para reclamar cuenta desde la entrega, y sin
+   * fecha registrada no hay desde cuándo contarlo ni cómo sostenerlo si el
+   * cliente discute.
+   */
+  @Column({ name: 'delivered_at', type: 'timestamptz', nullable: true })
+  deliveredAt: Date | null;
+
+  /** Quién, del back-office, registró la entrega. */
+  @Column({ name: 'delivered_by', type: 'uuid', nullable: true })
+  deliveredBy: string | null;
+
+  /**
+   * Quién se llevó el pedido: `{name, idCard}`. En las recogidas casi nunca es
+   * el comprador —está en el extranjero— sino el familiar que va al mostrador,
+   * así que se anota a quién se le entregó y con qué carné.
+   */
+  @Column({ name: 'picked_up_by', type: 'jsonb', nullable: true })
+  pickedUpBy: Record<string, unknown> | null;
+
   @OneToMany(() => OrderItem, (item) => item.order)
   items?: OrderItem[];
 

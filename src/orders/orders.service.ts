@@ -33,6 +33,7 @@ import {
 import { CheckoutDto } from './dto/checkout.dto';
 import { CorrectOrderDto } from './dto/correct-order.dto';
 import { OrderResponseDto } from './dto/order-response.dto';
+import { PickedUpByDto } from './dto/update-order-status.dto';
 import { UpdateOrderItemsDto } from './dto/update-order-items.dto';
 import { OrderItem } from './entities/order-item.entity';
 import {
@@ -685,6 +686,7 @@ export class OrdersService {
     id: string,
     status: OrderStatus,
     direct = false,
+    pickedUpBy?: PickedUpByDto,
   ): Promise<OrderResponseDto> {
     const order = await this.orderRepository.findOne({ where: { id } });
     if (!order) {
@@ -736,7 +738,21 @@ export class OrdersService {
       }
       const previous = order.status;
       order.status = status;
+      if (status === OrderStatus.DELIVERED && !order.deliveredAt) {
+        this.sealDelivery(order, user, pickedUpBy);
+      }
       await manager.getRepository(Order).save(order);
+      if (status === OrderStatus.DELIVERED && previous !== status) {
+        await this.orderEvents.record(manager, {
+          orderId: order.id,
+          kind: OrderEventKind.DELIVERED,
+          actor: { userId: user.id },
+          field: 'deliveredAt',
+          nextValue: order.deliveredAt?.toISOString() ?? null,
+          reason: 'Pedido entregado',
+          meta: { pickedUpBy: order.pickedUpBy },
+        });
+      }
       await this.orderEvents.record(manager, {
         orderId: order.id,
         kind: OrderEventKind.STATUS_CHANGED,
@@ -867,6 +883,11 @@ export class OrdersService {
     }
     const previous = order.paymentStatus;
     order.paymentStatus = paymentStatus;
+    // El reloj de la custodia arranca también cuando el pago se marca a mano;
+    // si no, el pedido nunca entraría en los recordatorios.
+    if (paymentStatus === PaymentStatus.PAID && !order.paidAt) {
+      order.paidAt = new Date();
+    }
     await this.orderRepository.save(order);
     await this.orderEvents.record(null, {
       orderId: order.id,
@@ -878,6 +899,28 @@ export class OrdersService {
       reason: 'Marcado a mano desde la administración',
     });
     return this.findOneAdmin(id);
+  }
+
+  /**
+   * Deja constancia de la entrega: cuándo, quién la registró y a quién se le
+   * dio. Desde `deliveredAt` cuenta el plazo para reclamar, así que la fecha
+   * se sella una sola vez: una corrección posterior no la reescribe.
+   */
+  private sealDelivery(
+    order: Order,
+    user: User,
+    pickedUpBy?: PickedUpByDto,
+  ): void {
+    order.deliveredAt = new Date();
+    order.deliveredBy = user.id;
+    const contact = order.contactSnapshot as {
+      name?: string;
+      fullName?: string;
+      idCard?: string;
+    } | null;
+    const name = pickedUpBy?.name ?? contact?.fullName ?? contact?.name ?? null;
+    const idCard = pickedUpBy?.idCard ?? contact?.idCard ?? null;
+    order.pickedUpBy = name || idCard ? { name, idCard } : null;
   }
 
   /** Almacenes donde este pedido puede apartar stock: los que cubren su municipio, y su mostrador. */
@@ -1022,6 +1065,9 @@ export class OrdersService {
       }
       if (fromPayment !== toPayment) {
         order.paymentStatus = toPayment;
+        if (toPayment === PaymentStatus.PAID && !order.paidAt) {
+          order.paidAt = new Date();
+        }
       }
       if (
         order.status === OrderStatus.PENDING &&

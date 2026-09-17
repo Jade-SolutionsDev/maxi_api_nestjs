@@ -25,7 +25,9 @@ import { HealthModule } from './health/health.module';
 import { InventoryModule } from './inventory/inventory.module';
 import { NomenclatorsModule } from './nomenclators/nomenclators.module';
 import { OrdersModule } from './orders/orders.module';
+import { MailModule } from './mail/mail.module';
 import { PaymentsModule } from './payments/payments.module';
+import { RefundsModule } from './refunds/refunds.module';
 import { PermissionGuard } from './permissions/guards/permission.guard';
 import { PermissionsModule } from './permissions/permissions.module';
 import { ProductsModule } from './products/products.module';
@@ -97,6 +99,8 @@ import { WebhooksModule } from './webhooks/webhooks.module';
     InventoryModule,
     OrdersModule,
     PaymentsModule,
+    RefundsModule,
+    MailModule,
     UploadsModule,
     WebhooksModule,
     PermissionsModule,

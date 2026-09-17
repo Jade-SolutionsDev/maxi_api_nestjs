@@ -108,6 +108,12 @@ export interface ResendConfig {
   configured: boolean;
 }
 
+/** Datos de contacto que aparecen en los correos al cliente. */
+export interface SupportConfig {
+  /** WhatsApp de atención, tal como se muestra: "+53 5251 9414". */
+  whatsapp: string;
+}
+
 export interface AppConfig {
   port: number;
   database: DatabaseConfig;
@@ -119,6 +125,7 @@ export interface AppConfig {
   payments: PaymentsConfig;
   storefront: StorefrontConfig;
   resend: ResendConfig;
+  support: SupportConfig;
   nodeEnv: string;
   /** Number of reverse proxies in front of the API (Express `trust proxy`).
    *  Makes req.ip resolve to the real client from X-Forwarded-For, so rate
@@ -280,6 +287,10 @@ export const resendConfig = (): ResendConfig => {
   };
 };
 
+export const supportConfig = (): SupportConfig => ({
+  whatsapp: process.env.SUPPORT_WHATSAPP ?? '+53 5251 9414',
+});
+
 export default (): AppConfig => ({
   port: parseInt(process.env.PORT ?? '3000', 10),
   database: databaseConfig(),
@@ -291,6 +302,7 @@ export default (): AppConfig => ({
   payments: paymentsConfig(),
   storefront: storefrontConfig(),
   resend: resendConfig(),
+  support: supportConfig(),
   nodeEnv: process.env.NODE_ENV ?? 'development',
   trustProxyHops: parseInt(process.env.TRUST_PROXY_HOPS ?? '1', 10),
 });
