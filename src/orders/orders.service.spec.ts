@@ -95,6 +95,12 @@ describe('OrdersService', () => {
     reserve: jest.Mock;
     confirmReservations: jest.Mock;
     releaseReservations: jest.Mock;
+    releaseProductUnits: jest.Mock;
+    confirmProductReservations: jest.Mock;
+  };
+  let productsService: {
+    coveringLocationIds: jest.Mock;
+    findOne: jest.Mock;
   };
   let paymentsService: {
     createChargeForOrder: jest.Mock;
@@ -112,7 +118,12 @@ describe('OrdersService', () => {
   };
   let permissionsService: { hasPermission: jest.Mock };
   let orderEvents: { record: jest.Mock; listForOrder: jest.Mock };
-  let orderItemRepo: { save: jest.Mock; create: jest.Mock; find: jest.Mock };
+  let orderItemRepo: {
+    save: jest.Mock;
+    create: jest.Mock;
+    find: jest.Mock;
+    remove: jest.Mock;
+  };
   let cartItemRepo: { delete: jest.Mock };
 
   beforeEach(async () => {
@@ -132,6 +143,7 @@ describe('OrdersService', () => {
       save: jest.fn().mockImplementation((o: unknown) => Promise.resolve(o)),
       create: jest.fn().mockImplementation((o: unknown) => o),
       find: jest.fn().mockResolvedValue([]),
+      remove: jest.fn().mockResolvedValue(undefined),
     };
     cartItemRepo = { delete: jest.fn() };
     cartService = { getCart: jest.fn() };
@@ -139,6 +151,19 @@ describe('OrdersService', () => {
       reserve: jest.fn(),
       confirmReservations: jest.fn(),
       releaseReservations: jest.fn(),
+      releaseProductUnits: jest.fn(),
+      confirmProductReservations: jest.fn(),
+    };
+    productsService = {
+      coveringLocationIds: jest.fn().mockResolvedValue(['loc-1']),
+      findOne: jest.fn().mockResolvedValue({
+        id: 'prod-2',
+        name: 'Malta 355ml',
+        basePrice: '2.00',
+        discount: '0',
+        isActive: true,
+        deletedAt: null,
+      }),
     };
     paymentsService = {
       createChargeForOrder: jest.fn().mockResolvedValue({ id: 'charge-1' }),
@@ -209,12 +234,7 @@ describe('OrdersService', () => {
         { provide: PaymentsService, useValue: paymentsService },
         { provide: PaymentMethodsService, useValue: paymentMethodsService },
         { provide: FulfillmentService, useValue: fulfillmentService },
-        {
-          provide: ProductsService,
-          useValue: {
-            coveringLocationIds: jest.fn().mockResolvedValue(['loc-1']),
-          },
-        },
+        { provide: ProductsService, useValue: productsService },
         { provide: ClientAddressesService, useValue: clientAddressesService },
         { provide: GeographyService, useValue: geographyService },
         { provide: PermissionsService, useValue: permissionsService },
@@ -1125,6 +1145,342 @@ describe('OrdersService', () => {
         }),
       ).rejects.toThrow(/Cerveza/);
       expect(orderRepo.save).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('updateItems (líneas del pedido, superadmin)', () => {
+    const superAdmin = makeUser(Role.SUPER_ADMIN);
+    const reason = 'El cliente cambió el pedido por teléfono';
+    // Dos líneas: 2 × 7.50 y 1 × 5.00 = 20.00 de subtotal.
+    const linea = (over: Partial<OrderItem> = {}): OrderItem =>
+      ({
+        id: 'item-1',
+        orderId: 'order-1',
+        productId: 'prod-1',
+        productNameSnapshot: 'Cola 1L',
+        unitPrice: '7.50',
+        quantity: 2,
+        lineTotal: '15.00',
+        ...over,
+      }) as OrderItem;
+
+    const stubOrder = (over: Partial<Order> = {}, items?: OrderItem[]) => {
+      const order = makeOrder({
+        subtotal: '20.00',
+        total: '20.00',
+        items: items ?? [
+          linea(),
+          linea({
+            id: 'item-2',
+            productId: 'prod-3',
+            productNameSnapshot: 'Pan',
+            unitPrice: '5.00',
+            quantity: 1,
+            lineTotal: '5.00',
+          }),
+        ],
+        ...over,
+      });
+      orderRepo.findOne
+        .mockResolvedValueOnce(order)
+        .mockResolvedValue(makeOrder({ items: [] }));
+      return order;
+    };
+
+    it('solo la puede hacer un superadministrador, aunque ADMIN pase el guard', async () => {
+      stubOrder();
+      await expect(
+        service.updateItems(makeUser(Role.ADMIN), 'order-1', {
+          items: [{ productId: 'prod-1', quantity: 3 }],
+          reason,
+        }),
+      ).rejects.toBeInstanceOf(ForbiddenException);
+      expect(orderRepo.save).not.toHaveBeenCalled();
+    });
+
+    it('rechaza el mismo producto en dos líneas', async () => {
+      await expect(
+        service.updateItems(superAdmin, 'order-1', {
+          items: [
+            { productId: 'prod-1', quantity: 1 },
+            { productId: 'prod-1', quantity: 2 },
+          ],
+          reason,
+        }),
+      ).rejects.toBeInstanceOf(BadRequestException);
+    });
+
+    it('exige que algo cambie', async () => {
+      stubOrder();
+      await expect(
+        service.updateItems(superAdmin, 'order-1', {
+          items: [
+            { productId: 'prod-1', quantity: 2 },
+            { productId: 'prod-3', quantity: 1 },
+          ],
+          reason,
+        }),
+      ).rejects.toBeInstanceOf(ConflictException);
+    });
+
+    it('subir una cantidad en un pedido pendiente aparta solo la diferencia', async () => {
+      stubOrder();
+      await service.updateItems(superAdmin, 'order-1', {
+        items: [
+          { productId: 'prod-1', quantity: 5 },
+          { productId: 'prod-3', quantity: 1 },
+        ],
+        reason,
+      });
+      expect(inventoryService.reserve).toHaveBeenCalledWith(
+        expect.anything(),
+        'order-1',
+        'prod-1',
+        3, // 5 - 2, no 5
+        expect.anything(),
+      );
+      expect(
+        inventoryService.confirmProductReservations,
+      ).not.toHaveBeenCalled();
+      expect(inventoryService.releaseProductUnits).not.toHaveBeenCalled();
+    });
+
+    it('bajar una cantidad en un pedido pendiente suelta solo la diferencia', async () => {
+      stubOrder();
+      await service.updateItems(superAdmin, 'order-1', {
+        items: [
+          { productId: 'prod-1', quantity: 1 },
+          { productId: 'prod-3', quantity: 1 },
+        ],
+        reason,
+      });
+      expect(inventoryService.releaseProductUnits).toHaveBeenCalledWith(
+        expect.anything(),
+        'order-1',
+        'prod-1',
+        1, // 2 - 1
+        'user-1',
+      );
+      expect(inventoryService.reserve).not.toHaveBeenCalled();
+    });
+
+    it('en un pedido confirmado, lo que sube se aparta y se descuenta', async () => {
+      stubOrder({ status: OrderStatus.CONFIRMED });
+      await service.updateItems(superAdmin, 'order-1', {
+        items: [
+          { productId: 'prod-1', quantity: 4 },
+          { productId: 'prod-3', quantity: 1 },
+        ],
+        reason,
+      });
+      expect(inventoryService.reserve).toHaveBeenCalledWith(
+        expect.anything(),
+        'order-1',
+        'prod-1',
+        2,
+        expect.anything(),
+      );
+      expect(inventoryService.confirmProductReservations).toHaveBeenCalledWith(
+        expect.anything(),
+        'order-1',
+        'prod-1',
+        'user-1',
+      );
+    });
+
+    it('en un pedido cancelado no se toca el stock', async () => {
+      stubOrder({ status: OrderStatus.CANCELLED });
+      await service.updateItems(superAdmin, 'order-1', {
+        items: [{ productId: 'prod-1', quantity: 9 }],
+        reason,
+      });
+      expect(inventoryService.reserve).not.toHaveBeenCalled();
+      expect(inventoryService.releaseProductUnits).not.toHaveBeenCalled();
+      expect(
+        inventoryService.confirmProductReservations,
+      ).not.toHaveBeenCalled();
+    });
+
+    it('quitar una línea la borra y suelta todas sus unidades', async () => {
+      stubOrder();
+      await service.updateItems(superAdmin, 'order-1', {
+        items: [{ productId: 'prod-1', quantity: 2 }],
+        reason,
+      });
+      expect(inventoryService.releaseProductUnits).toHaveBeenCalledWith(
+        expect.anything(),
+        'order-1',
+        'prod-3',
+        1,
+        'user-1',
+      );
+      expect(orderItemRepo.remove).toHaveBeenCalledTimes(1);
+    });
+
+    it('añadir un producto toma nombre y precio del catálogo', async () => {
+      stubOrder();
+      await service.updateItems(superAdmin, 'order-1', {
+        items: [
+          { productId: 'prod-1', quantity: 2 },
+          { productId: 'prod-3', quantity: 1 },
+          { productId: 'prod-2', quantity: 3 },
+        ],
+        reason,
+      });
+      expect(orderItemRepo.save).toHaveBeenCalledWith(
+        expect.objectContaining({
+          productId: 'prod-2',
+          productNameSnapshot: 'Malta 355ml',
+          unitPrice: '2.00',
+          quantity: 3,
+          lineTotal: '6.00',
+        }),
+      );
+    });
+
+    it('un precio a mano manda sobre el del catálogo', async () => {
+      stubOrder();
+      await service.updateItems(superAdmin, 'order-1', {
+        items: [
+          { productId: 'prod-1', quantity: 2 },
+          { productId: 'prod-3', quantity: 1 },
+          { productId: 'prod-2', quantity: 2, unitPrice: 1.25 },
+        ],
+        reason,
+      });
+      expect(orderItemRepo.save).toHaveBeenCalledWith(
+        expect.objectContaining({ productId: 'prod-2', unitPrice: '1.25' }),
+      );
+    });
+
+    it('no deja añadir un producto que no está a la venta', async () => {
+      productsService.findOne.mockResolvedValue({
+        id: 'prod-2',
+        name: 'Malta 355ml',
+        basePrice: '2.00',
+        discount: '0',
+        isActive: false,
+        deletedAt: null,
+      });
+      stubOrder();
+      await expect(
+        service.updateItems(superAdmin, 'order-1', {
+          items: [
+            { productId: 'prod-1', quantity: 2 },
+            { productId: 'prod-3', quantity: 1 },
+            { productId: 'prod-2', quantity: 1 },
+          ],
+          reason,
+        }),
+      ).rejects.toBeInstanceOf(ConflictException);
+      expect(orderRepo.save).not.toHaveBeenCalled();
+    });
+
+    it('recalcula subtotal y total respetando el envío', async () => {
+      stubOrder({ deliveryFee: '3.00', subtotal: '20.00', total: '23.00' });
+      await service.updateItems(superAdmin, 'order-1', {
+        items: [
+          { productId: 'prod-1', quantity: 4 }, // 30.00
+          { productId: 'prod-3', quantity: 1 }, //  5.00
+        ],
+        reason,
+      });
+      const saved = orderRepo.save.mock.calls[0][0] as Order;
+      expect(saved.subtotal).toBe('35.00');
+      expect(saved.total).toBe('38.00');
+    });
+
+    it('deja el cambio y la diferencia en el historial', async () => {
+      stubOrder();
+      await service.updateItems(superAdmin, 'order-1', {
+        items: [
+          { productId: 'prod-1', quantity: 1 },
+          { productId: 'prod-3', quantity: 1 },
+        ],
+        reason,
+      });
+      expect(orderEvents.record).toHaveBeenCalledWith(
+        expect.anything(),
+        expect.objectContaining({
+          kind: OrderEventKind.ITEMS_CHANGED,
+          reason,
+          meta: expect.objectContaining({
+            correction: true,
+            changes: [
+              expect.objectContaining({
+                type: 'quantity',
+                productId: 'prod-1',
+                from: 2,
+                to: 1,
+              }),
+            ],
+          }),
+        }),
+      );
+      expect(orderEvents.record).toHaveBeenCalledWith(
+        expect.anything(),
+        expect.objectContaining({
+          kind: OrderEventKind.TOTAL_CHANGED,
+          previousValue: '20.00',
+          nextValue: '12.50',
+        }),
+      );
+    });
+
+    it('con el pedido pagado, anota cuánto hay que devolver', async () => {
+      stubOrder({ paymentStatus: PaymentStatus.PAID });
+      await service.updateItems(superAdmin, 'order-1', {
+        items: [
+          { productId: 'prod-1', quantity: 1 },
+          { productId: 'prod-3', quantity: 1 },
+        ],
+        reason,
+      });
+      expect(orderEvents.record).toHaveBeenCalledWith(
+        expect.anything(),
+        expect.objectContaining({
+          kind: OrderEventKind.TOTAL_CHANGED,
+          meta: expect.objectContaining({ paidDifference: '-7.50' }),
+        }),
+      );
+    });
+
+    it('si falta stock para subir una línea, nombra el producto y no guarda', async () => {
+      stubOrder();
+      inventoryService.reserve.mockRejectedValue(
+        new ConflictException('Insufficient stock: only 1 available'),
+      );
+      await expect(
+        service.updateItems(superAdmin, 'order-1', {
+          items: [
+            { productId: 'prod-1', quantity: 40 },
+            { productId: 'prod-3', quantity: 1 },
+          ],
+          reason,
+        }),
+      ).rejects.toThrow(/Cola 1L/);
+      expect(orderRepo.save).not.toHaveBeenCalled();
+    });
+
+    it('suelta antes de apartar, para que un cambio de producto no falle por su propio hueco', async () => {
+      stubOrder();
+      const orden: string[] = [];
+      inventoryService.releaseProductUnits.mockImplementation(() => {
+        orden.push('release');
+        return Promise.resolve();
+      });
+      inventoryService.reserve.mockImplementation(() => {
+        orden.push('reserve');
+        return Promise.resolve();
+      });
+      await service.updateItems(superAdmin, 'order-1', {
+        items: [
+          { productId: 'prod-1', quantity: 1 },
+          { productId: 'prod-3', quantity: 4 },
+        ],
+        reason,
+      });
+      expect(orden).toEqual(['release', 'reserve']);
     });
   });
 

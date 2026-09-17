@@ -767,6 +767,151 @@ export class InventoryService {
     }
   }
 
+  // ---------------- Editar una línea de un pedido ----------------
+  // La corrección de líneas (capa 3) mueve el stock de UN producto dentro de un
+  // pedido que ya existe, no el pedido entero: por eso estos dos métodos, que
+  // son las versiones por producto de releaseReservations y confirmReservations.
+
+  /**
+   * Suelta `quantity` unidades de un producto de este pedido: primero las que
+   * solo estaban retenidas (basta con quitar el hold) y, si aún faltan, las ya
+   * confirmadas, que vuelven físicamente al almacén y quedan registradas como
+   * una entrada (IN).
+   *
+   * Una reserva que se consume a medias se parte en dos filas — la que sigue
+   * viva y la liberada — para que el historial de reservas siga cuadrando con
+   * lo que hay en el almacén.
+   */
+  async releaseProductUnits(
+    manager: EntityManager,
+    orderId: string,
+    productId: string,
+    quantity: number,
+    userId?: string,
+  ): Promise<void> {
+    if (quantity <= 0) return;
+    const reservationRepo = manager.getRepository(InventoryReservation);
+    const repo = manager.getRepository(Inventory);
+    let remaining = quantity;
+
+    // Las retenidas primero: soltarlas no mueve mercancía, solo libera el hold.
+    // Gastar antes las confirmadas obligaría a devolver género al almacén para
+    // volver a sacarlo si el pedido crece luego.
+    for (const status of [
+      ReservationStatus.RESERVED,
+      ReservationStatus.CONFIRMED,
+    ]) {
+      if (remaining <= 0) break;
+      const rows = await reservationRepo.find({
+        where: { orderId, productId, status },
+        order: { createdAt: 'ASC' },
+      });
+      const restocked: InventoryReservation[] = [];
+      for (const reservation of rows) {
+        if (remaining <= 0) break;
+        const take = Math.min(reservation.quantity, remaining);
+        const row = await repo.findOne({
+          where: { locationId: reservation.locationId, productId },
+          lock: { mode: 'pessimistic_write' },
+        });
+        if (status === ReservationStatus.RESERVED) {
+          if (row) {
+            row.reservedQuantity -= take;
+            await repo.save(row);
+          }
+        } else if (row) {
+          row.quantity += take;
+          await repo.save(row);
+        } else {
+          await repo.save(
+            repo.create({
+              locationId: reservation.locationId,
+              productId,
+              quantity: take,
+            }),
+          );
+        }
+
+        if (take === reservation.quantity) {
+          reservation.status = ReservationStatus.CANCELLED;
+          await reservationRepo.save(reservation);
+        } else {
+          // Parcial: la original se queda con lo que sigue vivo y nace una fila
+          // cancelada con lo soltado.
+          reservation.quantity -= take;
+          await reservationRepo.save(reservation);
+          await reservationRepo.save(
+            reservationRepo.create({
+              orderId,
+              locationId: reservation.locationId,
+              productId,
+              quantity: take,
+              status: ReservationStatus.CANCELLED,
+            }),
+          );
+        }
+        if (status === ReservationStatus.CONFIRMED) {
+          // Copia con lo devuelto en esta vuelta: el movimiento IN registra las
+          // unidades que vuelven, no las que tenía la reserva original.
+          restocked.push({ ...reservation, quantity: take });
+        }
+        remaining -= take;
+      }
+      if (restocked.length > 0) {
+        if (!userId) {
+          throw new Error(
+            'releaseProductUnits: userId required to restock a confirmed line',
+          );
+        }
+        await this.recordOrderMovement(manager, {
+          type: OperationType.IN,
+          orderId,
+          userId,
+          reservations: restocked,
+        });
+      }
+    }
+  }
+
+  /**
+   * Descuenta del almacén lo que este pedido tenga retenido de un producto, y
+   * lo registra como salida (OUT). Es lo que le toca a una línea que se añade o
+   * que crece en un pedido ya confirmado: el resto del pedido ya está
+   * descontado y esta parte tiene que igualarse.
+   */
+  async confirmProductReservations(
+    manager: EntityManager,
+    orderId: string,
+    productId: string,
+    userId: string,
+  ): Promise<void> {
+    const reservationRepo = manager.getRepository(InventoryReservation);
+    const toConfirm = await reservationRepo.find({
+      where: { orderId, productId, status: ReservationStatus.RESERVED },
+    });
+    if (toConfirm.length === 0) return;
+    const repo = manager.getRepository(Inventory);
+    for (const reservation of toConfirm) {
+      const row = await repo.findOne({
+        where: { locationId: reservation.locationId, productId },
+        lock: { mode: 'pessimistic_write' },
+      });
+      if (row) {
+        row.quantity -= reservation.quantity;
+        row.reservedQuantity -= reservation.quantity;
+        await repo.save(row);
+      }
+      reservation.status = ReservationStatus.CONFIRMED;
+      await reservationRepo.save(reservation);
+    }
+    await this.recordOrderMovement(manager, {
+      type: OperationType.OUT,
+      orderId,
+      userId,
+      reservations: toConfirm,
+    });
+  }
+
   // ---------------- Internal helpers ----------------
 
   private mergeItems(items: MergedItem[]): MergedItem[] {

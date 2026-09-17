@@ -31,6 +31,7 @@ import {
   RemovePaymentAttemptDto,
 } from './dto/correct-order.dto';
 import { PaymentChargeResponseDto } from '../payments/dto/payment-charge-response.dto';
+import { UpdateOrderItemsDto } from './dto/update-order-items.dto';
 import { UpdateOrderStatusDto } from './dto/update-order-status.dto';
 import { UpdatePaymentStatusDto } from './dto/update-payment-status.dto';
 import { OrdersService } from './orders.service';
@@ -164,6 +165,33 @@ export class OrdersController {
     @Body() dto: CorrectOrderDto,
   ): Promise<OrderResponseDto> {
     return this.ordersService.correct(req.user, id, dto);
+  }
+
+  @Patch(':id/items')
+  @Roles(Role.SUPER_ADMIN)
+  @ApiOperation({
+    summary: 'Super admin correction: the lines of the order',
+    description:
+      'Takes the lines as they must end up (not operations): quantities, ' +
+      'products added or removed, and optional unit prices. Recalculates the ' +
+      'subtotal and the total (the delivery fee is untouched) and moves the ' +
+      'stock according to the phase the order is in — a pending order re-holds ' +
+      'the difference, a confirmed one commits or restocks it, a cancelled one ' +
+      'moves nothing. Drops are applied before rises. A reason is mandatory ' +
+      'and lands in the history flagged as a correction. 409 when nothing ' +
+      'changes, a new product is not on sale, or the stock is gone. ' +
+      'The service enforces SUPER_ADMIN even though ADMIN bypasses guards.',
+  })
+  @ApiOkResponse({ type: OrderResponseDto })
+  @ApiConflictResponse({
+    description: 'No change, not on sale, or out of stock.',
+  })
+  updateItems(
+    @Req() req: AuthenticatedUserRequest,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: UpdateOrderItemsDto,
+  ): Promise<OrderResponseDto> {
+    return this.ordersService.updateItems(req.user, id, dto);
   }
 
   @Get(':id/payment-attempts')

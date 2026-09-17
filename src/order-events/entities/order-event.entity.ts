@@ -30,6 +30,10 @@ export enum OrderEventKind {
   EXPIRED = 'expired',
   /** Un superadmin quitó un intento de pago que nunca se completó. */
   PAYMENT_ATTEMPT_REMOVED = 'payment_attempt_removed',
+  /** Un superadmin cambió las líneas: cantidades, productos o precios. */
+  ITEMS_CHANGED = 'items_changed',
+  /** El total del pedido cambió a consecuencia de lo anterior. */
+  TOTAL_CHANGED = 'total_changed',
 }
 
 /**

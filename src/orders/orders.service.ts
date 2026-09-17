@@ -33,6 +33,7 @@ import {
 import { CheckoutDto } from './dto/checkout.dto';
 import { CorrectOrderDto } from './dto/correct-order.dto';
 import { OrderResponseDto } from './dto/order-response.dto';
+import { UpdateOrderItemsDto } from './dto/update-order-items.dto';
 import { OrderItem } from './entities/order-item.entity';
 import {
   CancellationReason,
@@ -1063,6 +1064,291 @@ export class OrdersService {
         `${fromStatus}/${fromPayment} -> ${toStatus}/${toPayment} (${dto.reason})`,
     );
     return this.findOneAdmin(id);
+  }
+
+  /**
+   * Corrección de las líneas de un pedido (capa 3): cambiar cantidades, quitar
+   * productos y añadir otros, con el total recalculado y el stock puesto al
+   * día. Solo superadministradores.
+   *
+   * Se recibe el pedido **como debe quedar** y aquí se deduce qué cambió. El
+   * stock se mueve según la fase en la que esté el pedido:
+   *
+   *   cancelado (liberado)  → no se toca stock: no hay nada apartado
+   *   pendiente (retenido)  → sube: aparta la diferencia; baja: la suelta
+   *   confirmado en adelante (comprometido) → sube: aparta y descuenta la
+   *                            diferencia (queda como salida); baja: la devuelve
+   *                            al almacén (queda como entrada)
+   *
+   * Las bajadas se aplican antes que las subidas: quien cambia un producto por
+   * otro libera stock que la subida puede necesitar. Si falta stock para alguna
+   * subida, no se guarda nada y se responde 409 nombrando el producto.
+   */
+  async updateItems(
+    user: User,
+    id: string,
+    dto: UpdateOrderItemsDto,
+  ): Promise<OrderResponseDto> {
+    if (user.role !== Role.SUPER_ADMIN) {
+      throw new ForbiddenException(
+        'Only a super admin can edit the lines of an order',
+      );
+    }
+    const productIds = dto.items.map((line) => line.productId);
+    if (new Set(productIds).size !== productIds.length) {
+      throw new BadRequestException(
+        'Un producto no puede aparecer dos veces; súmalo en una sola línea',
+      );
+    }
+    const order = await this.orderRepository.findOne({
+      where: { id },
+      relations: { items: true },
+    });
+    if (!order) {
+      throw new NotFoundException(`Order with id "${id}" not found`);
+    }
+
+    const current = new Map(
+      (order.items ?? []).map((item) => [item.productId, item]),
+    );
+    // El catálogo solo hace falta para las líneas nuevas: las que ya estaban
+    // conservan su nombre y su precio de entonces.
+    const incoming = await this.resolveLines(dto.items, current);
+
+    const changes: Record<string, unknown>[] = [];
+    for (const line of incoming) {
+      const existing = current.get(line.productId);
+      if (!existing) {
+        changes.push({
+          type: 'added',
+          productId: line.productId,
+          name: line.name,
+          quantity: line.quantity,
+          unitPrice: line.unitPrice,
+        });
+        continue;
+      }
+      if (existing.quantity !== line.quantity) {
+        changes.push({
+          type: 'quantity',
+          productId: line.productId,
+          name: line.name,
+          from: existing.quantity,
+          to: line.quantity,
+        });
+      }
+      if (Number(existing.unitPrice) !== Number(line.unitPrice)) {
+        changes.push({
+          type: 'price',
+          productId: line.productId,
+          name: line.name,
+          from: Number(existing.unitPrice).toFixed(2),
+          to: line.unitPrice.toFixed(2),
+        });
+      }
+    }
+    const incomingIds = new Set(incoming.map((line) => line.productId));
+    for (const item of current.values()) {
+      if (!incomingIds.has(item.productId)) {
+        changes.push({
+          type: 'removed',
+          productId: item.productId,
+          name: item.productNameSnapshot,
+          quantity: item.quantity,
+        });
+      }
+    }
+    if (changes.length === 0) {
+      throw new ConflictException('El pedido ya tiene esas líneas');
+    }
+
+    const phase = stockPhase(order.status);
+    const allowedLocationIds =
+      phase === 'released' ? undefined : await this.allowedLocationsFor(order);
+
+    const previousTotal = Number(order.total);
+    const subtotal = incoming.reduce(
+      (sum, line) => sum + Math.round(line.unitPrice * line.quantity * 100),
+      0,
+    );
+    const nextSubtotal = (subtotal / 100).toFixed(2);
+    const nextTotal = (subtotal / 100 + Number(order.deliveryFee)).toFixed(2);
+
+    await this.dataSource.transaction(async (manager) => {
+      if (phase !== 'released') {
+        // Primero lo que libera stock (quitadas y bajadas), después lo que lo
+        // pide: cambiar un producto por otro no debe fallar por un hueco que la
+        // propia corrección acaba de abrir.
+        for (const item of current.values()) {
+          const line = incoming.find((l) => l.productId === item.productId);
+          const drop = line ? item.quantity - line.quantity : item.quantity;
+          if (drop > 0) {
+            await this.inventoryService.releaseProductUnits(
+              manager,
+              order.id,
+              item.productId,
+              drop,
+              user.id,
+            );
+          }
+        }
+        for (const line of incoming) {
+          const existing = current.get(line.productId);
+          const rise = line.quantity - (existing?.quantity ?? 0);
+          if (rise <= 0) continue;
+          try {
+            await this.inventoryService.reserve(
+              manager,
+              order.id,
+              line.productId,
+              rise,
+              {
+                allowedLocationIds,
+                preferredLocationId: order.pickupLocationId ?? undefined,
+              },
+            );
+          } catch (err) {
+            if (err instanceof ConflictException) {
+              throw new ConflictException(
+                `No hay stock suficiente de "${line.name}" (faltan ${rise}) para corregir el pedido`,
+              );
+            }
+            throw err;
+          }
+          if (phase === 'committed') {
+            // El resto del pedido ya salió del almacén; esta parte se iguala.
+            await this.inventoryService.confirmProductReservations(
+              manager,
+              order.id,
+              line.productId,
+              user.id,
+            );
+          }
+        }
+      }
+
+      const itemRepo = manager.getRepository(OrderItem);
+      for (const item of current.values()) {
+        if (!incomingIds.has(item.productId)) await itemRepo.remove(item);
+      }
+      for (const line of incoming) {
+        const existing = current.get(line.productId);
+        const lineTotal = (
+          Math.round(line.unitPrice * line.quantity * 100) / 100
+        ).toFixed(2);
+        if (existing) {
+          existing.quantity = line.quantity;
+          existing.unitPrice = line.unitPrice.toFixed(2);
+          existing.lineTotal = lineTotal;
+          await itemRepo.save(existing);
+        } else {
+          await itemRepo.save(
+            itemRepo.create({
+              orderId: order.id,
+              productId: line.productId,
+              productNameSnapshot: line.name,
+              unitPrice: line.unitPrice.toFixed(2),
+              quantity: line.quantity,
+              lineTotal,
+            }),
+          );
+        }
+      }
+
+      order.subtotal = nextSubtotal;
+      order.total = nextTotal;
+      await manager.getRepository(Order).save(order);
+
+      await this.orderEvents.record(manager, {
+        orderId: order.id,
+        kind: OrderEventKind.ITEMS_CHANGED,
+        actor: { userId: user.id },
+        field: 'items',
+        reason: dto.reason,
+        meta: { correction: true, changes },
+      });
+      if (previousTotal !== Number(nextTotal)) {
+        await this.orderEvents.record(manager, {
+          orderId: order.id,
+          kind: OrderEventKind.TOTAL_CHANGED,
+          actor: { userId: user.id },
+          field: 'total',
+          previousValue: previousTotal.toFixed(2),
+          nextValue: nextTotal,
+          reason: dto.reason,
+          meta: {
+            correction: true,
+            subtotal: nextSubtotal,
+            deliveryFee: order.deliveryFee,
+            // Con el pedido ya cobrado, la diferencia es dinero que hay que
+            // cobrar (positiva) o devolver (negativa) fuera del sistema.
+            paidDifference:
+              order.paymentStatus === PaymentStatus.PAID
+                ? (Number(nextTotal) - previousTotal).toFixed(2)
+                : undefined,
+          },
+        });
+      }
+    });
+
+    this.logger.warn(
+      `Order ${order.orderNumber ?? order.id} lines corrected by super admin ${user.id}: ` +
+        `${changes.length} change(s), total ${previousTotal.toFixed(2)} -> ${nextTotal} (${dto.reason})`,
+    );
+    return this.findOneAdmin(id);
+  }
+
+  /**
+   * Cada línea pedida, con el nombre y el precio que le tocan: las que ya
+   * estaban conservan los suyos (salvo que se mande otro precio), y las nuevas
+   * los toman del catálogo. Un producto nuevo tiene que existir y estar a la
+   * venta; uno retirado del catálogo puede seguir en el pedido que lo compró,
+   * pero no se añade a otro.
+   */
+  private async resolveLines(
+    lines: UpdateOrderItemsDto['items'],
+    current: Map<string, OrderItem>,
+  ): Promise<
+    { productId: string; name: string; quantity: number; unitPrice: number }[]
+  > {
+    const resolved: {
+      productId: string;
+      name: string;
+      quantity: number;
+      unitPrice: number;
+    }[] = [];
+    for (const line of lines) {
+      const existing = current.get(line.productId);
+      if (existing) {
+        resolved.push({
+          productId: line.productId,
+          name: existing.productNameSnapshot,
+          quantity: line.quantity,
+          unitPrice: line.unitPrice ?? Number(existing.unitPrice),
+        });
+        continue;
+      }
+      const product = await this.productsService.findOne(line.productId);
+      if (!product.isActive || product.deletedAt) {
+        throw new ConflictException(
+          `"${product.name}" no está a la venta; no se puede añadir al pedido`,
+        );
+      }
+      resolved.push({
+        productId: line.productId,
+        name: product.name,
+        quantity: line.quantity,
+        // Misma fórmula que el carrito y la ficha de producto.
+        unitPrice:
+          line.unitPrice ??
+          Math.round(
+            Number(product.basePrice) *
+              (1 - Number(product.discount) / 100) *
+              100,
+          ) / 100,
+      });
+    }
+    return resolved;
   }
 
   /** Todos los intentos de pago del pedido, del más reciente al más antiguo. */
