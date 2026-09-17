@@ -74,6 +74,12 @@ export class OrderResponseDto {
    * refund is owed. Null for an ordinary cancellation.
    */
   cancellationReason: CancellationReason | null;
+  /** Cuándo entró el dinero. Desde aquí cuentan la custodia y sus avisos. */
+  paidAt: Date | null;
+  /** Cuándo se entregó. Desde aquí cuenta el plazo para reclamar. */
+  deliveredAt: Date | null;
+  /** A quién se le entregó: `{name, idCard}`. */
+  pickedUpBy: Record<string, unknown> | null;
   /**
    * Set when an admin brought the order back from cancelled to pending
    * («Restablecer orden»). The payment window restarts from this instant.
@@ -126,6 +132,9 @@ export class OrderResponseDto {
     dto.contactSnapshot = order.contactSnapshot;
     dto.customerNotes = order.customerNotes;
     dto.cancellationReason = order.cancellationReason;
+    dto.paidAt = order.paidAt;
+    dto.deliveredAt = order.deliveredAt;
+    dto.pickedUpBy = order.pickedUpBy;
     dto.reinstatedAt = order.reinstatedAt ?? null;
     dto.reinstatedBy = order.reinstatedBy ?? null;
     dto.items = order.items?.map(OrderItemResponseDto.fromEntity);

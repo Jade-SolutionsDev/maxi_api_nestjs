@@ -97,6 +97,7 @@ export class OrdersController {
       id,
       dto.status,
       dto.direct ?? false,
+      dto.pickedUpBy,
     );
   }
 
