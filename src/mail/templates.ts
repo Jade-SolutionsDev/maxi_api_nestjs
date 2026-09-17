@@ -52,7 +52,27 @@ const money = (amount: string, currency = 'USD'): string =>
 const greeting = (name: string | null): string =>
   name ? `Hola, ${esc(name)}:` : 'Hola:';
 
-const layout = (title: string, body: string, whatsapp: string): string => `
+export interface FooterLink {
+  label: string;
+  url: string;
+}
+
+const footerLinks = (links: FooterLink[]): string =>
+  links.length
+    ? `<p style="margin:0 0 12px;font-size:12.5px;line-height:1.9;">${links
+        .map(
+          (link) =>
+            `<a href="${link.url}" style="color:#ffe1bd;text-decoration:none;">${esc(link.label)}</a>`,
+        )
+        .join(' &nbsp;·&nbsp; ')}</p>`
+    : '';
+
+const layout = (
+  title: string,
+  body: string,
+  whatsapp: string,
+  links: FooterLink[] = [],
+): string => `
 <!doctype html>
 <html lang="es">
 <body style="margin:0;padding:24px;background:#f5f5f4;font-family:Helvetica,Arial,sans-serif;color:#1c1917;">
@@ -61,6 +81,7 @@ const layout = (title: string, body: string, whatsapp: string): string => `
       <h1 style="margin:0 0 20px;font-size:20px;line-height:1.3;color:#1c1917;">${title}</h1>
       ${body}
       <hr style="border:none;border-top:1px solid #e7e5e4;margin:28px 0 16px;">
+      ${footerLinks(links)}
       <p style="margin:0;font-size:13px;color:#78716c;line-height:1.6;">
         ¿Alguna duda? Escríbenos por WhatsApp al
         <a href="https://wa.me/${whatsapp.replace(/[^0-9]/g, '')}" style="color:#b45309;">${esc(whatsapp)}</a>.
@@ -203,6 +224,60 @@ export const refundRequested = (
   const html = layout('Tu devolución está en trámite', body, order.whatsapp);
   return {
     subject: `Pedido ${order.orderNumber}: devolución en trámite`,
+    html,
+    text: strip(body),
+  };
+};
+
+export interface WelcomeMailData {
+  customerName: string | null;
+  /** Raíz de la tienda, sin barra final. Los enlaces del pie cuelgan de aquí. */
+  storeUrl: string;
+  whatsapp: string;
+}
+
+const button = (url: string, label: string): string =>
+  `<p style="margin:0 0 18px;"><a href="${url}" style="display:inline-block;background:#3db98c;color:#ffffff;text-decoration:none;font-weight:600;font-size:15px;padding:13px 26px;border-radius:8px;">${label}</a></p>`;
+
+/**
+ * Bienvenida al crear la cuenta.
+ *
+ * Bienvenida y nada más: sin catálogo, sin instrucciones de pago y sin
+ * dirección de recogida. Todo eso llega en los correos de cada pedido, que es
+ * donde hace falta; aquí solo estorbaría.
+ *
+ * El texto habla de lo que trae al cliente, que no es el producto: alguien que
+ * compra desde fuera para su familia en Cuba.
+ */
+export const welcome = (data: WelcomeMailData): RenderedEmail => {
+  const store = data.storeUrl.replace(/\/+$/, '');
+  const body = [
+    p(
+      `${greeting(data.customerName)} tu cuenta ya está lista, y con ella una forma de estar presente aunque estés lejos.`,
+    ),
+    p(
+      `Detrás de cada pedido que pasa por aquí hay alguien pensando en su gente: una madre, un hermano, unos hijos que siguen allá. La distancia cambia muchas cosas, pero no esa.`,
+    ),
+    p(
+      `<strong>Lo que nos toca a nosotros es sencillo, y no lo tomamos a la ligera: que lo que compres llegue a manos de los tuyos.</strong>`,
+    ),
+    p(`Gracias por confiarnos eso. Aquí estamos cuando nos necesites.`),
+    button(store, 'Entrar a mi cuenta'),
+    p(`Con cariño,<br><strong>El equipo de Maxi Habana</strong>`),
+  ].join('\n');
+
+  const html = layout('¡Bienvenido a Maxi Habana!', body, data.whatsapp, [
+    { label: 'Preguntas frecuentes', url: `${store}/preguntas-frecuentes` },
+    { label: 'Contacto', url: `${store}/contacto` },
+    { label: 'Métodos de pago', url: `${store}/paginas/metodos-de-pagos` },
+    { label: 'Privacidad', url: `${store}/paginas/politica-de-privacidad` },
+    { label: 'Términos', url: `${store}/paginas/terminos-y-condiciones` },
+  ]);
+
+  return {
+    subject: data.customerName
+      ? `Bienvenida a Maxi Habana, ${data.customerName} 💚`
+      : 'Bienvenida a Maxi Habana 💚',
     html,
     text: strip(body),
   };
