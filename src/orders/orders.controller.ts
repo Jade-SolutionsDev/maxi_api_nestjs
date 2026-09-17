@@ -1,6 +1,7 @@
 import {
   Body,
   Controller,
+  Delete,
   Get,
   HttpCode,
   Param,
@@ -25,6 +26,11 @@ import { Role } from '../users/entities/user.entity';
 import { AdminOrdersQueryDto } from './dto/admin-orders-query.dto';
 import { OrderEventResponseDto } from '../order-events/dto/order-event-response.dto';
 import { OrderResponseDto } from './dto/order-response.dto';
+import {
+  CorrectOrderDto,
+  RemovePaymentAttemptDto,
+} from './dto/correct-order.dto';
+import { PaymentChargeResponseDto } from '../payments/dto/payment-charge-response.dto';
 import { UpdateOrderStatusDto } from './dto/update-order-status.dto';
 import { UpdatePaymentStatusDto } from './dto/update-payment-status.dto';
 import { OrdersService } from './orders.service';
@@ -134,6 +140,63 @@ export class OrdersController {
       req.user,
       id,
       dto.paymentStatus,
+    );
+  }
+
+  @Post(':id/correct')
+  @HttpCode(200)
+  @Roles(Role.SUPER_ADMIN)
+  @ApiOperation({
+    summary: 'Super admin correction: any order/payment status, any direction',
+    description:
+      'Moves the order and/or payment status wherever the super admin says, ' +
+      'applying the stock effect of the move (re-reserve, commit, release or ' +
+      'restock). A reason is mandatory and lands in the order history flagged ' +
+      'as a correction. When the result is pending and unpaid, the payment ' +
+      'window restarts. 409 when nothing changes or the stock is gone. ' +
+      'The service enforces SUPER_ADMIN even though ADMIN bypasses guards.',
+  })
+  @ApiOkResponse({ type: OrderResponseDto })
+  @ApiConflictResponse({ description: 'No change, or out of stock.' })
+  correct(
+    @Req() req: AuthenticatedUserRequest,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: CorrectOrderDto,
+  ): Promise<OrderResponseDto> {
+    return this.ordersService.correct(req.user, id, dto);
+  }
+
+  @Get(':id/payment-attempts')
+  @RequirePermission({ module: 'orders', action: 'read' })
+  @ApiOperation({ summary: 'Every payment attempt of the order, newest first' })
+  @ApiOkResponse({ type: PaymentChargeResponseDto, isArray: true })
+  listPaymentAttempts(
+    @Param('id', ParseUUIDPipe) id: string,
+  ): Promise<PaymentChargeResponseDto[]> {
+    return this.ordersService.listPaymentAttempts(id);
+  }
+
+  @Delete(':id/payment-attempts/:chargeId')
+  @Roles(Role.SUPER_ADMIN)
+  @ApiOperation({
+    summary: 'Remove a payment attempt that never completed (super admin)',
+    description:
+      'Deletes the attempt so the order shows no pending link/deposit for it. ' +
+      'A succeeded charge is never removable (409): that is money, refund it. ' +
+      'Reason mandatory; recorded in the order history.',
+  })
+  @ApiOkResponse({ type: OrderResponseDto })
+  removePaymentAttempt(
+    @Req() req: AuthenticatedUserRequest,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Param('chargeId', ParseUUIDPipe) chargeId: string,
+    @Body() dto: RemovePaymentAttemptDto,
+  ): Promise<OrderResponseDto> {
+    return this.ordersService.removePaymentAttempt(
+      req.user,
+      id,
+      chargeId,
+      dto.reason,
     );
   }
 

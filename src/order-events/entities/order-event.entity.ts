@@ -28,6 +28,8 @@ export enum OrderEventKind {
   PROOF_SUBMITTED = 'proof_submitted',
   REINSTATED = 'reinstated',
   EXPIRED = 'expired',
+  /** Un superadmin quitó un intento de pago que nunca se completó. */
+  PAYMENT_ATTEMPT_REMOVED = 'payment_attempt_removed',
 }
 
 /**

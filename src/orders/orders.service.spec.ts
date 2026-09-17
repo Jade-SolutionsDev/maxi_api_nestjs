@@ -100,6 +100,9 @@ describe('OrdersService', () => {
     createChargeForOrder: jest.Mock;
     latestChargeDto: jest.Mock;
     latestMethodsFor: jest.Mock;
+    listChargesFor: jest.Mock;
+    removeAttempt: jest.Mock;
+    toDto: jest.Mock;
   };
   let paymentMethodsService: { resolve: jest.Mock };
   let fulfillmentService: { resolveChoice: jest.Mock };
@@ -141,6 +144,9 @@ describe('OrdersService', () => {
       createChargeForOrder: jest.fn().mockResolvedValue({ id: 'charge-1' }),
       latestChargeDto: jest.fn().mockResolvedValue(undefined),
       latestMethodsFor: jest.fn().mockResolvedValue(new Map()),
+      listChargesFor: jest.fn().mockResolvedValue([]),
+      removeAttempt: jest.fn(),
+      toDto: jest.fn().mockImplementation((c: unknown) => c),
     };
     paymentMethodsService = {
       resolve: jest.fn().mockResolvedValue({ code: 'manual' }),
@@ -966,6 +972,216 @@ describe('OrdersService', () => {
         ConflictException,
       );
       expect(inventoryService.reserve).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('correct (corrección de superadmin)', () => {
+    const superAdmin = makeUser(Role.SUPER_ADMIN);
+    const reason = 'El cliente pagó por fuera y se registró mal';
+    const stubDetail = (order: Order) => {
+      orderRepo.findOne
+        .mockResolvedValueOnce(order)
+        .mockResolvedValue(makeOrder({ items: [] }));
+    };
+
+    it('solo la puede hacer un superadministrador, aunque ADMIN pase el guard', async () => {
+      stubDetail(makeOrder());
+      await expect(
+        service.correct(makeUser(Role.ADMIN), 'order-1', {
+          status: OrderStatus.CANCELLED,
+          reason,
+        }),
+      ).rejects.toBeInstanceOf(ForbiddenException);
+      expect(orderRepo.save).not.toHaveBeenCalled();
+    });
+
+    it('exige que algo cambie', async () => {
+      stubDetail(makeOrder());
+      await expect(
+        service.correct(superAdmin, 'order-1', {
+          status: OrderStatus.PENDING,
+          paymentStatus: PaymentStatus.PENDING,
+          reason,
+        }),
+      ).rejects.toBeInstanceOf(ConflictException);
+    });
+
+    it('de cancelado a pendiente vuelve a apartar y reinicia el plazo', async () => {
+      orderItemRepo.find.mockResolvedValue([
+        { productId: 'prod-1', quantity: 2, productNameSnapshot: 'Balita' },
+      ]);
+      stubDetail(makeOrder({ status: OrderStatus.CANCELLED }));
+
+      await service.correct(superAdmin, 'order-1', {
+        status: OrderStatus.PENDING,
+        reason,
+      });
+
+      expect(inventoryService.reserve).toHaveBeenCalledWith(
+        expect.anything(),
+        'order-1',
+        'prod-1',
+        2,
+        expect.anything(),
+      );
+      expect(inventoryService.confirmReservations).not.toHaveBeenCalled();
+      const saved = orderRepo.save.mock.calls[0][0] as Order;
+      expect(saved.status).toBe(OrderStatus.PENDING);
+      expect(saved.reinstatedAt).toBeInstanceOf(Date);
+      expect(orderEvents.record).toHaveBeenCalledWith(
+        expect.anything(),
+        expect.objectContaining({
+          kind: OrderEventKind.STATUS_CHANGED,
+          previousValue: OrderStatus.CANCELLED,
+          nextValue: OrderStatus.PENDING,
+          reason,
+          meta: { correction: true },
+        }),
+      );
+    });
+
+    it('de pendiente a entregado descuenta el stock una vez', async () => {
+      stubDetail(makeOrder());
+      await service.correct(superAdmin, 'order-1', {
+        status: OrderStatus.DELIVERED,
+        reason,
+      });
+      expect(inventoryService.reserve).not.toHaveBeenCalled();
+      expect(inventoryService.confirmReservations).toHaveBeenCalledTimes(1);
+      expect(inventoryService.releaseReservations).not.toHaveBeenCalled();
+    });
+
+    it('de confirmado a pendiente devuelve al almacén y vuelve a apartar', async () => {
+      orderItemRepo.find.mockResolvedValue([
+        { productId: 'prod-1', quantity: 1, productNameSnapshot: 'Balita' },
+      ]);
+      stubDetail(makeOrder({ status: OrderStatus.CONFIRMED }));
+
+      await service.correct(superAdmin, 'order-1', {
+        status: OrderStatus.PENDING,
+        reason,
+      });
+
+      expect(inventoryService.releaseReservations).toHaveBeenCalledTimes(1);
+      expect(inventoryService.reserve).toHaveBeenCalledTimes(1);
+      expect(inventoryService.confirmReservations).not.toHaveBeenCalled();
+    });
+
+    it('de entregado a cancelado devuelve al almacén sin volver a apartar', async () => {
+      stubDetail(makeOrder({ status: OrderStatus.DELIVERED }));
+      await service.correct(superAdmin, 'order-1', {
+        status: OrderStatus.CANCELLED,
+        reason,
+      });
+      expect(inventoryService.releaseReservations).toHaveBeenCalledTimes(1);
+      expect(inventoryService.reserve).not.toHaveBeenCalled();
+    });
+
+    it('entre estados de la misma fase no toca el stock', async () => {
+      stubDetail(makeOrder({ status: OrderStatus.SHIPPED }));
+      await service.correct(superAdmin, 'order-1', {
+        status: OrderStatus.PROCESSING,
+        reason,
+      });
+      expect(inventoryService.reserve).not.toHaveBeenCalled();
+      expect(inventoryService.confirmReservations).not.toHaveBeenCalled();
+      expect(inventoryService.releaseReservations).not.toHaveBeenCalled();
+      const saved = orderRepo.save.mock.calls[0][0] as Order;
+      expect(saved.status).toBe(OrderStatus.PROCESSING);
+    });
+
+    it('permite pagado → pendiente, que el flujo normal prohíbe, y reinicia el plazo', async () => {
+      stubDetail(makeOrder({ paymentStatus: PaymentStatus.PAID }));
+      await service.correct(superAdmin, 'order-1', {
+        paymentStatus: PaymentStatus.PENDING,
+        reason,
+      });
+      const saved = orderRepo.save.mock.calls[0][0] as Order;
+      expect(saved.paymentStatus).toBe(PaymentStatus.PENDING);
+      expect(saved.reinstatedAt).toBeInstanceOf(Date);
+      expect(orderEvents.record).toHaveBeenCalledWith(
+        expect.anything(),
+        expect.objectContaining({
+          kind: OrderEventKind.PAYMENT_STATUS_CHANGED,
+          previousValue: PaymentStatus.PAID,
+          nextValue: PaymentStatus.PENDING,
+        }),
+      );
+    });
+
+    it('409 nombrando el producto cuando no hay stock para volver a apartar', async () => {
+      orderItemRepo.find.mockResolvedValue([
+        { productId: 'prod-1', quantity: 5, productNameSnapshot: 'Cerveza' },
+      ]);
+      inventoryService.reserve.mockRejectedValueOnce(
+        new ConflictException('Insufficient stock'),
+      );
+      stubDetail(makeOrder({ status: OrderStatus.CANCELLED }));
+
+      await expect(
+        service.correct(superAdmin, 'order-1', {
+          status: OrderStatus.PENDING,
+          reason,
+        }),
+      ).rejects.toThrow(/Cerveza/);
+      expect(orderRepo.save).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('intentos de pago (superadmin)', () => {
+    const superAdmin = makeUser(Role.SUPER_ADMIN);
+
+    it('quita un intento no completado, limpia la referencia y lo anota', async () => {
+      orderRepo.findOne
+        .mockResolvedValueOnce(makeOrder({ paymentRef: 'REF-1' }))
+        .mockResolvedValue(makeOrder({ items: [] }));
+      paymentsService.removeAttempt.mockResolvedValue({
+        id: 'charge-1',
+        provider: 'tropipay',
+        reference: 'REF-1',
+        status: 'REQUIRES_ACTION',
+      });
+
+      await service.removePaymentAttempt(
+        superAdmin,
+        'order-1',
+        'charge-1',
+        'Enlace que el cliente nunca abrió',
+      );
+
+      expect(paymentsService.removeAttempt).toHaveBeenCalledWith(
+        'order-1',
+        'charge-1',
+      );
+      const saved = orderRepo.save.mock.calls[0][0] as Order;
+      expect(saved.paymentRef).toBeNull();
+      expect(orderEvents.record).toHaveBeenCalledWith(
+        null,
+        expect.objectContaining({
+          kind: OrderEventKind.PAYMENT_ATTEMPT_REMOVED,
+          meta: expect.objectContaining({ provider: 'tropipay' }),
+        }),
+      );
+    });
+
+    it('lo niega a quien no sea superadministrador', async () => {
+      await expect(
+        service.removePaymentAttempt(
+          makeUser(Role.ADMIN),
+          'order-1',
+          'charge-1',
+          'motivo',
+        ),
+      ).rejects.toBeInstanceOf(ForbiddenException);
+      expect(paymentsService.removeAttempt).not.toHaveBeenCalled();
+    });
+
+    it('lista los intentos convertidos a DTO', async () => {
+      orderRepo.findOne.mockResolvedValue(makeOrder());
+      paymentsService.listChargesFor.mockResolvedValue([{ id: 'c1' }]);
+      expect(await service.listPaymentAttempts('order-1')).toEqual([
+        { id: 'c1' },
+      ]);
     });
   });
 

@@ -68,6 +68,37 @@ export class PaymentsService {
     private readonly dataSource: DataSource,
   ) {}
 
+  /** Todos los intentos de un pedido, del más reciente al más antiguo. */
+  listChargesFor(orderId: string): Promise<PaymentCharge[]> {
+    return this.chargeRepository.find({
+      where: { orderId },
+      order: { createdAt: 'DESC' },
+    });
+  }
+
+  /**
+   * Quita un intento que nunca se completó. Un cobro con éxito no se toca
+   * nunca desde aquí: eso es dinero, y se resuelve con un reembolso.
+   */
+  async removeAttempt(
+    orderId: string,
+    chargeId: string,
+  ): Promise<PaymentCharge> {
+    const charge = await this.chargeRepository.findOne({
+      where: { id: chargeId, orderId },
+    });
+    if (!charge) {
+      throw new NotFoundException(`Payment attempt "${chargeId}" not found`);
+    }
+    if (charge.status === ChargeStatus.SUCCEEDED) {
+      throw new ConflictException(
+        'Este intento se cobró con éxito: no se puede quitar, hay que reembolsar',
+      );
+    }
+    await this.chargeRepository.delete({ id: charge.id });
+    return charge;
+  }
+
   /** Latest attempt of an order, if any (newest wins, whatever its provider). */
   latestChargeFor(orderId: string): Promise<PaymentCharge | null> {
     return this.chargeRepository.findOne({
