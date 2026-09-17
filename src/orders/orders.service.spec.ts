@@ -28,6 +28,7 @@ import { PermissionsService } from '../permissions/permissions.service';
 import { PaymentMethodsService } from '../payments/payment-methods.service';
 import { PaymentsService } from '../payments/payments.service';
 import { OrderEventsService } from '../order-events/order-events.service';
+import { OrderMailerService } from '../mail/order-mailer.service';
 import { OrderEventKind } from '../order-events/entities/order-event.entity';
 
 function makeClient(): Client {
@@ -118,6 +119,7 @@ describe('OrdersService', () => {
   };
   let permissionsService: { hasPermission: jest.Mock };
   let orderEvents: { record: jest.Mock; listForOrder: jest.Mock };
+  let mailer: { paymentReceived: jest.Mock };
   let orderItemRepo: {
     save: jest.Mock;
     create: jest.Mock;
@@ -200,6 +202,7 @@ describe('OrdersService', () => {
           Promise.resolve(role === Role.SUPER_ADMIN || role === Role.ADMIN),
         ),
     };
+    mailer = { paymentReceived: jest.fn().mockResolvedValue(null) };
     orderEvents = {
       record: jest.fn().mockResolvedValue(undefined),
       listForOrder: jest.fn().mockResolvedValue([]),
@@ -239,6 +242,7 @@ describe('OrdersService', () => {
         { provide: GeographyService, useValue: geographyService },
         { provide: PermissionsService, useValue: permissionsService },
         { provide: OrderEventsService, useValue: orderEvents },
+        { provide: OrderMailerService, useValue: mailer },
         { provide: DataSource, useValue: dataSource },
       ],
     }).compile();
@@ -889,6 +893,36 @@ describe('OrdersService', () => {
           PaymentStatus.PENDING,
         ),
       ).rejects.toBeInstanceOf(ConflictException);
+    });
+
+    it('sella la fecha de cobro y avisa al cliente al marcar pagado a mano', async () => {
+      orderRepo.findOne.mockResolvedValue(
+        makeOrder({ paymentStatus: PaymentStatus.PENDING }),
+      );
+
+      await service.updatePaymentStatus(
+        makeUser(Role.ADMIN),
+        'order-1',
+        PaymentStatus.PAID,
+      );
+
+      const saved = orderRepo.save.mock.calls[0][0] as { paidAt: Date | null };
+      expect(saved.paidAt).toBeInstanceOf(Date);
+      expect(mailer.paymentReceived).toHaveBeenCalledWith('order-1');
+    });
+
+    it('corregir a reembolsado no manda el aviso de pago recibido', async () => {
+      orderRepo.findOne.mockResolvedValue(
+        makeOrder({ paymentStatus: PaymentStatus.PAID }),
+      );
+
+      await service.updatePaymentStatus(
+        makeUser(Role.ADMIN),
+        'order-1',
+        PaymentStatus.REFUNDED,
+      );
+
+      expect(mailer.paymentReceived).not.toHaveBeenCalled();
     });
 
     it('allows refunding a paid order', async () => {
