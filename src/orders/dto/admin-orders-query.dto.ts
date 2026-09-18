@@ -14,7 +14,7 @@ import { OrderStatus, PaymentStatus } from '../entities/order.entity';
 export const SIN_METODO_DE_PAGO = 'none';
 
 export class AdminOrdersQueryDto extends PaginationQueryDto {
-  /** Matches order number, client name or client email (ILIKE). */
+  /** Matches order number or client name, email or phone (accent-insensitive). */
   @IsOptional()
   @IsString()
   q?: string;

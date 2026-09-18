@@ -548,6 +548,43 @@ describe('OrdersService', () => {
     });
   });
 
+  describe('findAllAdmin', () => {
+    it('busca pedidos por el nombre completo y teléfono del cliente', async () => {
+      const qb = {
+        leftJoinAndSelect: jest.fn(),
+        andWhere: jest.fn(),
+        orderBy: jest.fn(),
+        addOrderBy: jest.fn(),
+        skip: jest.fn(),
+        take: jest.fn(),
+        getManyAndCount: jest.fn().mockResolvedValue([[], 0]),
+      };
+      for (const method of [
+        'leftJoinAndSelect',
+        'andWhere',
+        'orderBy',
+        'addOrderBy',
+        'skip',
+        'take',
+      ] as const) {
+        qb[method].mockReturnValue(qb);
+      }
+      orderRepo.createQueryBuilder.mockReturnValue(qb);
+
+      await service.findAllAdmin({ q: 'Aurelio García' });
+
+      const [condition, parameters] = qb.andWhere.mock.calls[0] as [
+        string,
+        { q: string },
+      ];
+      expect(condition).toContain(
+        "concat_ws(' ', client.firstName, client.lastName)",
+      );
+      expect(condition).toContain('client.phone');
+      expect(parameters).toEqual({ q: '%Aurelio García%' });
+    });
+  });
+
   describe('findForClient', () => {
     it('labels each listed order with the method it was paid with', async () => {
       orderRepo.findAndCount.mockResolvedValue([[makeOrder()], 1]);

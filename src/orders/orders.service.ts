@@ -536,7 +536,9 @@ export class OrdersService {
     if (query.q) {
       qb.andWhere(
         `(${sinTildes('order.orderNumber')} OR ${sinTildes('client.email')}
-          OR ${sinTildes('client.firstName')} OR ${sinTildes('client.lastName')})`,
+          OR ${sinTildes('client.firstName')} OR ${sinTildes('client.lastName')}
+          OR ${sinTildes("concat_ws(' ', client.firstName, client.lastName)")}
+          OR ${sinTildes('client.phone')})`,
         { q: `%${query.q}%` },
       );
     }
