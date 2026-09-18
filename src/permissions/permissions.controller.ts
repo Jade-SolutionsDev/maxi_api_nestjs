@@ -43,7 +43,10 @@ export class PermissionsController {
     @Req() request: AuthenticatedUserRequest,
   ): Promise<RoleResponseDto> {
     const role = await this.permissionsService.createRole(dto, request.user.id);
-    return RoleResponseDto.fromEntity(role, []);
+    const permissionIds = await this.permissionsService.getRolePermissionIds(
+      role.id,
+    );
+    return RoleResponseDto.fromEntity(role, permissionIds);
   }
 
   @Get('roles')

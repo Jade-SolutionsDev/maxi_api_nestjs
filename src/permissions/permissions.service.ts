@@ -43,6 +43,23 @@ const CRUD = ['list', 'read', 'create', 'update', 'delete'] as const;
 const ACCIONES_DE_LECTURA = ['list', 'read'] as const;
 
 /**
+ * Módulos que hacen falta para que otro se pueda usar de verdad.
+ *
+ * No es una jerarquía inventada: son las listas que el propio panel consulta
+ * para pintar sus filtros y formularios. Los productos se filtran por
+ * departamento y categoría, así que un rol con todos los permisos de
+ * `products` y ninguno de `categories` abre la pantalla y no puede filtrar —
+ * el desplegable pide la lista de categorías y recibe un 403. Le pasó a QA.
+ *
+ * Solo se conceden las lecturas del módulo del que se depende, nunca escritura.
+ */
+const MODULOS_DE_APOYO: Record<string, readonly string[]> = {
+  products: ['categories', 'departments'],
+  categories: ['departments'],
+  inventory: ['categories', 'departments', 'stock-locations'],
+};
+
+/**
  * THE permission catalog: every grantable backoffice module and its actions.
  * Keys match the frontend resource names 1:1 (see authProvider RESOURCE_RULES).
  *
@@ -413,8 +430,14 @@ export class PermissionsService implements OnModuleInit {
     };
   }
 
+  /**
+   * Crea el rol y, si vienen, le asigna sus permisos de una vez.
+   *
+   * Si los permisos fallan, el rol recién creado se deshace: quedaría un rol
+   * huérfano y sin acceso a nada, que es justo lo que ya no queremos.
+   */
   async createRole(
-    data: { name: string; description?: string },
+    data: { name: string; description?: string; permissionIds?: string[] },
     createdBy: string | null = null,
   ): Promise<ManagedRole> {
     const existing = await this.roleRepository.findOne({
@@ -425,13 +448,24 @@ export class PermissionsService implements OnModuleInit {
       throw new ConflictException(`Role "${data.name}" already exists`);
     }
 
-    return this.roleRepository.save({
+    const role = await this.roleRepository.save({
       name: data.name,
       description: data.description ?? null,
       isSystem: false,
       isActive: true,
       createdBy,
     });
+
+    if (data.permissionIds?.length) {
+      try {
+        await this.setRolePermissions(role.id, data.permissionIds);
+      } catch (err) {
+        await this.roleRepository.delete(role.id);
+        throw err;
+      }
+    }
+
+    return role;
   }
 
   async listRoles(): Promise<ManagedRole[]> {
@@ -519,13 +553,26 @@ export class PermissionsService implements OnModuleInit {
         )
         .map((permiso) => permiso.module),
     );
-    if (modulosQueTrabajan.size === 0) {
+
+    // Cualquier módulo tocado —se trabaje en él o solo se mire— arrastra las
+    // lecturas de aquellos de los que depende para pintarse.
+    const modulosDeApoyo = new Set(
+      [...new Set(pedidos.map((permiso) => permiso.module))].flatMap(
+        (module) => MODULOS_DE_APOYO[module] ?? [],
+      ),
+    );
+
+    const necesitanLectura = new Set([
+      ...modulosQueTrabajan,
+      ...modulosDeApoyo,
+    ]);
+    if (necesitanLectura.size === 0) {
       return pedidos.map((permiso) => permiso.id);
     }
 
     const faltantes = await this.permissionRepository.find({
       where: {
-        module: In([...modulosQueTrabajan]),
+        module: In([...necesitanLectura]),
         action: In([...ACCIONES_DE_LECTURA]),
         isActive: true,
       },

@@ -37,6 +37,7 @@ describe('PermissionsService', () => {
     save: jest.Mock;
     count: jest.Mock;
     softDelete: jest.Mock;
+    delete: jest.Mock;
   };
   let rolePermissionRepo: {
     count: jest.Mock;
@@ -60,6 +61,7 @@ describe('PermissionsService', () => {
       save: jest.fn(),
       count: jest.fn(),
       softDelete: jest.fn(),
+      delete: jest.fn(),
     };
     rolePermissionRepo = {
       count: jest.fn(),
@@ -434,7 +436,7 @@ describe('PermissionsService', () => {
         .mockResolvedValueOnce([
           { id: 'p-create', module: 'products', action: 'create' },
         ])
-        // las lecturas que faltan
+        // las lecturas que faltan, del propio módulo y de los que lo pintan
         .mockResolvedValueOnce([
           { id: 'p-list', module: 'products', action: 'list' },
           { id: 'p-read', module: 'products', action: 'read' },
@@ -449,10 +451,11 @@ describe('PermissionsService', () => {
       ]);
     });
 
-    it('un rol de solo lectura se queda como está', async () => {
+    it('un rol de solo lectura sobre un módulo suelto se queda como está', async () => {
       roleRepo.findOne.mockResolvedValue({ id: 'r1', isSystem: false });
+      // `clients` no depende de ningún otro módulo para pintarse.
       permissionRepo.find.mockResolvedValue([
-        { id: 'p-list', module: 'products', action: 'list' },
+        { id: 'p-list', module: 'clients', action: 'list' },
       ]);
 
       await service.setRolePermissions('r1', ['p-list']);
@@ -463,12 +466,65 @@ describe('PermissionsService', () => {
       ]);
     });
 
+    it('mirar productos arrastra ver categorías y departamentos, que es lo que los filtra', async () => {
+      roleRepo.findOne.mockResolvedValue({ id: 'r1', isSystem: false });
+      permissionRepo.find
+        .mockResolvedValueOnce([
+          { id: 'p-list', module: 'products', action: 'list' },
+        ])
+        .mockResolvedValueOnce([
+          { id: 'cat-list', module: 'categories', action: 'list' },
+          { id: 'dep-list', module: 'departments', action: 'list' },
+        ]);
+
+      await service.setRolePermissions('r1', ['p-list']);
+
+      expect(rolePermissionRepo.save).toHaveBeenCalledWith([
+        { roleId: 'r1', permissionId: 'p-list' },
+        { roleId: 'r1', permissionId: 'cat-list' },
+        { roleId: 'r1', permissionId: 'dep-list' },
+      ]);
+    });
+
     it('un rol sin ningún permiso no se guarda', async () => {
       roleRepo.findOne.mockResolvedValue({ id: 'r1', isSystem: false });
       await expect(service.setRolePermissions('r1', [])).rejects.toBeInstanceOf(
         BadRequestException,
       );
       expect(rolePermissionRepo.delete).not.toHaveBeenCalled();
+    });
+
+    it('crear un rol con permisos lo deja listo de una vez', async () => {
+      roleRepo.findOne
+        .mockResolvedValueOnce(null) // no hay otro con ese nombre
+        .mockResolvedValue({ id: 'r-nuevo', isSystem: false });
+      roleRepo.save.mockResolvedValue({ id: 'r-nuevo', isSystem: false });
+      permissionRepo.find.mockResolvedValue([
+        { id: 'p-list', module: 'clients', action: 'list' },
+      ]);
+
+      const role = await service.createRole({
+        name: 'Económico',
+        permissionIds: ['p-list'],
+      });
+
+      expect(role.id).toBe('r-nuevo');
+      expect(rolePermissionRepo.save).toHaveBeenCalledWith([
+        { roleId: 'r-nuevo', permissionId: 'p-list' },
+      ]);
+    });
+
+    it('si los permisos no valen, no queda un rol huérfano', async () => {
+      roleRepo.findOne
+        .mockResolvedValueOnce(null) // no existe otro con ese nombre
+        .mockResolvedValue({ id: 'r-nuevo', isSystem: false });
+      roleRepo.save.mockResolvedValue({ id: 'r-nuevo', isSystem: false });
+      permissionRepo.find.mockResolvedValue([]); // ninguno de los pedidos existe
+
+      await expect(
+        service.createRole({ name: 'Roto', permissionIds: ['p-inventado'] }),
+      ).rejects.toBeInstanceOf(NotFoundException);
+      expect(roleRepo.delete).toHaveBeenCalledWith('r-nuevo');
     });
 
     it('deleteRole removes its assignments before soft-deleting', async () => {
