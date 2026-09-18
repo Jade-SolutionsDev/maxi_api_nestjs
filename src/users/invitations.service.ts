@@ -55,7 +55,7 @@ export class InvitationsService {
     });
     if (existingUser) {
       throw new ConflictException(
-        `An active user with email ${normalizedEmail} already exists.`,
+        `Ya hay un usuario activo con el correo ${normalizedEmail}. Si lo borraste, revisa la lista de usuarios: puede seguir ahí desactivado.`,
       );
     }
 
@@ -64,7 +64,7 @@ export class InvitationsService {
     });
     if (existingPending) {
       throw new ConflictException(
-        `A pending invitation for ${normalizedEmail} already exists.`,
+        `Ya hay una invitación pendiente para ${normalizedEmail}. Reenvíala o anúlala desde la lista de invitaciones antes de crear otra.`,
       );
     }
 
@@ -230,6 +230,36 @@ export class InvitationsService {
 
     invitation.status = InvitationStatus.REVOKED;
     return this.invitationRepository.save(invitation);
+  }
+
+  /**
+   * Anula las invitaciones pendientes de un correo. Se llama al borrar un
+   * usuario: si se le invitó y se le borró antes de que aceptara, la
+   * invitación seguía viva y bloqueaba volver a invitarlo.
+   *
+   * Es a prueba de fallos a propósito: que Clerk no responda no puede impedir
+   * que el usuario se borre.
+   */
+  async revokePendingForEmail(email: string | null): Promise<number> {
+    const normalizedEmail = email?.toLowerCase().trim();
+    if (!normalizedEmail) {
+      return 0;
+    }
+    const pendientes = await this.invitationRepository.find({
+      where: { email: normalizedEmail, status: InvitationStatus.PENDING },
+    });
+    for (const invitation of pendientes) {
+      try {
+        await this.revoke(invitation.id);
+      } catch (err) {
+        this.logger.warn(
+          `No se pudo anular la invitación ${invitation.id} de ${normalizedEmail}: ${
+            err instanceof Error ? err.message : String(err)
+          }`,
+        );
+      }
+    }
+    return pendientes.length;
   }
 
   /**

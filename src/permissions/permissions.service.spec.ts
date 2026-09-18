@@ -1,4 +1,8 @@
-import { ConflictException, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  ConflictException,
+  NotFoundException,
+} from '@nestjs/common';
 import { Test, TestingModule } from '@nestjs/testing';
 import { getRepositoryToken } from '@nestjs/typeorm';
 import { Role, User } from '../users/entities/user.entity';
@@ -400,7 +404,9 @@ describe('PermissionsService', () => {
 
     it('rejects setRolePermissions with unknown permission ids', async () => {
       roleRepo.findOne.mockResolvedValue({ id: 'r1', isSystem: false });
-      permissionRepo.count.mockResolvedValue(1); // asked for 2, found 1
+      permissionRepo.find.mockResolvedValue([
+        { id: 'p1', module: 'products', action: 'list' },
+      ]); // asked for 2, found 1
       await expect(
         service.setRolePermissions('r1', ['p1', 'p2']),
       ).rejects.toBeInstanceOf(NotFoundException);
@@ -409,13 +415,60 @@ describe('PermissionsService', () => {
 
     it('replaces the grant set when all ids are valid', async () => {
       roleRepo.findOne.mockResolvedValue({ id: 'r1', isSystem: false });
-      permissionRepo.count.mockResolvedValue(2);
+      permissionRepo.find.mockResolvedValue([
+        { id: 'p1', module: 'products', action: 'list' },
+        { id: 'p2', module: 'products', action: 'read' },
+      ]);
       await service.setRolePermissions('r1', ['p1', 'p2', 'p1']); // dupes collapse
       expect(rolePermissionRepo.delete).toHaveBeenCalledWith({ roleId: 'r1' });
       expect(rolePermissionRepo.save).toHaveBeenCalledWith([
         { roleId: 'r1', permissionId: 'p1' },
         { roleId: 'r1', permissionId: 'p2' },
       ]);
+    });
+
+    it('conceder «crear» arrastra «listar» y «ver» del mismo módulo', async () => {
+      roleRepo.findOne.mockResolvedValue({ id: 'r1', isSystem: false });
+      permissionRepo.find
+        // los pedidos
+        .mockResolvedValueOnce([
+          { id: 'p-create', module: 'products', action: 'create' },
+        ])
+        // las lecturas que faltan
+        .mockResolvedValueOnce([
+          { id: 'p-list', module: 'products', action: 'list' },
+          { id: 'p-read', module: 'products', action: 'read' },
+        ]);
+
+      await service.setRolePermissions('r1', ['p-create']);
+
+      expect(rolePermissionRepo.save).toHaveBeenCalledWith([
+        { roleId: 'r1', permissionId: 'p-create' },
+        { roleId: 'r1', permissionId: 'p-list' },
+        { roleId: 'r1', permissionId: 'p-read' },
+      ]);
+    });
+
+    it('un rol de solo lectura se queda como está', async () => {
+      roleRepo.findOne.mockResolvedValue({ id: 'r1', isSystem: false });
+      permissionRepo.find.mockResolvedValue([
+        { id: 'p-list', module: 'products', action: 'list' },
+      ]);
+
+      await service.setRolePermissions('r1', ['p-list']);
+
+      expect(permissionRepo.find).toHaveBeenCalledTimes(1);
+      expect(rolePermissionRepo.save).toHaveBeenCalledWith([
+        { roleId: 'r1', permissionId: 'p-list' },
+      ]);
+    });
+
+    it('un rol sin ningún permiso no se guarda', async () => {
+      roleRepo.findOne.mockResolvedValue({ id: 'r1', isSystem: false });
+      await expect(service.setRolePermissions('r1', [])).rejects.toBeInstanceOf(
+        BadRequestException,
+      );
+      expect(rolePermissionRepo.delete).not.toHaveBeenCalled();
     });
 
     it('deleteRole removes its assignments before soft-deleting', async () => {
