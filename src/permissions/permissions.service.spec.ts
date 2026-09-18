@@ -117,14 +117,14 @@ describe('PermissionsService', () => {
         expect.objectContaining({ systemKey: 'KARDIST', isSystem: false }),
       );
 
-      // Grants mirror the pre-collapse baselines (+ direct jump for the
-      // Almacenero template): 20 for GROCER, 8 for KARDIST.
+      // El Almacenero nace con lo que MxH-0036 define: 12 permisos para GROCER,
+      // 8 para KARDIST.
       const grantCalls = rolePermissionRepo.save.mock.calls;
-      expect(grantCalls[0][0]).toHaveLength(20);
+      expect(grantCalls[0][0]).toHaveLength(12);
       expect(grantCalls[1][0]).toHaveLength(8);
       expect(grantCalls[0][0]).toContainEqual({
         roleId: 'role-GROCER',
-        permissionId: 'products:create',
+        permissionId: 'inventory:create-operation',
       });
       expect(grantCalls[1][0]).toContainEqual({
         roleId: 'role-KARDIST',
@@ -134,6 +134,49 @@ describe('PermissionsService', () => {
       // Nobody is auto-assigned anymore — invitations carry explicit roles.
       expect(userRoleRepo.save).not.toHaveBeenCalled();
       expect(userRepo.find).not.toHaveBeenCalled();
+    });
+
+    // MxH-0036: el Jefe de almacenes opera almacenes e inventario y **consulta**
+    // el catálogo. La plantilla no puede nacer pudiendo tocar productos ni
+    // almacenes: un rol que nace de más rara vez se recorta después.
+    it('el Almacenero nace sin poder escribir en catálogo, almacenes ni pedidos', async () => {
+      // Igual que la prueba de arriba: la primera lectura ve la tabla vacía y
+      // las siguientes ya ven el catálogo sembrado, que es de donde salen los ids.
+      permissionRepo.find
+        .mockResolvedValueOnce([])
+        .mockResolvedValue(catalogRows);
+      permissionRepo.save.mockResolvedValue([]);
+      roleRepo.findOne.mockResolvedValue(null);
+      roleRepo.save.mockImplementation((r: { systemKey: string }) =>
+        Promise.resolve({ ...r, id: `role-${r.systemKey}` }),
+      );
+      rolePermissionRepo.save.mockResolvedValue([]);
+
+      await service.onModuleInit();
+
+      const concedidos = (
+        rolePermissionRepo.save.mock.calls[0][0] as { permissionId: string }[]
+      ).map((g) => g.permissionId);
+
+      // Consulta sí.
+      expect(concedidos).toContain('products:list');
+      expect(concedidos).toContain('products:read');
+      expect(concedidos).toContain('stock-locations:list');
+      expect(concedidos).toContain('inventory:create-operation');
+
+      // Escritura no, en ninguna de sus formas.
+      for (const prohibido of [
+        'products:create',
+        'products:update',
+        'products:delete',
+        'stock-locations:create',
+        'stock-locations:update',
+        'stock-locations:delete',
+      ]) {
+        expect(concedidos).not.toContain(prohibido);
+      }
+      // Los pedidos son de otro rol: ni uno solo.
+      expect(concedidos.filter((p) => p.startsWith('orders:'))).toHaveLength(0);
     });
 
     it('seeds only missing permission rows (diff, not blind insert)', async () => {

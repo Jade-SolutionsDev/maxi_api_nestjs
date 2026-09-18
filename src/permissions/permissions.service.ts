@@ -101,12 +101,19 @@ const BASE_ROLES: ReadonlyArray<{
     name: 'Almacenero — base',
     description:
       'Permisos iniciales del rol Almacenero. Ajústalos o retíralos según lo que necesite tu equipo.',
+    // Lo que MxH-0036 define para el Jefe de almacenes: almacenes e inventario
+    // los opera, el catálogo solo lo consulta. En concreto, y porque la tarjeta
+    // lo dice con todas las letras: **el catálogo es de solo lectura** (no crea,
+    // no edita, no borra, no activa productos) y **los almacenes no se
+    // modifican** (tampoco se crean ni se eliminan, eso ya lo impedía el
+    // catálogo de acciones). Los pedidos quedan fuera: son de otro rol.
+    // Es una plantilla editable, así que quien necesite más se lo concede desde
+    // la pantalla de roles — pero nace por lo mínimo, no por lo máximo.
     grants: {
-      products: CRUD,
+      products: ['list', 'read'],
       categories: ['list', 'read'],
       departments: ['list', 'read'],
-      'stock-locations': ['list', 'read', 'update'],
-      orders: ['list', 'read', 'update-status', 'update-status-direct'],
+      'stock-locations': ['list', 'read'],
       inventory: ['list', 'read', 'history', 'create-operation'],
     },
   },
