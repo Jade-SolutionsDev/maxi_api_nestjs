@@ -31,10 +31,18 @@ export class CreateCategoryDto {
   @MaxLength(2048)
   imageDesktopUrl: string;
 
+  /**
+   * Opcional a propósito: **una sola imagen basta para crear una categoría**.
+   * La tienda cae a la de escritorio cuando esta falta
+   * (`taxonomy.adapter.ts`), y el formulario del admin dejó de exigirla el
+   * 26-ago-2026 — pero aquí se seguía exigiendo, así que guardar con una sola
+   * imagen respondía 400 y la categoría no se creaba (MxH-0019, reportado por
+   * QA el 7-sep-2026).
+   */
+  @IsOptional()
   @IsString()
-  @IsNotEmpty()
   @MaxLength(2048)
-  imageMobileUrl: string;
+  imageMobileUrl?: string;
 
   @IsOptional()
   sortOrder?: number;
