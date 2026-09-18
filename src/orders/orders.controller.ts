@@ -52,7 +52,7 @@ export class OrdersController {
   @ApiOperation({
     summary: 'List orders (server-paginated)',
     description:
-      'Filters: `q` (order number / client name / client email), `status`, ' +
+      'Filters: `q` (order number / client name / client email / client phone), `status`, ' +
       '`paymentStatus`, `id` (comma list). Sort with `sortBy` + `sortOrder`; ' +
       'defaults to newest first.',
   })

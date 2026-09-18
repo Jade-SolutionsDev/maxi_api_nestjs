@@ -106,6 +106,15 @@ describe('ClientsService', () => {
       expect(parametros).toEqual({ q: '%aurelio%' });
     });
 
+    it('también busca por nombre y apellidos escritos como una frase', async () => {
+      await service.findAll({ q: 'Aurelio García' });
+
+      const [condicion] = qb.andWhere.mock.calls[0] as [string];
+      expect(condicion).toContain(
+        "concat_ws(' ', client.firstName, client.lastName)",
+      );
+    });
+
     // Sin esto la búsqueda se perdería por una tilde, que en español es la
     // mitad de las veces. Ver la decisión D-021.
     it('dobla los acentos por los dos lados', async () => {
