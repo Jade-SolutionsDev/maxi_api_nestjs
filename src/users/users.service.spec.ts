@@ -15,6 +15,7 @@ jest.mock('@clerk/backend', () => ({
 }));
 import { CustomerProvisioningService } from '../clients/customer-provisioning.service';
 import { PermissionsService } from '../permissions/permissions.service';
+import { InvitationsService } from './invitations.service';
 import { CreateUserDto } from './dto/create-user.dto';
 import { UpdateUserDto } from './dto/update-user.dto';
 import { Invitation } from './entities/invitation.entity';
@@ -28,6 +29,7 @@ describe('UsersService', () => {
   let configService: jest.Mocked<ConfigService>;
   let customerProvisioning: jest.Mocked<CustomerProvisioningService>;
   let permissionsService: jest.Mocked<PermissionsService>;
+  let invitationsService: jest.Mocked<InvitationsService>;
   let qb: {
     withDeleted: jest.Mock;
     andWhere: jest.Mock;
@@ -124,6 +126,10 @@ describe('UsersService', () => {
             getRoleSummariesByIds: jest.fn().mockResolvedValue([]),
           },
         },
+        {
+          provide: InvitationsService,
+          useValue: { revokePendingForEmail: jest.fn().mockResolvedValue(0) },
+        },
       ],
     }).compile();
 
@@ -133,6 +139,7 @@ describe('UsersService', () => {
     configService = module.get(ConfigService);
     customerProvisioning = module.get(CustomerProvisioningService);
     permissionsService = module.get(PermissionsService);
+    invitationsService = module.get(InvitationsService);
   });
 
   afterEach(() => {
@@ -482,6 +489,22 @@ describe('UsersService', () => {
   });
 
   describe('remove', () => {
+    it('anula las invitaciones pendientes, para poder volver a invitar', async () => {
+      repository.findOne.mockResolvedValue({ ...user });
+      repository.update.mockResolvedValue({} as never);
+      repository.softDelete.mockResolvedValue({
+        affected: 1,
+        raw: [],
+        generatedMaps: [],
+      });
+
+      await service.remove(user.id);
+
+      expect(invitationsService.revokePendingForEmail).toHaveBeenCalledWith(
+        user.email,
+      );
+    });
+
     it('should soft delete and deactivate a user', async () => {
       repository.findOne.mockResolvedValue({ ...user });
       repository.update.mockResolvedValue({} as never);

@@ -24,6 +24,7 @@ import type { UserStatusFilter } from './dto/list-users-query.dto';
 import { UpdateUserDto } from './dto/update-user.dto';
 import { Role, User } from './entities/user.entity';
 import { Invitation, InvitationStatus } from './entities/invitation.entity';
+import { InvitationsService } from './invitations.service';
 
 export interface FindUsersFilter {
   q?: string;
@@ -49,6 +50,7 @@ export class UsersService {
     private readonly configService: ConfigService,
     private readonly customerProvisioning: CustomerProvisioningService,
     private readonly permissionsService: PermissionsService,
+    private readonly invitationsService: InvitationsService,
   ) {}
 
   /** Run a side effect (storefront mirror, base-role assignment) without ever
@@ -368,6 +370,11 @@ export class UsersService {
 
     await this.usersRepository.update(id, { isActive: false });
     await this.usersRepository.softDelete(id);
+
+    // Sin esto, borrar a alguien a quien se invitó y nunca aceptó dejaba su
+    // invitación viva, y volver a invitarlo respondía «ya hay una invitación
+    // pendiente» sobre un usuario que ya no existe.
+    await this.invitationsService.revokePendingForEmail(user.email);
 
     // Deleting a never-approved user is a rejection — tear down the gated
     // storefront customer we provisioned at sign-up. Approved users keep theirs.

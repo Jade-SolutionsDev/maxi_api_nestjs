@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   ConflictException,
   Injectable,
   Logger,
@@ -29,6 +30,17 @@ export interface UserPermissionsPayload {
 }
 
 const CRUD = ['list', 'read', 'create', 'update', 'delete'] as const;
+
+/**
+ * Las dos acciones que solo miran. Todas las demás son trabajar sobre el
+ * módulo, y trabajar sobre algo que no puedes ver no significa nada: el menú
+ * lateral enseña un módulo cuando el rol tiene `list`, así que un rol con solo
+ * `create` deja a la persona en un panel vacío.
+ *
+ * Por eso conceder cualquier acción de trabajo arrastra `list` y `read` — las
+ * que el módulo tenga. `uploads`, que solo ofrece `create`, no gana nada.
+ */
+const ACCIONES_DE_LECTURA = ['list', 'read'] as const;
 
 /**
  * THE permission catalog: every grantable backoffice module and its actions.
@@ -463,21 +475,67 @@ export class PermissionsService implements OnModuleInit {
     }
 
     const uniqueIds = [...new Set(permissionIds)];
-    if (uniqueIds.length > 0) {
-      const found = await this.permissionRepository.count({
-        where: { id: In(uniqueIds) },
-      });
-      if (found !== uniqueIds.length) {
-        throw new NotFoundException('One or more permissions were not found');
-      }
-    }
-
-    await this.rolePermissionRepository.delete({ roleId });
-    if (uniqueIds.length > 0) {
-      await this.rolePermissionRepository.save(
-        uniqueIds.map((permissionId) => ({ roleId, permissionId })),
+    if (uniqueIds.length === 0) {
+      // Un rol sin un solo permiso no sirve para nada: quien lo tenga entra y
+      // no ve más que el panel. Se rechaza aquí y no solo en la pantalla.
+      throw new BadRequestException(
+        'Un rol tiene que dar acceso al menos a un módulo',
       );
     }
+
+    const pedidos = await this.permissionRepository.find({
+      where: { id: In(uniqueIds) },
+    });
+    if (pedidos.length !== uniqueIds.length) {
+      throw new NotFoundException('One or more permissions were not found');
+    }
+
+    const conLecturas = await this.conLecturasImplicadas(pedidos);
+
+    await this.rolePermissionRepository.delete({ roleId });
+    await this.rolePermissionRepository.save(
+      conLecturas.map((permissionId) => ({ roleId, permissionId })),
+    );
+  }
+
+  /**
+   * Añade `list` y `read` de cada módulo donde se conceda alguna acción de
+   * trabajo. Devuelve los ids finales, sin repetir.
+   *
+   * Se hace en el servidor y no solo en la pantalla porque la regla vale para
+   * cualquier vía: la API, una importación o el día que alguien escriba en la
+   * base a mano.
+   */
+  private async conLecturasImplicadas(
+    pedidos: Permission[],
+  ): Promise<string[]> {
+    const modulosQueTrabajan = new Set(
+      pedidos
+        .filter(
+          (permiso) =>
+            !ACCIONES_DE_LECTURA.includes(
+              permiso.action as (typeof ACCIONES_DE_LECTURA)[number],
+            ),
+        )
+        .map((permiso) => permiso.module),
+    );
+    if (modulosQueTrabajan.size === 0) {
+      return pedidos.map((permiso) => permiso.id);
+    }
+
+    const faltantes = await this.permissionRepository.find({
+      where: {
+        module: In([...modulosQueTrabajan]),
+        action: In([...ACCIONES_DE_LECTURA]),
+        isActive: true,
+      },
+    });
+    return [
+      ...new Set([
+        ...pedidos.map((permiso) => permiso.id),
+        ...faltantes.map((permiso) => permiso.id),
+      ]),
+    ];
   }
 
   async listPermissions(): Promise<Permission[]> {
