@@ -53,6 +53,7 @@ import {
   ResolvedPaymentMethod,
 } from '../payments/payment-methods.service';
 import { PaymentsService } from '../payments/payments.service';
+import { deshacerCobro, sellarCobro } from './payment-sealing';
 
 /**
  * Qué hace el stock en cada estado: retenido (reserva viva), comprometido
@@ -291,6 +292,9 @@ export class OrdersService {
           pickupLocationId: fulfillment.pickupLocationId,
           pickupAddressId: fulfillment.pickupAddressId,
           pickupAddressSnapshot: fulfillment.pickupAddressSnapshot,
+          // El plazo se congela aquí, como la etiqueta y la tarifa: cambiar
+          // la opción de entrega mañana no reescribe lo prometido hoy.
+          promiseDays: fulfillment.promiseDays,
           deliveryMunicipalityId: deliveryMunicipalityId ?? null,
           // A snapshot: the saved address may be edited or deleted later, the
           // order must still say where it was going.
@@ -887,10 +891,11 @@ export class OrdersService {
     }
     const previous = order.paymentStatus;
     order.paymentStatus = paymentStatus;
-    // El reloj de la custodia arranca también cuando el pago se marca a mano;
-    // si no, el pedido nunca entraría en los recordatorios.
-    if (paymentStatus === PaymentStatus.PAID && !order.paidAt) {
-      order.paidAt = new Date();
+    // El reloj de la custodia y el plazo de entrega arrancan también cuando
+    // el pago se marca a mano; si no, el pedido nunca entraría ni en los
+    // recordatorios ni en lo comprometido.
+    if (paymentStatus === PaymentStatus.PAID) {
+      sellarCobro(order);
     }
     await this.orderRepository.save(order);
     await this.orderEvents.record(null, {
@@ -1080,8 +1085,12 @@ export class OrdersService {
       }
       if (fromPayment !== toPayment) {
         order.paymentStatus = toPayment;
-        if (toPayment === PaymentStatus.PAID && !order.paidAt) {
-          order.paidAt = new Date();
+        if (toPayment === PaymentStatus.PAID) {
+          sellarCobro(order);
+        } else if (fromPayment === PaymentStatus.PAID) {
+          // Deshacer un cobro deshace lo que colgaba de él: no hay plazo que
+          // contar desde un pago que ya no existe, ni custodia que corra.
+          deshacerCobro(order);
         }
       }
       if (
