@@ -4,6 +4,8 @@ export class StorefrontDeliveryOptionDto {
   label: string;
   description: string | null;
   fee: number;
+  /** Días hábiles prometidos para esta opción; null si no hay compromiso. */
+  promiseDays: number | null;
 }
 
 /** A counter the customer can collect from. */

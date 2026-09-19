@@ -31,7 +31,11 @@ describe('OrderPdfService', () => {
       cancellationReason: null,
       paidAt: null,
       createdAt: new Date('2026-09-14T12:37:00Z'),
-      client: { firstName: 'Johel', lastName: 'Vargas', email: 'j@example.com' },
+      client: {
+        firstName: 'Johel',
+        lastName: 'Vargas',
+        email: 'j@example.com',
+      },
       ...extra,
     }) as Order;
 
@@ -52,9 +56,7 @@ describe('OrderPdfService', () => {
         contact: { email: 'hola@maxihabana.com', phone: '+53 5251 9414' },
         footer: {
           copyright: '© 2026 Maxi Habana',
-          legalLinks: [
-            { label: 'Privacidad', slug: 'politica-de-privacidad' },
-          ],
+          legalLinks: [{ label: 'Privacidad', slug: 'politica-de-privacidad' }],
         },
       }),
     };
@@ -67,11 +69,13 @@ describe('OrderPdfService', () => {
         {
           provide: ConfigService,
           useValue: {
-            get: jest.fn().mockImplementation((clave: string) =>
-              clave === 'storefront'
-                ? { url: 'https://www.maxihabana.com' }
-                : { whatsapp: '+53 5251 9414' },
-            ),
+            get: jest
+              .fn()
+              .mockImplementation((clave: string) =>
+                clave === 'storefront'
+                  ? { url: 'https://www.maxihabana.com' }
+                  : { whatsapp: '+53 5251 9414' },
+              ),
           },
         },
         { provide: CmsService, useValue: cms },

@@ -30,6 +30,13 @@ export class DeliveryOption {
   @Column({ type: 'decimal', precision: 12, scale: 2, default: 0 })
   fee: string;
 
+  /**
+   * Días hábiles que esta opción promete, contados desde el pago. Nulo = sin
+   * compromiso publicado. Se cuenta de lunes a sábado, sin feriados.
+   */
+  @Column({ name: 'promise_days', type: 'int', nullable: true })
+  promiseDays: number | null;
+
   @Column({ name: 'sort_order', type: 'int', default: 0 })
   sortOrder: number;
 

@@ -44,6 +44,8 @@ export interface FulfillmentChoice {
   pickupLocationId: string | null;
   pickupAddressId: string | null;
   pickupAddressSnapshot: Record<string, unknown> | null;
+  /** Días hábiles prometidos: de la opción elegida, o de los ajustes si es recogida. */
+  promiseDays: number | null;
 }
 
 /**
@@ -131,6 +133,7 @@ export class FulfillmentService {
         label: dto.label,
         description: dto.description ?? null,
         fee: (dto.fee ?? 0).toFixed(2),
+        promiseDays: dto.promiseDays ?? null,
         sortOrder: dto.sortOrder ?? 0,
         enabled: dto.enabled ?? false,
       }),
@@ -150,6 +153,9 @@ export class FulfillmentService {
     if (dto.label !== undefined) option.label = dto.label;
     if (dto.description !== undefined) option.description = dto.description;
     if (dto.fee !== undefined) option.fee = dto.fee.toFixed(2);
+    if (dto.promiseDays !== undefined) {
+      option.promiseDays = dto.promiseDays ?? null;
+    }
     if (dto.sortOrder !== undefined) option.sortOrder = dto.sortOrder;
     if (dto.enabled !== undefined) option.enabled = dto.enabled;
     await this.optionRepository.save(option);
@@ -302,6 +308,7 @@ export class FulfillmentService {
         label: option.label,
         description: option.description,
         fee: Number(option.fee),
+        promiseDays: option.promiseDays ?? null,
       })),
       pickupPoints: points,
       pickupEnabled: settings.pickupEnabled,
@@ -349,9 +356,11 @@ export class FulfillmentService {
           'Choose one of the available pickup points',
         );
       }
+      const ajustes = await this.getSettings();
       return {
         type,
         fee: '0.00',
+        promiseDays: ajustes.pickupPromiseDays ?? null,
         deliveryOptionId: null,
         deliveryOptionLabel: null,
         pickupLocationId: point.locationId,
@@ -384,6 +393,7 @@ export class FulfillmentService {
       pickupLocationId: null,
       pickupAddressId: null,
       pickupAddressSnapshot: null,
+      promiseDays: option.promiseDays ?? null,
     };
   }
 }

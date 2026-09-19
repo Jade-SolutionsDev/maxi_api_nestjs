@@ -141,6 +141,21 @@ export class Order {
   @Column({ name: 'pickup_location_id', type: 'uuid', nullable: true })
   pickupLocationId: string | null;
 
+  /**
+   * Plazo prometido al comprar, en días hábiles, congelado como la tarifa y
+   * la etiqueta: cambiar la opción de entrega no reescribe pedidos viejos.
+   */
+  @Column({ name: 'promise_days', type: 'int', nullable: true })
+  promiseDays: number | null;
+
+  /**
+   * Hasta cuándo está comprometido. Se sella con el pago, porque el plazo
+   * corre desde que se cobra y no desde que se crea el pedido. Si se cumplió
+   * se deduce comparándolo con `deliveredAt`.
+   */
+  @Column({ name: 'promised_at', type: 'timestamptz', nullable: true })
+  promisedAt: Date | null;
+
   @Column({ name: 'pickup_address_id', type: 'uuid', nullable: true })
   pickupAddressId: string | null;
 

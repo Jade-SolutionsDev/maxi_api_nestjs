@@ -34,6 +34,7 @@ import {
   ResolvedPaymentMethod,
 } from './payment-methods.service';
 import { GatewayCharge } from './payment-gateway.interface';
+import { sellarCobro } from '../orders/payment-sealing';
 
 /** Postgres reports a broken unique constraint as 23505. */
 const isUniqueViolation = (err: unknown): boolean =>
@@ -488,9 +489,9 @@ export class PaymentsService {
     const previous = order.paymentStatus;
     if (charge.status === ChargeStatus.SUCCEEDED) {
       order.paymentStatus = PaymentStatus.PAID;
-      // Desde aquí cuentan la custodia y sus recordatorios: la hora del cobro,
-      // no la de este barrido.
-      order.paidAt = charge.completedAt ?? new Date();
+      // Desde aquí cuentan la custodia, sus recordatorios y el plazo de
+      // entrega: la hora del cobro, no la de este barrido.
+      sellarCobro(order, charge.completedAt ?? new Date());
     } else if (charge.status === ChargeStatus.FAILED) {
       order.paymentStatus = PaymentStatus.FAILED;
     } else {

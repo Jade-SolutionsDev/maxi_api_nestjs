@@ -78,6 +78,10 @@ export class OrderResponseDto {
   paidAt: Date | null;
   /** Cuándo se entregó. Desde aquí cuenta el plazo para reclamar. */
   deliveredAt: Date | null;
+  /** Días hábiles prometidos al comprar. */
+  promiseDays: number | null;
+  /** Hasta cuándo está comprometida la entrega; se sella con el pago. */
+  promisedAt: Date | null;
   /** A quién se le entregó: `{name, idCard}`. */
   pickedUpBy: Record<string, unknown> | null;
   /**
@@ -134,6 +138,8 @@ export class OrderResponseDto {
     dto.cancellationReason = order.cancellationReason;
     dto.paidAt = order.paidAt;
     dto.deliveredAt = order.deliveredAt;
+    dto.promiseDays = order.promiseDays;
+    dto.promisedAt = order.promisedAt;
     dto.pickedUpBy = order.pickedUpBy;
     dto.reinstatedAt = order.reinstatedAt ?? null;
     dto.reinstatedBy = order.reinstatedBy ?? null;
