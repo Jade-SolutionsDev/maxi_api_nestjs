@@ -7,6 +7,7 @@ import {
   Length,
   MaxLength,
 } from 'class-validator';
+import { IsImageUrl } from '../../common/validators/is-image-url.validator';
 
 export class CreateCategoryDto {
   @IsUUID()
@@ -29,6 +30,7 @@ export class CreateCategoryDto {
   @IsString()
   @IsNotEmpty()
   @MaxLength(2048)
+  @IsImageUrl()
   imageDesktopUrl: string;
 
   /**
@@ -42,6 +44,7 @@ export class CreateCategoryDto {
   @IsOptional()
   @IsString()
   @MaxLength(2048)
+  @IsImageUrl()
   imageMobileUrl?: string;
 
   @IsOptional()

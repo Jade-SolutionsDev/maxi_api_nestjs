@@ -48,3 +48,30 @@ describe('CreateCategoryDto', () => {
     expect(fallos).toContain('name');
   });
 });
+
+describe('CreateCategoryDto · imágenes que la tienda no puede pintar', () => {
+  // MxH-0086: guardar una URL así dejaba el catálogo sin cargar entero.
+  it('rechaza un host sin dominio', async () => {
+    expect(
+      await errores({ ...base, imageDesktopUrl: 'https://x/p.png' }),
+    ).toContain('imageDesktopUrl');
+  });
+
+  it('rechaza texto que no es una dirección', async () => {
+    expect(
+      await errores({ ...base, imageDesktopUrl: 'foto-bonita.png' }),
+    ).toContain('imageDesktopUrl');
+  });
+
+  it('acepta una ruta propia y el almacenamiento de siempre', async () => {
+    expect(await errores({ ...base, imageDesktopUrl: '/img/a.webp' })).toEqual(
+      [],
+    );
+    expect(
+      await errores({
+        ...base,
+        imageMobileUrl: 'https://res.cloudinary.com/demo/a.webp',
+      }),
+    ).toEqual([]);
+  });
+});
