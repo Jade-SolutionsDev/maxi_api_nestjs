@@ -1,0 +1,50 @@
+# Comprobaciones en cada propuesta de cambios.
+#
+# Capa 1 de la integración continua: lo barato y rápido —compilar, linter y
+# pruebas unitarias—. Las pruebas de navegador (MxH-0085) irán en su propio
+# flujo, porque necesitan la tienda, el panel y una base levantados.
+#
+# Todo lo que hay aquí pasa en verde hoy. Un flujo que nace rojo no lo mira
+# nadie, y a la semana está apagado.
+name: Comprobaciones
+
+on:
+  pull_request:
+  push:
+    branches: [develop, master]
+
+# Una propuesta que recibe otro empujón cancela la comprobación anterior.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  comprobar:
+    name: Compilar, linter y pruebas
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 12
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Instalar dependencias
+        run: pnpm install --frozen-lockfile
+
+      - name: Compilar
+        run: pnpm exec nest build
+
+      - name: Linter
+        # Sin --fix: en un servidor de integración se comprueba, no se corrige.
+        run: pnpm exec eslint "src/**/*.ts"
+
+      - name: Pruebas
+        run: pnpm exec jest --ci --runInBand
