@@ -1518,10 +1518,14 @@ export class OrdersService {
 
     const eventos = await this.orderEvents.listForOrder(order.id);
     const history = eventos
+      // Por el campo que tocan, no por el tipo de evento: un pedido llega a
+      // «cancelado» tanto por una cancelación como por caducar sin pagarse
+      // (`expired`), y por el tipo se quedaba fuera justo ese caso, que es el
+      // más frecuente. Así entra cualquier evento que mueva el estado, incluidos
+      // los que se añadan después.
       .filter(
         (e) =>
-          (e.kind === OrderEventKind.STATUS_CHANGED ||
-            e.kind === OrderEventKind.CREATED) &&
+          e.field === 'status' &&
           typeof e.nextValue === 'string' &&
           e.nextValue in ESTADO_PARA_EL_CLIENTE,
       )

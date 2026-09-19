@@ -1781,16 +1781,19 @@ describe('OrdersService', () => {
       orderEvents.listForOrder.mockResolvedValue([
         {
           kind: OrderEventKind.CREATED,
+          field: 'status',
           nextValue: 'pending',
           createdAt: new Date('2026-09-15T10:00:00Z'),
         },
         {
           kind: OrderEventKind.PAYMENT_ATTEMPT,
+          field: 'paymentRef',
           nextValue: null,
           createdAt: new Date('2026-09-15T10:05:00Z'),
         },
         {
           kind: OrderEventKind.STATUS_CHANGED,
+          field: 'status',
           nextValue: 'shipped',
           createdAt: new Date('2026-09-17T09:00:00Z'),
         },
@@ -1836,6 +1839,37 @@ describe('OrdersService', () => {
       expect(serializado).not.toContain('client-1');
       expect(serializado).not.toContain('105.00');
       expect(serializado).not.toContain(TRACK);
+    });
+
+    // En staging salió un pedido «Cancelado» cuyo historial solo mostraba
+    // «Pendiente de pago»: había caducado sin pagarse, y ese evento es `expired`,
+    // no `status_changed`. Por el tipo de evento se perdía el final de la
+    // historia justo en el caso más común.
+    it('incluye la cancelación por caducidad, que no es un cambio de estado normal', async () => {
+      orderRepo.findOne.mockResolvedValue(
+        pedido({ status: OrderStatus.CANCELLED }),
+      );
+      orderEvents.listForOrder.mockResolvedValue([
+        {
+          kind: OrderEventKind.CREATED,
+          field: 'status',
+          nextValue: 'pending',
+          createdAt: new Date('2026-09-18T05:39:37Z'),
+        },
+        {
+          kind: OrderEventKind.EXPIRED,
+          field: 'status',
+          nextValue: 'cancelled',
+          createdAt: new Date('2026-09-19T05:39:37Z'),
+        },
+      ]);
+
+      const dto = await service.trackByPublicId(TRACK);
+
+      expect(dto.history.map((h) => h.status)).toEqual([
+        'Pendiente de pago',
+        'Cancelado',
+      ]);
     });
 
     it('un enlace inexistente y uno mal formado responden igual', async () => {
