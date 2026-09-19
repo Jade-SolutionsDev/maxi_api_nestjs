@@ -1,3 +1,4 @@
+import type { Response } from 'express';
 import {
   Body,
   Controller,
@@ -10,6 +11,8 @@ import {
   Post,
   Query,
   Req,
+  Res,
+  StreamableFile,
 } from '@nestjs/common';
 import {
   ApiBearerAuth,
@@ -34,6 +37,7 @@ import { PaymentChargeResponseDto } from '../payments/dto/payment-charge-respons
 import { UpdateOrderItemsDto } from './dto/update-order-items.dto';
 import { UpdateOrderStatusDto } from './dto/update-order-status.dto';
 import { UpdatePaymentStatusDto } from './dto/update-payment-status.dto';
+import { OrderPdfService } from './order-pdf.service';
 import { OrdersService } from './orders.service';
 
 // Backoffice order management, gated per-action by managed permissions
@@ -45,7 +49,10 @@ import { OrdersService } from './orders.service';
 @ApiBearerAuth()
 @Controller('orders')
 export class OrdersController {
-  constructor(private readonly ordersService: OrdersService) {}
+  constructor(
+    private readonly ordersService: OrdersService,
+    private readonly orderPdfService: OrderPdfService,
+  ) {}
 
   @Get()
   @RequirePermission({ module: 'orders', action: 'list' })
@@ -227,6 +234,29 @@ export class OrdersController {
       chargeId,
       dto.reason,
     );
+  }
+
+  @Get(':id/pdf')
+  @RequirePermission({ module: 'orders', action: 'read' })
+  @ApiOperation({
+    summary: 'Comprobante del pedido en PDF',
+    description:
+      'El pedido en papel: cabecera con los datos de la empresa, líneas, ' +
+      'totales y pie con los enlaces legales que tenga configurados la ' +
+      'tienda. **No es una factura** y el propio documento lo dice.',
+  })
+  async pdf(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Res({ passthrough: true }) res: Response,
+  ): Promise<StreamableFile> {
+    const order = await this.orderPdfService.findOrderOrFail(id);
+    const pdf = await this.orderPdfService.generate(id);
+    res.set({
+      'Content-Type': 'application/pdf',
+      'Content-Disposition': `attachment; filename="${this.orderPdfService.fileNameFor(order)}"`,
+      'Content-Length': pdf.length.toString(),
+    });
+    return new StreamableFile(pdf);
   }
 
   @Get(':id/events')

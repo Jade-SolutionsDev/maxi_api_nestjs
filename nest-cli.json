@@ -11,6 +11,13 @@
           "introspectComments": true
         }
       }
+    ],
+    "assets": [
+      {
+        "include": "orders/assets/**/*",
+        "outDir": "dist",
+        "watchAssets": true
+      }
     ]
   }
 }
