@@ -16,6 +16,7 @@ import { Role, User } from '../users/entities/user.entity';
 import { OrderItem } from './entities/order-item.entity';
 import {
   CancellationReason,
+  FulfillmentType,
   Order,
   OrderStatus,
   PaymentStatus,
@@ -1752,6 +1753,132 @@ describe('OrdersService', () => {
         NotFoundException,
       );
       expect(orderEvents.listForOrder).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('trackByPublicId (seguimiento público del pedido)', () => {
+    const TRACK = 'a'.repeat(64);
+
+    const pedido = (over: Partial<Order> = {}) =>
+      makeOrder({
+        orderNumber: 'ORD-20260134',
+        trackingId: TRACK,
+        status: OrderStatus.SHIPPED,
+        paymentStatus: PaymentStatus.PAID,
+        promiseDays: 3,
+        promisedAt: new Date('2026-09-20T10:00:00Z'),
+        deliveredAt: null,
+        fulfillmentType: FulfillmentType.DELIVERY,
+        clientId: 'client-1',
+        subtotal: '100.00',
+        total: '105.00',
+        deliveryAddress: { street: 'Calle secreta 123' },
+        ...over,
+      });
+
+    it('devuelve el estado con el enlace correcto', async () => {
+      orderRepo.findOne.mockResolvedValue(pedido());
+      orderEvents.listForOrder.mockResolvedValue([
+        {
+          kind: OrderEventKind.CREATED,
+          nextValue: 'pending',
+          createdAt: new Date('2026-09-15T10:00:00Z'),
+        },
+        {
+          kind: OrderEventKind.PAYMENT_ATTEMPT,
+          nextValue: null,
+          createdAt: new Date('2026-09-15T10:05:00Z'),
+        },
+        {
+          kind: OrderEventKind.STATUS_CHANGED,
+          nextValue: 'shipped',
+          createdAt: new Date('2026-09-17T09:00:00Z'),
+        },
+      ]);
+
+      const dto = await service.trackByPublicId(TRACK);
+
+      expect(dto.orderNumber).toBe('ORD-20260134');
+      expect(dto.status).toBe('En camino');
+      expect(dto.paid).toBe(true);
+      expect(dto.promiseDays).toBe(3);
+      // El historial solo lleva cambios de estado: el intento de pago se cae.
+      expect(dto.history).toEqual([
+        { status: 'Pendiente de pago', at: new Date('2026-09-15T10:00:00Z') },
+        { status: 'En camino', at: new Date('2026-09-17T09:00:00Z') },
+      ]);
+    });
+
+    // La prueba que pide la tarjeta: que no se escape nada de más. Se mira el
+    // objeto entero, no campo a campo, para que añadir uno nuevo sin pensar
+    // haga saltar esto.
+    it('no revela datos del cliente, dirección, importes ni productos', async () => {
+      orderRepo.findOne.mockResolvedValue(pedido());
+      orderEvents.listForOrder.mockResolvedValue([]);
+
+      const dto = await service.trackByPublicId(TRACK);
+
+      expect(Object.keys(dto).sort()).toEqual(
+        [
+          'deliveredAt',
+          'fulfillmentType',
+          'history',
+          'orderNumber',
+          'paid',
+          'placedAt',
+          'promiseDays',
+          'promisedAt',
+          'status',
+        ].sort(),
+      );
+      const serializado = JSON.stringify(dto);
+      expect(serializado).not.toContain('Calle secreta');
+      expect(serializado).not.toContain('client-1');
+      expect(serializado).not.toContain('105.00');
+      expect(serializado).not.toContain(TRACK);
+    });
+
+    it('un enlace inexistente y uno mal formado responden igual', async () => {
+      orderRepo.findOne.mockResolvedValue(null);
+      const inexistente = await service
+        .trackByPublicId(TRACK)
+        .catch((e: Error) => e);
+      const malFormado = await service
+        .trackByPublicId('no-es-un-identificador')
+        .catch((e: Error) => e);
+
+      expect(inexistente).toBeInstanceOf(NotFoundException);
+      expect(malFormado).toBeInstanceOf(NotFoundException);
+      expect((inexistente as Error).message).toBe(
+        (malFormado as Error).message,
+      );
+    });
+
+    it('un enlace mal formado ni siquiera consulta la base', async () => {
+      orderRepo.findOne.mockClear();
+      await service.trackByPublicId('AAAA').catch(() => undefined);
+      expect(orderRepo.findOne).not.toHaveBeenCalled();
+    });
+
+    it('un pedido borrado no se puede seguir', async () => {
+      orderRepo.findOne.mockResolvedValue(pedido({ deletedAt: new Date() }));
+      await expect(service.trackByPublicId(TRACK)).rejects.toBeInstanceOf(
+        NotFoundException,
+      );
+    });
+
+    it('traduce cada estado al vocabulario del cliente', async () => {
+      orderEvents.listForOrder.mockResolvedValue([]);
+      for (const [estado, etiqueta] of [
+        [OrderStatus.PENDING, 'Pendiente de pago'],
+        [OrderStatus.CONFIRMED, 'Confirmado'],
+        [OrderStatus.PROCESSING, 'En preparación'],
+        [OrderStatus.DELIVERED, 'Entregado'],
+        [OrderStatus.CANCELLED, 'Cancelado'],
+      ] as const) {
+        orderRepo.findOne.mockResolvedValue(pedido({ status: estado }));
+        expect((await service.trackByPublicId(TRACK)).status).toBe(etiqueta);
+      }
     });
   });
 

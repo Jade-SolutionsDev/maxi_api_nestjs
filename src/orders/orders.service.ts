@@ -1,3 +1,4 @@
+import { randomBytes } from 'node:crypto';
 import { sinTildes } from '../common/search/accent-insensitive';
 import {
   BadRequestException,
@@ -35,6 +36,11 @@ import { CheckoutDto } from './dto/checkout.dto';
 import { CorrectOrderDto } from './dto/correct-order.dto';
 import { OrderResponseDto } from './dto/order-response.dto';
 import { PickedUpByDto } from './dto/update-order-status.dto';
+import {
+  ESTADO_PARA_EL_CLIENTE,
+  estaPagado,
+  OrderTrackingResponseDto,
+} from './dto/order-tracking.dto';
 import { UpdateOrderItemsDto } from './dto/update-order-items.dto';
 import { OrderItem } from './entities/order-item.entity';
 import {
@@ -309,6 +315,10 @@ export class OrdersService {
         }),
       );
       order.orderNumber = `ORD-${new Date().getFullYear()}${String(order.seq).padStart(4, '0')}`;
+      // El enlace de seguimiento se reparte por fuera (WhatsApp, correo), así
+      // que su identificador no puede deducirse del número de pedido, que es
+      // correlativo. 32 bytes aleatorios, y no cambia en toda la vida del pedido.
+      order.trackingId = randomBytes(32).toString('hex');
       await orderRepo.save(order);
 
       const itemRepo = manager.getRepository(OrderItem);
@@ -1480,6 +1490,57 @@ export class OrdersService {
       },
     });
     return this.findOneAdmin(id);
+  }
+
+  /**
+   * Seguimiento público: el estado de un pedido a partir del identificador que
+   * viaja en el enlace, **sin sesión**.
+   *
+   * Un identificador que no existe y uno mal formado responden exactamente
+   * igual —404, sin cuerpo que los distinga—: si el error dijera «formato
+   * inválido» frente a «no encontrado», estaría confirmando cuáles tienen la
+   * forma buena, que es media pista para quien prueba a ciegas.
+   *
+   * Lo que se devuelve lo acota `OrderTrackingResponseDto`, que se construye
+   * campo a campo. El historial sale de `order_events`, filtrado a los cambios
+   * de estado: los intentos de pago y los comprobantes no son asunto de quien
+   * recibe el enlace.
+   */
+  async trackByPublicId(trackingId: string): Promise<OrderTrackingResponseDto> {
+    const noExiste = new NotFoundException('Pedido no encontrado');
+    // 64 caracteres hexadecimales; cualquier otra cosa ni se consulta.
+    if (!/^[0-9a-f]{64}$/.test(trackingId)) throw noExiste;
+
+    const order = await this.orderRepository.findOne({
+      where: { trackingId },
+    });
+    if (!order || order.deletedAt) throw noExiste;
+
+    const eventos = await this.orderEvents.listForOrder(order.id);
+    const history = eventos
+      .filter(
+        (e) =>
+          (e.kind === OrderEventKind.STATUS_CHANGED ||
+            e.kind === OrderEventKind.CREATED) &&
+          typeof e.nextValue === 'string' &&
+          e.nextValue in ESTADO_PARA_EL_CLIENTE,
+      )
+      .map((e) => ({
+        status: ESTADO_PARA_EL_CLIENTE[e.nextValue as OrderStatus],
+        at: e.createdAt,
+      }));
+
+    const dto = new OrderTrackingResponseDto();
+    dto.orderNumber = order.orderNumber;
+    dto.status = ESTADO_PARA_EL_CLIENTE[order.status];
+    dto.paid = estaPagado(order.paymentStatus);
+    dto.placedAt = order.createdAt;
+    dto.promiseDays = order.promiseDays ?? null;
+    dto.promisedAt = order.promisedAt ?? null;
+    dto.deliveredAt = order.deliveredAt ?? null;
+    dto.fulfillmentType = order.fulfillmentType;
+    dto.history = history;
+    return dto;
   }
 
   /** Historial del pedido, del más antiguo al más reciente. */

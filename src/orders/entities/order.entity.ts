@@ -97,6 +97,21 @@ export class Order {
   paymentStatus: PaymentStatus;
 
   // Reference id at the (future) payment gateway; null for manual payments.
+  /**
+   * Identificador público del pedido, el que viaja en el enlace de seguimiento.
+   *
+   * Es **distinto del número de pedido y del id interno** a propósito: el
+   * número es corto y correlativo —ORD-20260134 revela cuántos pedidos hay y
+   * deja adivinar el de al lado—, y el id interno se usa en rutas autenticadas.
+   * Este se genera con 32 bytes aleatorios y no se puede deducir de nada.
+   *
+   * No cambia nunca durante la vida del pedido: quien guardó el enlace en el
+   * móvil tiene que seguir entrando meses después.
+   */
+  @Index('IDX_orders_tracking_id', { unique: true })
+  @Column({ name: 'tracking_id', type: 'varchar', length: 64, nullable: true })
+  trackingId: string | null;
+
   @Column({ name: 'payment_ref', type: 'varchar', length: 255, nullable: true })
   paymentRef: string | null;
 

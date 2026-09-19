@@ -18,6 +18,7 @@ import { OrdersController } from './orders.controller';
 import { OrderPdfService } from './order-pdf.service';
 import { OrdersService } from './orders.service';
 import { PermissionsModule } from '../permissions/permissions.module';
+import { OrderTrackingController } from './order-tracking.controller';
 import { StorefrontOrdersController } from './storefront-orders.controller';
 
 @Module({
@@ -37,7 +38,11 @@ import { StorefrontOrdersController } from './storefront-orders.controller';
     CmsModule,
     ProductsModule,
   ],
-  controllers: [OrdersController, StorefrontOrdersController],
+  controllers: [
+    OrdersController,
+    StorefrontOrdersController,
+    OrderTrackingController,
+  ],
   providers: [OrdersService, OrderPdfService],
 })
 export class OrdersModule {}
