@@ -79,6 +79,14 @@ export class OrderResponseDto {
   /** Cuándo se entregó. Desde aquí cuenta el plazo para reclamar. */
   deliveredAt: Date | null;
   /** Días hábiles prometidos al comprar. */
+  /**
+   * El identificador del enlace de seguimiento. Se devuelve a quien ya puede
+   * ver el pedido entero —su dueño y la administración—, para que la tienda
+   * pueda ofrecer «compartir seguimiento» sin pedirlo aparte. Para el resto
+   * del mundo la única puerta es /storefront/tracking/:id, que no devuelve
+   * datos personales.
+   */
+  trackingId: string | null;
   promiseDays: number | null;
   /** Hasta cuándo está comprometida la entrega; se sella con el pago. */
   promisedAt: Date | null;
@@ -138,6 +146,7 @@ export class OrderResponseDto {
     dto.cancellationReason = order.cancellationReason;
     dto.paidAt = order.paidAt;
     dto.deliveredAt = order.deliveredAt;
+    dto.trackingId = order.trackingId ?? null;
     dto.promiseDays = order.promiseDays;
     dto.promisedAt = order.promisedAt;
     dto.pickedUpBy = order.pickedUpBy;
