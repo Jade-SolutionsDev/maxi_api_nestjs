@@ -24,6 +24,13 @@ export class StorefrontFulfillmentDto {
   /** False ⇒ do not offer pickup at all, whatever the points say. */
   pickupEnabled: boolean;
   /**
+   * Días hábiles que se tarda en tener el pedido listo para recoger. Vive en
+   * los ajustes y no en cada punto, así que sin publicarlo aquí la tienda no
+   * tiene forma de prometer fecha en una recogida — que es justo el caso de
+   * Maxi, donde toda la venta se recoge en el mostrador.
+   */
+  pickupPromiseDays: number | null;
+  /**
    * Set when the shop can fulfil nothing: show this instead of a picker and
    * keep the customer from submitting.
    */

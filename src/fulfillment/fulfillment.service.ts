@@ -91,7 +91,16 @@ export class FulfillmentService {
   ): Promise<FulfillmentSettingsResponseDto> {
     const current = await this.getSettings();
     const row = await this.settingsRepository.findOne({ where: {} });
-    const data: FulfillmentSettingsData = { ...current, ...dto };
+
+    // Solo se pisa lo que de verdad viene en la petición. Sin este filtro, un
+    // campo declarado en el DTO pero no enviado llega como `undefined`, pisa
+    // el valor guardado y desaparece del jsonb: guardar el mensaje de soporte
+    // borraba el ajuste de recogida, que volvía a su valor por defecto sin
+    // que nadie lo notara.
+    const cambios = Object.fromEntries(
+      Object.entries(dto).filter(([, valor]) => valor !== undefined),
+    );
+    const data: FulfillmentSettingsData = { ...current, ...cambios };
 
     if (row) {
       row.data = data;
@@ -312,6 +321,7 @@ export class FulfillmentService {
       })),
       pickupPoints: points,
       pickupEnabled: settings.pickupEnabled,
+      pickupPromiseDays: settings.pickupPromiseDays ?? null,
       unavailableMessage: nothingToOffer ? settings.supportMessage : null,
     };
   }
