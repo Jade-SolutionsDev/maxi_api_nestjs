@@ -49,7 +49,7 @@ describe('ClientsService', () => {
       addOrderBy: jest.fn(() => qb),
       skip: jest.fn(() => qb),
       take: jest.fn(() => qb),
-      getManyAndCount: jest.fn(async () => [[client], 1]),
+      getManyAndCount: jest.fn(() => Promise.resolve([[client], 1])),
     };
 
     const module: TestingModule = await Test.createTestingModule({

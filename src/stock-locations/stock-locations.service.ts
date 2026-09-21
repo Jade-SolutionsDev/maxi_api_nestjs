@@ -10,7 +10,6 @@ import {
   DataSource,
   EntityManager,
   FindOptionsWhere,
-  ILike,
   In,
   Repository,
 } from 'typeorm';

@@ -5,7 +5,7 @@ import {
 } from '@nestjs/common';
 import { Test, TestingModule } from '@nestjs/testing';
 import { getRepositoryToken } from '@nestjs/typeorm';
-import { ILike, IsNull, Not, Repository } from 'typeorm';
+import { IsNull, Not, Repository } from 'typeorm';
 import { Product } from '../products/entities/product.entity';
 import { Role, User } from '../users/entities/user.entity';
 import { RevalidationService } from '../revalidation/revalidation.service';
