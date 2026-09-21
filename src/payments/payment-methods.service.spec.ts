@@ -1,4 +1,5 @@
 import { BadRequestException } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { Test, TestingModule } from '@nestjs/testing';
 import { getRepositoryToken } from '@nestjs/typeorm';
 import { PaymentMethod } from './entities/payment-method.entity';
@@ -6,8 +7,13 @@ import { CustomManualGateway } from './gateways/custom-manual/custom-manual.gate
 import { PAYMENT_GATEWAYS, PaymentGateway } from './payment-gateway.interface';
 import { PaymentMethodsService } from './payment-methods.service';
 
-const stubGateway = (code: string, configured: boolean): PaymentGateway =>
-  ({ code, kind: 'redirect', configured }) as PaymentGateway;
+const stubGateway = (
+  code: string,
+  configured: boolean,
+  kind: PaymentGateway['kind'] = 'redirect',
+): PaymentGateway => ({ code, kind, configured }) as PaymentGateway;
+
+const EXPIRY = { gatewayMinutes: 30, manualHours: 24 };
 
 const method = (code: string, overrides: Partial<PaymentMethod> = {}) => ({
   id: `id-${code}`,
@@ -52,8 +58,12 @@ describe('PaymentMethodsService', () => {
           useValue: [
             stubGateway('tropipay', true),
             stubGateway('mibilletera', false),
-            stubGateway('manual', true),
+            stubGateway('manual', true, 'manual'),
           ],
+        },
+        {
+          provide: ConfigService,
+          useValue: { get: () => ({ expiry: EXPIRY }) },
         },
       ],
     }).compile();
@@ -265,6 +275,33 @@ describe('PaymentMethodsService', () => {
         BadRequestException,
       );
       expect(repo.softDelete).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('findAvailableForStorefront', () => {
+    it('dice cuánto se aparta el stock con cada método', async () => {
+      repo.find.mockResolvedValue([method('tropipay'), method('manual')]);
+
+      const offered = await service.findAvailableForStorefront();
+
+      expect(offered).toEqual([
+        expect.objectContaining({
+          code: 'tropipay',
+          kind: 'redirect',
+          holdMinutes: EXPIRY.gatewayMinutes,
+        }),
+        expect.objectContaining({
+          code: 'manual',
+          kind: 'manual',
+          holdMinutes: EXPIRY.manualHours * 60,
+        }),
+      ]);
+    });
+
+    it('no ofrece un método sin credenciales', async () => {
+      repo.find.mockResolvedValue([method('mibilletera')]);
+
+      expect(await service.findAvailableForStorefront()).toEqual([]);
     });
   });
 });

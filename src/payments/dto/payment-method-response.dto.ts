@@ -46,10 +46,19 @@ export class StorefrontPaymentMethodDto {
   description: string | null;
   icon: string | null;
   kind: PaymentActionKind;
+  /**
+   * Minutes the order keeps its stock reserved with this method before the
+   * expiry sweep cancels it. It travels with the method because the checkout
+   * has to say it BEFORE the order exists, when there is no charge yet to read
+   * an `expiresAt` from — and hardcoding it in the storefront would drift the
+   * day someone changes ORDER_EXPIRY_GATEWAY_MINUTES.
+   */
+  holdMinutes: number;
 
   static fromEntity(
     method: PaymentMethod,
     kind: PaymentActionKind,
+    holdMinutes: number,
   ): StorefrontPaymentMethodDto {
     const dto = new StorefrontPaymentMethodDto();
     dto.code = method.code;
@@ -57,6 +66,7 @@ export class StorefrontPaymentMethodDto {
     dto.description = method.description;
     dto.icon = method.icon;
     dto.kind = kind;
+    dto.holdMinutes = holdMinutes;
     return dto;
   }
 }
