@@ -151,4 +151,53 @@ describe('MailService', () => {
     const cuerpo = JSON.parse(fetchMock.mock.calls[0][1].body as string);
     expect('reply_to' in cuerpo).toBe(false);
   });
+  // El comprobante del pedido existe desde hace semanas, pero vivía solo
+  // detrás de un botón de la web. Esto es la pieza que permite mandárselo.
+  it('manda los adjuntos en base64, como los quiere Resend', async () => {
+    resend = {
+      apiKey: 'k',
+      fromAddress: 'Maxi <pedidos@maxihabana.com>',
+      configured: true,
+    };
+    service = await build();
+    const fetchMock = jest.fn().mockResolvedValue({
+      ok: true,
+      json: () => Promise.resolve({ id: 'resend-126' }),
+    });
+    global.fetch = fetchMock;
+
+    await service.send({
+      ...email,
+      attachments: [
+        { filename: 'ORD-20260001.pdf', content: Buffer.from('%PDF-1.4 x') },
+      ],
+    });
+
+    const cuerpo = JSON.parse(fetchMock.mock.calls[0][1].body as string);
+    expect(cuerpo.attachments).toEqual([
+      {
+        filename: 'ORD-20260001.pdf',
+        content: Buffer.from('%PDF-1.4 x').toString('base64'),
+      },
+    ]);
+  });
+
+  it('sin adjuntos no manda el campo, para que no salga el clip vacío', async () => {
+    resend = {
+      apiKey: 'k',
+      fromAddress: 'Maxi <pedidos@maxihabana.com>',
+      configured: true,
+    };
+    service = await build();
+    const fetchMock = jest.fn().mockResolvedValue({
+      ok: true,
+      json: () => Promise.resolve({ id: 'resend-127' }),
+    });
+    global.fetch = fetchMock;
+
+    await service.send(email);
+
+    const cuerpo = JSON.parse(fetchMock.mock.calls[0][1].body as string);
+    expect('attachments' in cuerpo).toBe(false);
+  });
 });
