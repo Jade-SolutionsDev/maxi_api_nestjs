@@ -68,13 +68,14 @@ describe('plantillas de correo', () => {
 
     it('saluda por el nombre y lo lleva en el asunto', () => {
       const rendered = welcome(datos);
-      expect(rendered.text).toContain('Hola, Marisol:');
+      // El saludo es ahora el titular del correo, sin dos puntos.
+      expect(rendered.text).toMatch(/^Hola, Marisol/);
       expect(rendered.subject).toContain('Marisol');
     });
 
     it('sin nombre el saludo sigue teniendo sentido', () => {
       const rendered = welcome({ ...datos, customerName: null });
-      expect(rendered.text).toContain('Hola:');
+      expect(rendered.text).toMatch(/^Hola\b/);
       expect(rendered.subject).toBe('Bienvenida a Maxi Habana 💚');
     });
 
@@ -119,7 +120,7 @@ describe('plantillas de correo', () => {
 
     it('al que pagó y se quedó sin stock le dice que se le devuelve, con el importe', () => {
       const r = orderCancelled(order, 'paid_after_expiry_out_of_stock');
-      expect(r.text).toMatch(/dinero se te devuelve/i);
+      expect(r.text).toMatch(/te devolvemos/i);
       expect(r.text).toContain('$60.00');
       expect(r.text).not.toContain('No se te cobró nada');
     });
@@ -129,5 +130,45 @@ describe('plantillas de correo', () => {
     expect(orderShipped(order).subject).toContain('ORD-20260001');
     expect(orderDelivered(order).subject).toContain('ORD-20260001');
     expect(orderCancelled(order, null).subject).toContain('ORD-20260001');
+  });
+  describe('el pie y la marca, iguales en todos', () => {
+    // Antes solo la bienvenida llevaba enlaces legales: las otras siete salían
+    // sin política de privacidad ni términos, que es de lo primero que mira un
+    // filtro de spam.
+    const conEnlaces = (html: string) =>
+      [
+        'politica-de-privacidad',
+        'terminos-y-condiciones',
+        'preguntas-frecuentes',
+      ].every((enlace) => html.includes(enlace));
+
+    const conTienda: OrderMailData = {
+      ...order,
+      storeUrl: 'https://www.maxihabana.com',
+    };
+
+    it('todos los correos de pedido llevan los enlaces legales', () => {
+      expect(conEnlaces(paymentReceived(conTienda).html)).toBe(true);
+      expect(conEnlaces(orderShipped(conTienda).html)).toBe(true);
+      expect(conEnlaces(orderDelivered(conTienda).html)).toBe(true);
+      expect(conEnlaces(orderCancelled(conTienda, null).html)).toBe(true);
+    });
+
+    it('sin URL de tienda no inventa enlaces rotos', () => {
+      const sinTienda = paymentReceived({ ...order, storeUrl: null });
+      expect(sinTienda.html).not.toContain('href="/');
+      expect(sinTienda.html).not.toContain('null/');
+    });
+
+    it('la marca va en texto, porque Gmail bloquea las imágenes', () => {
+      const html = paymentReceived(order).html;
+      expect(html).toContain('Habana');
+      expect(html).not.toContain('<img');
+    });
+
+    it('dice por qué le llega el correo a quien lo recibe', () => {
+      expect(paymentReceived(order).html).toMatch(/Recibes este correo porque/);
+      expect(orderShipped(order).html).toMatch(/Recibes este correo porque/);
+    });
   });
 });
