@@ -90,6 +90,9 @@ export class MailService {
         body: JSON.stringify({
           from: resend.fromAddress,
           to: [email.to],
+          // Sin esto la respuesta del cliente vuelve al remitente, que es una
+          // dirección de un dominio que no recibe correo: se pierde entera.
+          ...(resend.replyTo ? { reply_to: resend.replyTo } : {}),
           subject: email.subject,
           html: email.html,
           text: email.text,

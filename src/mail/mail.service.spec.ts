@@ -7,7 +7,12 @@ import { MailService } from './mail.service';
 describe('MailService', () => {
   let service: MailService;
   let saved: Partial<EmailLog>[];
-  let resend: { apiKey?: string; fromAddress?: string; configured: boolean };
+  let resend: {
+    apiKey?: string;
+    fromAddress?: string;
+    replyTo?: string;
+    configured: boolean;
+  };
 
   const build = async (): Promise<MailService> => {
     const module: TestingModule = await Test.createTestingModule({
@@ -104,5 +109,46 @@ describe('MailService', () => {
     expect(result.status).toBe(EmailStatus.FAILED);
     expect(result.error).toBe('dominio sin verificar');
     expect(saved[0]).toMatchObject({ status: EmailStatus.FAILED });
+  });
+  // El remitente es una dirección del dominio, y el dominio no recibe correo:
+  // escribirle a `pedidos@maxihabana.com` rebota con «User does not exist».
+  // Sin Reply-To, cada cliente que contesta a su pedido escribe al vacío.
+  it('manda las respuestas al buzón que el equipo lee', async () => {
+    resend = {
+      apiKey: 'k',
+      fromAddress: 'Maxi <pedidos@maxihabana.com>',
+      replyTo: 'comercialmaxihabana@gmail.com',
+      configured: true,
+    };
+    service = await build();
+    const fetchMock = jest.fn().mockResolvedValue({
+      ok: true,
+      json: () => Promise.resolve({ id: 'resend-124' }),
+    });
+    global.fetch = fetchMock;
+
+    await service.send(email);
+
+    const cuerpo = JSON.parse(fetchMock.mock.calls[0][1].body as string);
+    expect(cuerpo.reply_to).toBe('comercialmaxihabana@gmail.com');
+  });
+
+  it('sin buzón de respuestas configurado, no manda el campo vacío', async () => {
+    resend = {
+      apiKey: 'k',
+      fromAddress: 'Maxi <pedidos@maxihabana.com>',
+      configured: true,
+    };
+    service = await build();
+    const fetchMock = jest.fn().mockResolvedValue({
+      ok: true,
+      json: () => Promise.resolve({ id: 'resend-125' }),
+    });
+    global.fetch = fetchMock;
+
+    await service.send(email);
+
+    const cuerpo = JSON.parse(fetchMock.mock.calls[0][1].body as string);
+    expect('reply_to' in cuerpo).toBe(false);
   });
 });

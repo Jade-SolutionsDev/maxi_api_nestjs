@@ -104,6 +104,14 @@ export interface ResendConfig {
   apiKey: string | undefined;
   /** Sender address for platform replies, e.g. "Maxi <soporte@maxihabana.com>". */
   fromAddress: string | undefined;
+  /**
+   * Dónde caen las respuestas del cliente. El remitente es una dirección del
+   * dominio, y el dominio **no recibe correo**: una respuesta a
+   * `pedidos@maxihabana.com` rebota con «User does not exist» (comprobado el
+   * 23-sep-2026). Sin esto, cada cliente que contesta a su correo de pedido
+   * escribe al vacío. Apunta al buzón que el equipo sí lee.
+   */
+  replyTo: string | undefined;
   /** Credentials present. Platform email replies stay disabled without this. */
   configured: boolean;
 }
@@ -283,6 +291,7 @@ export const resendConfig = (): ResendConfig => {
   return {
     apiKey,
     fromAddress,
+    replyTo: process.env.RESEND_REPLY_TO,
     configured: isConfigured(apiKey, fromAddress),
   };
 };
