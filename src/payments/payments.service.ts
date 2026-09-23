@@ -608,6 +608,13 @@ export class PaymentsService {
     order.cancellationReason =
       CancellationReason.PAID_AFTER_EXPIRY_OUT_OF_STOCK;
     await this.orderRepository.save(order);
+    // El peor caso para el cliente: pagó y no hay mercancía. Se le cuenta en
+    // cuanto pasa, con el importe que se le va a devolver, en vez de que lo
+    // descubra esperando un pedido que no va a llegar.
+    void this.orderMailer.cancelled(
+      order.id,
+      CancellationReason.PAID_AFTER_EXPIRY_OUT_OF_STOCK,
+    );
     await this.orderEvents.record(null, {
       orderId: order.id,
       kind: OrderEventKind.STATUS_CHANGED,

@@ -12,6 +12,7 @@ import {
 } from '../orders/entities/order.entity';
 import { InventoryService } from '../inventory/inventory.service';
 import { OrderEventsService } from '../order-events/order-events.service';
+import { OrderMailerService } from '../mail/order-mailer.service';
 import { ChargeStatus, PaymentCharge } from './entities/payment-charge.entity';
 import { OrderExpiryService } from './order-expiry.service';
 import { PaymentMethodsService } from './payment-methods.service';
@@ -43,6 +44,7 @@ const makeCharge = (overrides: Partial<PaymentCharge> = {}): PaymentCharge =>
   }) as PaymentCharge;
 
 describe('OrderExpiryService', () => {
+  const mailer = { cancelled: jest.fn().mockResolvedValue(null) };
   let service: OrderExpiryService;
   let orderRepo: { find: jest.Mock; findOne: jest.Mock; save: jest.Mock };
   let payments: { latestChargesFor: jest.Mock };
@@ -84,6 +86,10 @@ describe('OrderExpiryService', () => {
         {
           provide: OrderEventsService,
           useValue: { record: jest.fn().mockResolvedValue(undefined) },
+        },
+        {
+          provide: OrderMailerService,
+          useValue: mailer,
         },
         {
           provide: ConfigService,

@@ -729,6 +729,10 @@ export class OrdersService {
       }
     }
 
+    // El estado con el que entró, para no mandar correo cuando alguien vuelve
+    // a marcar lo que ya estaba marcado.
+    const previoAlCambio = order.status;
+
     // A jump still owes the side effects of the steps it skips: stock is
     // committed exactly once when the order passes (or lands on) confirmed,
     // and released when it lands on cancelled.
@@ -781,7 +785,33 @@ export class OrdersService {
         meta: direct ? { direct: true } : null,
       });
     });
+    // Fuera de la transacción y sin await: avisar no puede tumbar ni demorar
+    // el cambio de estado, igual que con el correo del pago. Si el envío
+    // falla, queda anotado en `email_log` con su motivo.
+    if (previoAlCambio !== status) {
+      this.avisarDelCambio(order.id, status, order.cancellationReason ?? null);
+    }
     return this.findOneAdmin(id);
+  }
+
+  /**
+   * Qué cambios de estado se le cuentan al cliente. Son tres de seis: de
+   * `confirmed` y `processing` no se avisa —el cliente acaba de recibir el
+   * correo del pago y no aportan nada que él pueda hacer—, y `pending` es
+   * donde nace el pedido.
+   */
+  private avisarDelCambio(
+    orderId: string,
+    status: OrderStatus,
+    motivo: CancellationReason | null,
+  ): void {
+    if (status === OrderStatus.SHIPPED) {
+      void this.orderMailer.shipped(orderId);
+    } else if (status === OrderStatus.DELIVERED) {
+      void this.orderMailer.delivered(orderId);
+    } else if (status === OrderStatus.CANCELLED) {
+      void this.orderMailer.cancelled(orderId, motivo);
+    }
   }
 
   // Direct jumps skip the step chain but never its rules of physics: forward

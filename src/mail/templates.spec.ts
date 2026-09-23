@@ -1,5 +1,8 @@
 import {
   OrderMailData,
+  orderCancelled,
+  orderDelivered,
+  orderShipped,
   paymentReceived,
   refundCompleted,
   welcome,
@@ -95,5 +98,36 @@ describe('plantillas de correo', () => {
       }).html;
       expect(html).not.toContain('.com//');
     });
+  });
+  describe('cancelación: tres motivos, tres textos', () => {
+    // El error caro aquí es contarle a alguien lo que no le pasó. Quien
+    // cancela su propio pedido y recibe «no recibimos tu pago» concluye que el
+    // sistema no se entera de lo que hace.
+    it('al que canceló él mismo no le habla de plazos ni de pagos', () => {
+      const r = orderCancelled(order, null);
+      expect(r.text).toContain('quedó cancelado');
+      expect(r.text).not.toMatch(/plazo|no llegamos a recibir el pago/i);
+      expect(r.text).toContain('Si no fuiste tú');
+    });
+
+    it('al que no pagó a tiempo le dice que no se le cobró y puede repetirlo', () => {
+      const r = orderCancelled(order, 'payment_not_received');
+      expect(r.text).toMatch(/no llegamos a recibir el pago/i);
+      expect(r.text).toContain('No se te cobró nada');
+      expect(r.text).not.toMatch(/te lo devolvemos|devolución/i);
+    });
+
+    it('al que pagó y se quedó sin stock le dice que se le devuelve, con el importe', () => {
+      const r = orderCancelled(order, 'paid_after_expiry_out_of_stock');
+      expect(r.text).toMatch(/dinero se te devuelve/i);
+      expect(r.text).toContain('$60.00');
+      expect(r.text).not.toContain('No se te cobró nada');
+    });
+  });
+
+  it('los tres avisos de estado llevan el número de pedido en el asunto', () => {
+    expect(orderShipped(order).subject).toContain('ORD-20260001');
+    expect(orderDelivered(order).subject).toContain('ORD-20260001');
+    expect(orderCancelled(order, null).subject).toContain('ORD-20260001');
   });
 });
