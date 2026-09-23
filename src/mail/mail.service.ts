@@ -13,6 +13,18 @@ export interface OutgoingEmail {
   /** Clave de plantilla, para el registro y para no repetir envíos. */
   template: string;
   orderId?: string | null;
+  /**
+   * Ficheros que viajan con el correo. Hoy solo el comprobante del pedido:
+   * el cliente recibe su factura sin tener que entrar en la web ni buscar
+   * el enlace. El contenido va en memoria y se codifica aquí.
+   */
+  attachments?: OutgoingAttachment[];
+}
+
+export interface OutgoingAttachment {
+  /** Lo que verá el cliente al guardarlo, con extensión. */
+  filename: string;
+  content: Buffer;
 }
 
 export interface SendResult {
@@ -96,6 +108,16 @@ export class MailService {
           subject: email.subject,
           html: email.html,
           text: email.text,
+          // Resend los quiere en base64. Sin adjuntos no se manda el campo:
+          // un array vacío hace que algunos clientes pinten el clip igual.
+          ...(email.attachments?.length
+            ? {
+                attachments: email.attachments.map((file) => ({
+                  filename: file.filename,
+                  content: file.content.toString('base64'),
+                })),
+              }
+            : {}),
         }),
         signal: AbortSignal.timeout(SEND_TIMEOUT_MS),
       });
