@@ -57,9 +57,61 @@ export interface FooterLink {
   url: string;
 }
 
+/**
+ * Tono de la franja de estado. Verde para lo que va bien, naranja para lo que
+ * cuesta dinero o pide atención: el cliente sabe de qué va el correo antes de
+ * leerlo, y con las imágenes bloqueadas —que es como Gmail los abre por
+ * defecto— el color sigue ahí.
+ */
+export type TonoEstado = 'bien' | 'atencion';
+
+const TONOS: Record<TonoEstado, { fondo: string; texto: string }> = {
+  bien: { fondo: '#3db98c', texto: '#08291b' },
+  atencion: { fondo: '#f2933f', texto: '#3d2408' },
+};
+
+/**
+ * La marca, en texto y no en imagen.
+ *
+ * Gmail bloquea las imágenes por defecto: un logo que no carga deja el correo
+ * sin firma visual justo en el primer vistazo, que es cuando el cliente decide
+ * si esto es suyo o es basura. El nombre escrito siempre se ve.
+ */
+const cabecera = (): string => `
+      <tr><td style="background:#1e3d30;padding:22px 30px;">
+        <span style="font-size:22px;font-weight:bold;color:#ffffff;">maxi</span><span style="font-size:22px;font-weight:bold;color:#7fd3af;">Habana</span>
+        <span style="float:right;font-size:10px;letter-spacing:1.6px;color:#9dbcab;padding-top:9px;">EN SU PUNTO</span>
+      </td></tr>`;
+
+const franja = (estado?: { texto: string; tono: TonoEstado }): string =>
+  estado
+    ? `
+      <tr><td style="background:${TONOS[estado.tono].fondo};padding:9px 30px;font-size:12px;font-weight:bold;letter-spacing:0.4px;color:${TONOS[estado.tono].texto};">${esc(estado.texto)}</td></tr>`
+    : '';
+
+/**
+ * El pie, igual en todos los correos.
+ *
+ * Antes solo lo llevaba la bienvenida y las otras siete salían sin política de
+ * privacidad, sin términos y sin más contacto que el WhatsApp. Ahora los
+ * enlaces los arma el propio layout a partir de la raíz de la tienda, así que
+ * ninguna plantilla puede olvidarse de ellos.
+ */
+const enlacesDelPie = (storeUrl: string | null | undefined): FooterLink[] => {
+  if (!storeUrl) return [];
+  const raiz = storeUrl.replace(/\/+$/, '');
+  return [
+    { label: 'Preguntas frecuentes', url: `${raiz}/preguntas-frecuentes` },
+    { label: 'Contacto', url: `${raiz}/contacto` },
+    { label: 'Métodos de pago', url: `${raiz}/paginas/metodos-de-pagos` },
+    { label: 'Privacidad', url: `${raiz}/paginas/politica-de-privacidad` },
+    { label: 'Términos', url: `${raiz}/paginas/terminos-y-condiciones` },
+  ];
+};
+
 const footerLinks = (links: FooterLink[]): string =>
   links.length
-    ? `<p style="margin:0 0 12px;font-size:12.5px;line-height:1.9;">${links
+    ? `<p style="margin:0 0 10px;font-size:12px;line-height:1.9;">${links
         .map(
           (link) =>
             `<a href="${link.url}" style="color:#ffe1bd;text-decoration:none;">${esc(link.label)}</a>`,
@@ -67,29 +119,88 @@ const footerLinks = (links: FooterLink[]): string =>
         .join(' &nbsp;·&nbsp; ')}</p>`
     : '';
 
-const layout = (
-  title: string,
-  body: string,
-  whatsapp: string,
-  links: FooterLink[] = [],
-): string => `
+export interface LayoutOptions {
+  title: string;
+  body: string;
+  whatsapp: string;
+  storeUrl?: string | null;
+  estado?: { texto: string; tono: TonoEstado };
+  /** Por qué le llega esto: cuenta para no acabar en spam, y es honesto. */
+  motivo?: string;
+}
+
+const layout = ({
+  title,
+  body,
+  whatsapp,
+  storeUrl,
+  estado,
+  motivo,
+}: LayoutOptions): string => `
 <!doctype html>
 <html lang="es">
-<body style="margin:0;padding:24px;background:#f5f5f4;font-family:Helvetica,Arial,sans-serif;color:#1c1917;">
-  <table role="presentation" style="max-width:560px;margin:0 auto;background:#ffffff;border-radius:12px;padding:32px;">
-    <tr><td>
-      <h1 style="margin:0 0 20px;font-size:20px;line-height:1.3;color:#1c1917;">${title}</h1>
-      ${body}
-      <hr style="border:none;border-top:1px solid #e7e5e4;margin:28px 0 16px;">
-      ${footerLinks(links)}
-      <p style="margin:0;font-size:13px;color:#78716c;line-height:1.6;">
-        ¿Alguna duda? Escríbenos por WhatsApp al
-        <a href="https://wa.me/${whatsapp.replace(/[^0-9]/g, '')}" style="color:#b45309;">${esc(whatsapp)}</a>.
-      </p>
+<body style="margin:0;padding:20px 0;background:#eceeed;font-family:Helvetica,Arial,sans-serif;color:#2f3b36;">
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">
+    <tr><td align="center">
+      <table role="presentation" width="600" cellpadding="0" cellspacing="0" border="0" style="max-width:600px;background:#ffffff;border-radius:12px;overflow:hidden;">
+${cabecera()}${franja(estado)}
+        <tr><td style="padding:28px 30px 4px;">
+          <h1 style="margin:0 0 16px;font-size:20px;line-height:1.3;color:#14211c;">${title}</h1>
+          ${body}
+        </td></tr>
+        <tr><td style="padding:4px 30px 22px;">
+          <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="border-top:1px solid #e6ebe8;">
+            <tr><td style="padding-top:14px;font-size:13px;line-height:1.7;color:#6b7a73;">
+              ¿Alguna duda? Escríbenos por WhatsApp al
+              <a href="https://wa.me/${whatsapp.replace(/[^0-9]/g, '')}" style="color:#1e3d30;font-weight:bold;text-decoration:none;">${esc(whatsapp)}</a>
+              o responde a este correo.
+            </td></tr>
+          </table>
+        </td></tr>
+        <tr><td style="background:#14291f;padding:18px 30px;">
+          ${footerLinks(enlacesDelPie(storeUrl))}
+          <p style="margin:0;font-size:11px;line-height:1.7;color:#8ba394;">
+            © ${new Date().getFullYear()} Maxi Habana · La Meknica Export &amp; Import SRL${motivo ? `<br>${esc(motivo)}` : ''}
+          </p>
+        </td></tr>
+      </table>
     </td></tr>
   </table>
 </body>
 </html>`;
+
+/**
+ * Las dos versiones del correo desde los mismos datos.
+ *
+ * El título vive en el layout, así que el texto plano se quedaba sin él —y sin
+ * el saludo, cuando el saludo es el título—. Quien lea la versión de texto
+ * empezaba en seco, a media frase.
+ */
+const render = (opts: LayoutOptions): { html: string; text: string } => ({
+  html: layout(opts),
+  text: strip(`${opts.title}\n\n${opts.body}`),
+});
+
+/** Una tabla de clave y valor: lo que el cliente busca, fuera del párrafo. */
+const datos = (filas: Array<[string, string]>): string =>
+  filas.length
+    ? `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="margin:0 0 16px;border:1px solid #dde5e1;border-radius:8px;">${filas
+        .map(
+          ([clave, valor], i) =>
+            `<tr><td style="padding:11px 16px;font-size:14px;color:#5d6c65;${i ? 'border-top:1px solid #eef2f0;' : ''}">${esc(clave)}</td><td align="right" style="padding:11px 16px;font-size:14px;font-weight:bold;color:#14211c;${i ? 'border-top:1px solid #eef2f0;' : ''}">${valor}</td></tr>`,
+        )
+        .join('')}</table>`
+    : '';
+
+/** Un importe grande: el dato por el que esa persona iba a llamar. */
+const destacado = (rotulo: string, valor: string, nota: string): string =>
+  `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="margin:0 0 16px;border:2px solid #f2933f;border-radius:8px;background:#fff7ee;">
+    <tr><td style="padding:16px 18px;">
+      <p style="margin:0 0 4px;font-size:11px;letter-spacing:0.8px;color:#8a5a1c;font-weight:bold;">${esc(rotulo)}</p>
+      <p style="margin:0 0 6px;font-size:28px;font-weight:bold;color:#14211c;line-height:1.1;">${valor}</p>
+      <p style="margin:0;font-size:14px;line-height:1.6;color:#4a3a26;">${nota}</p>
+    </td></tr>
+  </table>`;
 
 const p = (text: string): string =>
   `<p style="margin:0 0 14px;font-size:15px;line-height:1.6;">${text}</p>`;
@@ -112,25 +223,35 @@ export const paymentReceived = (order: OrderMailData): RenderedEmail => {
     p(
       `${greeting(order.customerName)} recibimos el pago de tu pedido <strong>${esc(order.orderNumber)}</strong> por ${money(order.total, order.currency)}. Ya lo estamos preparando.`,
     ),
-    order.pickupAddress
-      ? box(`<strong>Dónde recogerlo</strong><br>${esc(order.pickupAddress)}`)
-      : '',
+    datos([
+      ['Pedido', esc(order.orderNumber)],
+      ['Total pagado', money(order.total, order.currency)],
+      ...(order.pickupAddress
+        ? ([['Se recoge en', esc(order.pickupAddress)]] as Array<
+            [string, string]
+          >)
+        : []),
+      ['Lo guardamos', `${PICKUP_CUSTODY_DAYS} días desde hoy`],
+    ]),
     p(
       `Quien vaya a buscarlo debe llevar su carné de identidad y el número del pedido.`,
     ),
     p(
-      `Guardamos tu pedido durante <strong>${PICKUP_CUSTODY_DAYS} días</strong> contados desde hoy. Te avisaremos a los ${PICKUP_REMINDER_DAYS[0]} y a los ${PICKUP_REMINDER_DAYS[1]} días si todavía no lo has recogido.`,
+      `Te avisaremos a los ${PICKUP_REMINDER_DAYS[0]} y a los ${PICKUP_REMINDER_DAYS[1]} días si todavía no lo has recogido.`,
     ),
   ].join('\n');
-  const html = layout(
-    'Tu pedido está listo para recoger',
+  const { html, text } = render({
+    title: 'Tu pedido está listo para recoger',
     body,
-    order.whatsapp,
-  );
+    whatsapp: order.whatsapp,
+    storeUrl: order.storeUrl,
+    estado: { texto: 'PAGO RECIBIDO', tono: 'bien' },
+    motivo: 'Recibes este correo porque hiciste un pedido en Maxi Habana.',
+  });
   return {
     subject: `Pedido ${order.orderNumber}: pago recibido y listo para recoger`,
     html,
-    text: strip(body),
+    text,
   };
 };
 
@@ -154,15 +275,18 @@ export const pickupReminder = (
       `Si no puedes ir tú, puede recogerlo otra persona: solo necesita su carné y el número del pedido.`,
     ),
   ].join('\n');
-  const html = layout(
-    `Tu pedido ${esc(order.orderNumber)} te espera`,
+  const { html, text } = render({
+    title: `Tu pedido ${esc(order.orderNumber)} te espera`,
     body,
-    order.whatsapp,
-  );
+    whatsapp: order.whatsapp,
+    storeUrl: order.storeUrl,
+    estado: { texto: `TE QUEDAN ${remaining} DÍAS`, tono: 'atencion' },
+    motivo: 'Recibes este correo porque tienes un pedido pagado sin recoger.',
+  });
   return {
     subject: `Recordatorio: tu pedido ${order.orderNumber} sigue esperando`,
     html,
-    text: strip(body),
+    text,
   };
 };
 
@@ -195,11 +319,18 @@ export const refundCompleted = (
       `Si no lo ves reflejado en las próximas horas, escríbenos y lo revisamos contigo.`,
     ),
   ].join('\n');
-  const html = layout('Te devolvimos tu dinero', body, order.whatsapp);
+  const { html, text } = render({
+    title: 'Te devolvimos tu dinero',
+    body,
+    whatsapp: order.whatsapp,
+    storeUrl: order.storeUrl,
+    estado: { texto: 'DEVOLUCIÓN COMPLETADA', tono: 'bien' },
+    motivo: 'Recibes este correo por una devolución de tu pedido.',
+  });
   return {
     subject: `Pedido ${order.orderNumber}: reembolso enviado`,
     html,
-    text: strip(body),
+    text,
   };
 };
 
@@ -221,11 +352,18 @@ export const refundRequested = (
       `En cuanto salga el envío te avisamos con la referencia de la transacción.`,
     ),
   ].join('\n');
-  const html = layout('Tu devolución está en trámite', body, order.whatsapp);
+  const { html, text } = render({
+    title: 'Tu devolución está en trámite',
+    body,
+    whatsapp: order.whatsapp,
+    storeUrl: order.storeUrl,
+    estado: { texto: 'DEVOLUCIÓN EN TRÁMITE', tono: 'atencion' },
+    motivo: 'Recibes este correo por una devolución de tu pedido.',
+  });
   return {
     subject: `Pedido ${order.orderNumber}: devolución en trámite`,
     html,
-    text: strip(body),
+    text,
   };
 };
 
@@ -237,7 +375,7 @@ export interface WelcomeMailData {
 }
 
 const button = (url: string, label: string): string =>
-  `<p style="margin:0 0 18px;"><a href="${url}" style="display:inline-block;background:#3db98c;color:#ffffff;text-decoration:none;font-weight:600;font-size:15px;padding:13px 26px;border-radius:8px;">${label}</a></p>`;
+  `<p style="margin:0 0 18px;"><a href="${url}" style="display:inline-block;background:#1e3d30;color:#ffffff;text-decoration:none;font-weight:bold;font-size:15px;padding:13px 26px;border-radius:8px;">${label}</a></p>`;
 
 /**
  * Bienvenida al crear la cuenta.
@@ -272,8 +410,14 @@ export const orderShipped = (order: OrderMailData): RenderedEmail => {
   ].join('\n');
   return {
     subject: `Pedido ${order.orderNumber}: va en camino`,
-    html: layout('Tu pedido va en camino', body, order.whatsapp),
-    text: strip(body),
+    ...render({
+      title: 'Tu pedido va en camino',
+      body,
+      whatsapp: order.whatsapp,
+      storeUrl: order.storeUrl,
+      estado: { texto: 'EN CAMINO', tono: 'bien' },
+      motivo: 'Recibes este correo porque hiciste un pedido en Maxi Habana.',
+    }),
   };
 };
 
@@ -289,8 +433,14 @@ export const orderDelivered = (order: OrderMailData): RenderedEmail => {
   ].join('\n');
   return {
     subject: `Pedido ${order.orderNumber}: entregado`,
-    html: layout('Pedido entregado', body, order.whatsapp),
-    text: strip(body),
+    ...render({
+      title: 'Pedido entregado',
+      body,
+      whatsapp: order.whatsapp,
+      storeUrl: order.storeUrl,
+      estado: { texto: 'ENTREGADO', tono: 'bien' },
+      motivo: 'Recibes este correo porque hiciste un pedido en Maxi Habana.',
+    }),
   };
 };
 
@@ -317,8 +467,10 @@ export const orderCancelled = (
       p(
         `${greeting(order.customerName)} recibimos tu pago del pedido <strong>${esc(order.orderNumber)}</strong>, pero llegó después de que venciera el plazo y para entonces ya no quedaban existencias.`,
       ),
-      box(
-        `<strong>Tu dinero se te devuelve.</strong> Vamos a contactarte para acordar cómo, y mientras tanto el importe de ${money(order.total, order.currency)} queda registrado a tu nombre.`,
+      destacado(
+        'TE DEVOLVEMOS',
+        money(order.total, order.currency),
+        'Vamos a contactarte para acordar cómo hacértelo llegar. El importe queda registrado a tu nombre.',
       ),
       p(
         `Sentimos el trastorno. Si prefieres otro producto en lugar de la devolución, dínoslo y lo arreglamos.`,
@@ -333,10 +485,23 @@ export const orderCancelled = (
     ],
   }[motivo ?? 'ordinaria'].join('\n');
 
+  // El caso del pago tardío sin stock lleva naranja y lo dice en la franja:
+  // es el único de los tres en el que hay dinero de por medio.
+  const conDevolucion = motivo === 'paid_after_expiry_out_of_stock';
   return {
     subject: `Pedido ${order.orderNumber}: cancelado`,
-    html: layout('Tu pedido se canceló', cuerpo, order.whatsapp),
-    text: strip(cuerpo),
+    ...render({
+      title: conDevolucion
+        ? 'Tu pago llegó tarde y ya no quedaban existencias'
+        : 'Tu pedido se canceló',
+      body: cuerpo,
+      whatsapp: order.whatsapp,
+      storeUrl: order.storeUrl,
+      estado: conDevolucion
+        ? { texto: 'CANCELADO · TE DEVOLVEMOS EL DINERO', tono: 'atencion' }
+        : { texto: 'PEDIDO CANCELADO', tono: 'atencion' },
+      motivo: 'Recibes este correo porque hiciste un pedido en Maxi Habana.',
+    }),
   };
 };
 
@@ -344,7 +509,7 @@ export const welcome = (data: WelcomeMailData): RenderedEmail => {
   const store = data.storeUrl.replace(/\/+$/, '');
   const body = [
     p(
-      `${greeting(data.customerName)} tu cuenta ya está lista, y con ella una forma de estar presente aunque estés lejos.`,
+      `Tu cuenta ya está lista, y con ella una forma de estar presente aunque estés lejos.`,
     ),
     p(
       `Detrás de cada pedido que pasa por aquí hay alguien pensando en su gente: una madre, un hermano, unos hijos que siguen allá. La distancia cambia muchas cosas, pero no esa.`,
@@ -357,19 +522,20 @@ export const welcome = (data: WelcomeMailData): RenderedEmail => {
     p(`Con cariño,<br><strong>El equipo de Maxi Habana</strong>`),
   ].join('\n');
 
-  const html = layout('¡Bienvenido a Maxi Habana!', body, data.whatsapp, [
-    { label: 'Preguntas frecuentes', url: `${store}/preguntas-frecuentes` },
-    { label: 'Contacto', url: `${store}/contacto` },
-    { label: 'Métodos de pago', url: `${store}/paginas/metodos-de-pagos` },
-    { label: 'Privacidad', url: `${store}/paginas/politica-de-privacidad` },
-    { label: 'Términos', url: `${store}/paginas/terminos-y-condiciones` },
-  ]);
+  const { html, text } = render({
+    title: data.customerName ? `Hola, ${esc(data.customerName)}` : 'Hola',
+    body,
+    whatsapp: data.whatsapp,
+    storeUrl: store,
+    estado: { texto: 'TU CUENTA YA ESTÁ LISTA', tono: 'bien' },
+    motivo: 'Recibes este correo porque creaste una cuenta en Maxi Habana.',
+  });
 
   return {
     subject: data.customerName
       ? `Bienvenida a Maxi Habana, ${data.customerName} 💚`
       : 'Bienvenida a Maxi Habana 💚',
     html,
-    text: strip(body),
+    text,
   };
 };
