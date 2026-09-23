@@ -6,9 +6,13 @@ import { SupportConfig } from '../config/configuration';
 import { Order } from '../orders/entities/order.entity';
 import { MailService, SendResult } from './mail.service';
 import {
+  MotivoCancelacion,
   OrderMailData,
   RefundMailData,
   RenderedEmail,
+  orderCancelled,
+  orderDelivered,
+  orderShipped,
   paymentReceived,
   pickupReminder,
   refundCompleted,
@@ -40,6 +44,32 @@ export class OrderMailerService {
   async paymentReceived(orderId: string): Promise<SendResult | null> {
     return this.dispatch(orderId, 'payment_received', (data) =>
       paymentReceived(data),
+    );
+  }
+
+  /**
+   * Los cambios de estado que el cliente nota. **No están los seis a
+   * propósito:** de `confirmed` y `processing` no se avisa, porque el cliente
+   * acaba de recibir el correo del pago y tres avisos en una hora es la forma
+   * más rápida de que marque la tienda como spam.
+   */
+  async shipped(orderId: string): Promise<SendResult | null> {
+    return this.dispatch(orderId, 'order_shipped', (data) => orderShipped(data));
+  }
+
+  async delivered(orderId: string): Promise<SendResult | null> {
+    return this.dispatch(orderId, 'order_delivered', (data) =>
+      orderDelivered(data),
+    );
+  }
+
+  /** El motivo elige el texto; `null` es la cancelación ordinaria. */
+  async cancelled(
+    orderId: string,
+    motivo: MotivoCancelacion = null,
+  ): Promise<SendResult | null> {
+    return this.dispatch(orderId, 'order_cancelled', (data) =>
+      orderCancelled(data, motivo),
     );
   }
 

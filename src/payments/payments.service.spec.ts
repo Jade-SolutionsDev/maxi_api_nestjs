@@ -121,7 +121,7 @@ describe('PaymentsService', () => {
   let orderItemRepo: { find: jest.Mock };
   let inventory: { reserve: jest.Mock };
   let refunds: { requestForLatePaymentWithoutStock: jest.Mock };
-  let mailer: { paymentReceived: jest.Mock };
+  let mailer: { paymentReceived: jest.Mock; cancelled: jest.Mock };
 
   // `createChargeForOrder` recibe la pasarela y la fila que la eligió.
   const resolved = () => ({ gateway, method: methodRow(gateway.code) });
@@ -149,7 +149,10 @@ describe('PaymentsService', () => {
     refunds = {
       requestForLatePaymentWithoutStock: jest.fn().mockResolvedValue(undefined),
     };
-    mailer = { paymentReceived: jest.fn().mockResolvedValue(null) };
+    mailer = {
+      paymentReceived: jest.fn().mockResolvedValue(null),
+      cancelled: jest.fn().mockResolvedValue(null),
+    };
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [

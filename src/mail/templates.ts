@@ -249,6 +249,97 @@ const button = (url: string, label: string): string =>
  * El texto habla de lo que trae al cliente, que no es el producto: alguien que
  * compra desde fuera para su familia en Cuba.
  */
+/**
+ * Motivo por el que se canceló, para elegir qué se le cuenta al cliente.
+ * `null` es la cancelación ordinaria —la pidió él o la hizo el back-office— y
+ * es el caso más frecuente: decirle ahí que «se le caducó la reserva» sería
+ * contarle algo que no pasó.
+ */
+export type MotivoCancelacion =
+  | null
+  | 'payment_not_received'
+  | 'paid_after_expiry_out_of_stock';
+
+/** El pedido salió hacia su destino. */
+export const orderShipped = (order: OrderMailData): RenderedEmail => {
+  const body = [
+    p(
+      `${greeting(order.customerName)} tu pedido <strong>${esc(order.orderNumber)}</strong> ya salió y va en camino.`,
+    ),
+    p(
+      `Quien lo reciba debe llevar su carné de identidad y el número del pedido.`,
+    ),
+  ].join('\n');
+  return {
+    subject: `Pedido ${order.orderNumber}: va en camino`,
+    html: layout('Tu pedido va en camino', body, order.whatsapp),
+    text: strip(body),
+  };
+};
+
+/** Se entregó: cierra el ciclo y sirve de comprobante. */
+export const orderDelivered = (order: OrderMailData): RenderedEmail => {
+  const body = [
+    p(
+      `${greeting(order.customerName)} tu pedido <strong>${esc(order.orderNumber)}</strong> fue entregado. Gracias por comprar con nosotros.`,
+    ),
+    p(
+      `Si algo no está como esperabas, escríbenos y lo miramos: guardamos el registro de cada pedido.`,
+    ),
+  ].join('\n');
+  return {
+    subject: `Pedido ${order.orderNumber}: entregado`,
+    html: layout('Pedido entregado', body, order.whatsapp),
+    text: strip(body),
+  };
+};
+
+/**
+ * Se canceló. Tres motivos y tres textos: el genérico no sirve para los otros
+ * dos, y sobre todo no sirve al revés —a quien canceló él mismo no se le puede
+ * decir que se le venció un plazo—.
+ */
+export const orderCancelled = (
+  order: OrderMailData,
+  motivo: MotivoCancelacion,
+): RenderedEmail => {
+  const cuerpo = {
+    payment_not_received: [
+      p(
+        `${greeting(order.customerName)} tu pedido <strong>${esc(order.orderNumber)}</strong> se canceló porque no llegamos a recibir el pago dentro del plazo.`,
+      ),
+      p(
+        `Los productos que tenías apartados volvieron a la venta. No se te cobró nada.`,
+      ),
+      p(`Si todavía lo quieres, puedes hacer el pedido otra vez.`),
+    ],
+    paid_after_expiry_out_of_stock: [
+      p(
+        `${greeting(order.customerName)} recibimos tu pago del pedido <strong>${esc(order.orderNumber)}</strong>, pero llegó después de que venciera el plazo y para entonces ya no quedaban existencias.`,
+      ),
+      box(
+        `<strong>Tu dinero se te devuelve.</strong> Vamos a contactarte para acordar cómo, y mientras tanto el importe de ${money(order.total, order.currency)} queda registrado a tu nombre.`,
+      ),
+      p(
+        `Sentimos el trastorno. Si prefieres otro producto en lugar de la devolución, dínoslo y lo arreglamos.`,
+      ),
+    ],
+    ordinaria: [
+      p(
+        `${greeting(order.customerName)} tu pedido <strong>${esc(order.orderNumber)}</strong> quedó cancelado.`,
+      ),
+      p(`No se te cobró nada, y lo que tenías apartado volvió a la venta.`),
+      p(`Si no fuiste tú quien lo canceló, escríbenos y lo revisamos.`),
+    ],
+  }[motivo ?? 'ordinaria'].join('\n');
+
+  return {
+    subject: `Pedido ${order.orderNumber}: cancelado`,
+    html: layout('Tu pedido se canceló', cuerpo, order.whatsapp),
+    text: strip(cuerpo),
+  };
+};
+
 export const welcome = (data: WelcomeMailData): RenderedEmail => {
   const store = data.storeUrl.replace(/\/+$/, '');
   const body = [

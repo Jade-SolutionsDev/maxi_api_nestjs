@@ -121,7 +121,12 @@ describe('OrdersService', () => {
   };
   let permissionsService: { hasPermission: jest.Mock };
   let orderEvents: { record: jest.Mock; listForOrder: jest.Mock };
-  let mailer: { paymentReceived: jest.Mock };
+  let mailer: {
+    paymentReceived: jest.Mock;
+    shipped: jest.Mock;
+    delivered: jest.Mock;
+    cancelled: jest.Mock;
+  };
   let orderItemRepo: {
     save: jest.Mock;
     create: jest.Mock;
@@ -211,7 +216,12 @@ describe('OrdersService', () => {
           Promise.resolve(role === Role.SUPER_ADMIN || role === Role.ADMIN),
         ),
     };
-    mailer = { paymentReceived: jest.fn().mockResolvedValue(null) };
+    mailer = {
+      paymentReceived: jest.fn().mockResolvedValue(null),
+      shipped: jest.fn().mockResolvedValue(null),
+      delivered: jest.fn().mockResolvedValue(null),
+      cancelled: jest.fn().mockResolvedValue(null),
+    };
     orderEvents = {
       record: jest.fn().mockResolvedValue(undefined),
       listForOrder: jest.fn().mockResolvedValue([]),
@@ -708,6 +718,53 @@ describe('OrdersService', () => {
       orderRepo.findOne
         .mockResolvedValueOnce(makeOrder())
         .mockResolvedValue(makeOrder({ items: [] }));
+    });
+
+    // Tres de seis estados avisan al cliente. Los otros tres callan a
+    // propósito: de `confirmed` y `processing` ya se enteró por el correo del
+    // pago, y tres avisos en una hora es lo que lleva una tienda a spam.
+    it('avisa al cliente cuando el pedido sale', async () => {
+      await service.updateStatus(
+        makeUser(Role.ADMIN),
+        'order-1',
+        OrderStatus.SHIPPED,
+        true,
+      );
+
+      expect(mailer.shipped).toHaveBeenCalledWith('order-1');
+    });
+
+    it('avisa al cliente cuando se entrega', async () => {
+      await service.updateStatus(
+        makeUser(Role.ADMIN),
+        'order-1',
+        OrderStatus.DELIVERED,
+        true,
+      );
+
+      expect(mailer.delivered).toHaveBeenCalledWith('order-1');
+    });
+
+    it('al cancelar pasa el motivo, que elige el texto del correo', async () => {
+      await service.updateStatus(
+        makeUser(Role.ADMIN),
+        'order-1',
+        OrderStatus.CANCELLED,
+      );
+
+      expect(mailer.cancelled).toHaveBeenCalledWith('order-1', null);
+    });
+
+    it('confirmar no genera correo: el cliente ya recibió el del pago', async () => {
+      await service.updateStatus(
+        makeUser(Role.ADMIN),
+        'order-1',
+        OrderStatus.CONFIRMED,
+      );
+
+      expect(mailer.shipped).not.toHaveBeenCalled();
+      expect(mailer.delivered).not.toHaveBeenCalled();
+      expect(mailer.cancelled).not.toHaveBeenCalled();
     });
 
     it('confirming commits the reservations', async () => {
