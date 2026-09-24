@@ -6,6 +6,7 @@ import {
   NotFoundException,
   OnModuleInit,
 } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import {
@@ -23,7 +24,12 @@ import {
   PaymentMethod,
 } from './entities/payment-method.entity';
 import { CustomManualGateway } from './gateways/custom-manual/custom-manual.gateway';
-import { PAYMENT_GATEWAYS, PaymentGateway } from './payment-gateway.interface';
+import {
+  PAYMENT_GATEWAYS,
+  PaymentActionKind,
+  PaymentGateway,
+} from './payment-gateway.interface';
+import { PaymentsConfig } from '../config/configuration';
 
 /** Icono por defecto según el tipo de instrucción. */
 const ICON_BY_TYPE: Record<string, string> = {
@@ -95,7 +101,19 @@ export class PaymentMethodsService implements OnModuleInit {
     private readonly methodRepository: Repository<PaymentMethod>,
     @Inject(PAYMENT_GATEWAYS)
     private readonly gateways: PaymentGateway[],
+    private readonly configService: ConfigService,
   ) {}
+
+  /**
+   * The same rule the expiry sweep applies, said in minutes so the checkout can
+   * tell the customer how long we hold the stock. Kept next to the sweep's
+   * meaning on purpose: two places deciding this would drift, and the customer
+   * would be told a deadline that is not the one that cancels the order.
+   */
+  private holdMinutesFor(kind: PaymentActionKind): number {
+    const { expiry } = this.configService.get<PaymentsConfig>('payments')!;
+    return kind === 'manual' ? expiry.manualHours * 60 : expiry.gatewayMinutes;
+  }
 
   async onModuleInit(): Promise<void> {
     for (const gateway of this.gateways) {
@@ -275,12 +293,14 @@ export class PaymentMethodsService implements OnModuleInit {
 
   async findAvailableForStorefront(): Promise<StorefrontPaymentMethodDto[]> {
     const methods = await this.findAvailable();
-    return methods.map((method) =>
-      StorefrontPaymentMethodDto.fromEntity(
+    return methods.map((method) => {
+      const { kind } = this.gatewayFor(method.code);
+      return StorefrontPaymentMethodDto.fromEntity(
         method,
-        this.gatewayFor(method.code).kind,
-      ),
-    );
+        kind,
+        this.holdMinutesFor(kind),
+      );
+    });
   }
 
   /**
