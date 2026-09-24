@@ -171,4 +171,28 @@ describe('plantillas de correo', () => {
       expect(orderShipped(order).html).toMatch(/Recibes este correo porque/);
     });
   });
+  describe('redes sociales en el pie', () => {
+    it('las ocho plantillas llevan Facebook e Instagram', () => {
+      for (const html of [
+        paymentReceived(order).html,
+        orderShipped(order).html,
+        orderDelivered(order).html,
+        orderCancelled(order, null).html,
+        welcome({
+          customerName: 'Marisol',
+          storeUrl: 'https://www.maxihabana.com',
+          whatsapp: '+53 5251 9414',
+        }).html,
+      ]) {
+        expect(html).toContain('facebook.com');
+        expect(html).toContain('instagram.com');
+      }
+    });
+
+    // El de Instagram venía con un `?stkn=` que es un token de la sesión de
+    // quien copió el enlace: publicarlo sería filtrar algo de su cuenta.
+    it('el enlace de Instagram no lleva tokens de sesión', () => {
+      expect(paymentReceived(order).html).not.toContain('stkn=');
+    });
+  });
 });
