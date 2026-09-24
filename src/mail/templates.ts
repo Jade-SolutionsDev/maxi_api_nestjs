@@ -14,6 +14,26 @@ export const PICKUP_CUSTODY_DAYS = 30;
 /** Hitos en los que se avisa al cliente de que su pedido sigue esperando. */
 export const PICKUP_REMINDER_DAYS = [15, 25] as const;
 
+/**
+ * Las redes de la tienda, en el pie de todos los correos.
+ *
+ * Van aquí y no en el CMS por lo mismo que los días de custodia: forman parte
+ * de lo que el correo dice, cambian una vez cada varios años, y una consulta a
+ * la base por cada correo enviado no se paga con eso. Cuando el panel permita
+ * editarlas (MxH-0119), este es el sitio que hay que sustituir.
+ *
+ * Enlaces canónicos: el de Facebook que se comparte desde la app es un
+ * `/share/…` que redirige aquí, y el de Instagram traía un `?stkn=` que es un
+ * token de la sesión de quien lo copió y no debe publicarse.
+ */
+export const REDES: FooterLink[] = [
+  {
+    label: 'Facebook',
+    url: 'https://www.facebook.com/profile.php?id=61550740714835',
+  },
+  { label: 'Instagram', url: 'https://www.instagram.com/maxihabana' },
+];
+
 export interface RenderedEmail {
   subject: string;
   html: string;
@@ -119,6 +139,16 @@ const footerLinks = (links: FooterLink[]): string =>
         .join(' &nbsp;·&nbsp; ')}</p>`
     : '';
 
+/**
+ * Las redes, en texto y no con iconos: un PNG de Facebook en el pie es una
+ * imagen más que Gmail bloquea, y entonces no queda ni el enlace.
+ */
+const redesDelPie = (): string =>
+  `<p style="margin:0 0 10px;font-size:12px;">${REDES.map(
+    (red) =>
+      `<a href="${red.url}" style="color:#ffe1bd;text-decoration:none;">${esc(red.label)}</a>`,
+  ).join(' &nbsp;·&nbsp; ')}</p>`;
+
 export interface LayoutOptions {
   title: string;
   body: string;
@@ -159,6 +189,7 @@ ${cabecera()}${franja(estado)}
         </td></tr>
         <tr><td style="background:#14291f;padding:18px 30px;">
           ${footerLinks(enlacesDelPie(storeUrl))}
+          ${redesDelPie()}
           <p style="margin:0;font-size:11px;line-height:1.7;color:#8ba394;">
             © ${new Date().getFullYear()} Maxi Habana · La Meknica Export &amp; Import SRL${motivo ? `<br>${esc(motivo)}` : ''}
           </p>
