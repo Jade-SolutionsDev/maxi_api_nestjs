@@ -514,7 +514,9 @@ export class PaymentsService {
       // Un pedido que quedó cancelado por falta de mercancía no está listo
       // para recoger: ese cliente recibe el aviso de su devolución, no este.
       if (order.status !== OrderStatus.CANCELLED) {
-        void this.orderMailer.paymentReceived(order.id);
+        void this.orderMailer
+          .paymentReceived(order.id)
+          .catch(() => undefined);
       }
     }
   }
@@ -611,10 +613,11 @@ export class PaymentsService {
     // El peor caso para el cliente: pagó y no hay mercancía. Se le cuenta en
     // cuanto pasa, con el importe que se le va a devolver, en vez de que lo
     // descubra esperando un pedido que no va a llegar.
-    void this.orderMailer.cancelled(
-      order.id,
-      CancellationReason.PAID_AFTER_EXPIRY_OUT_OF_STOCK,
-    );
+    // Ver la nota del mismo patrón en order-expiry.service.ts: `void` sin
+    // `.catch()` deja una promesa sin dueño, y eso tumba el proceso de Node.
+    void this.orderMailer
+      .cancelled(order.id, CancellationReason.PAID_AFTER_EXPIRY_OUT_OF_STOCK)
+      .catch(() => undefined);
     await this.orderEvents.record(null, {
       orderId: order.id,
       kind: OrderEventKind.STATUS_CHANGED,

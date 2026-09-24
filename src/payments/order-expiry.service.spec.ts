@@ -255,4 +255,23 @@ describe('OrderExpiryService', () => {
     expect(where.createdAt).toBeDefined();
     expect(payments.latestChargesFor).not.toHaveBeenCalled();
   });
+  // `void` sin `.catch()` deja una promesa sin dueño, y en Node eso tumba el
+  // proceso. Se comprueba de dos maneras porque una sola engaña: que el correo
+  // se haya intentado —si no, la prueba no toca el camino— y que el rechazo no
+  // se propague al barrido.
+  it('un correo que revienta no tumba el barrido', async () => {
+    mailer.cancelled.mockRejectedValueOnce(new Error('resend caído'));
+    const order = makeOrder();
+
+    const result = await sweepWith(
+      order,
+      makeCharge({ createdAt: ago(31 * MINUTE) }),
+    );
+
+    expect(mailer.cancelled).toHaveBeenCalledWith(
+      order.id,
+      CancellationReason.PAYMENT_NOT_RECEIVED,
+    );
+    expect(result.cancelled).toBe(1);
+  });
 });

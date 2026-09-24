@@ -183,10 +183,14 @@ export class OrderExpiryService {
         // Fuera de la transacción: el cliente apartó algo, no pagó a tiempo y
         // lo perdió sin enterarse. Este correo es la diferencia entre eso y
         // saber que puede volver a pedirlo.
-        void this.orderMailer.cancelled(
-          order.id,
-          CancellationReason.PAYMENT_NOT_RECEIVED,
-        );
+        // El .catch() no es adorno: `void` deja la promesa sin dueño, y en
+        // Node una promesa rechazada sin atender tumba el proceso entero.
+        // Hoy `dispatch` se traga sus errores, así que nunca rechaza — pero
+        // eso es una garantía de otro fichero, y el día que alguien toque su
+        // try/catch, esto se cae DESPUÉS de haber cobrado o cancelado.
+        void this.orderMailer
+          .cancelled(order.id, CancellationReason.PAYMENT_NOT_RECEIVED)
+          .catch(() => undefined);
       }
       return caducado;
     } catch (err) {
