@@ -21,9 +21,12 @@ export class AddOrderTracking1789700000000 implements MigrationInterface {
 
     // pgcrypto suele estar; si no, se usa md5(random()) repetido, que da los
     // mismos 64 caracteres hexadecimales sin depender de la extensión.
-    const tieneGen: { existe: boolean }[] = await queryRunner.query(
+    // La aserción es explícita a propósito: `query()` devuelve `any`, y
+    // asignarlo a un tipo sin decirlo deja al linter sin forma de distinguir
+    // esto de un descuido.
+    const tieneGen = (await queryRunner.query(
       `SELECT EXISTS (SELECT 1 FROM pg_proc WHERE proname = 'gen_random_bytes') AS existe`,
-    );
+    )) as { existe: boolean }[];
     const expresion = tieneGen[0]?.existe
       ? `encode(gen_random_bytes(32), 'hex')`
       : `md5(random()::text || clock_timestamp()::text) || md5(random()::text || id::text)`;

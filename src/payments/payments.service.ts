@@ -514,9 +514,7 @@ export class PaymentsService {
       // Un pedido que quedó cancelado por falta de mercancía no está listo
       // para recoger: ese cliente recibe el aviso de su devolución, no este.
       if (order.status !== OrderStatus.CANCELLED) {
-        void this.orderMailer
-          .paymentReceived(order.id)
-          .catch(() => undefined);
+        void this.orderMailer.paymentReceived(order.id).catch(() => undefined);
       }
     }
   }

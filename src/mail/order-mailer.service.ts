@@ -54,7 +54,9 @@ export class OrderMailerService {
    * más rápida de que marque la tienda como spam.
    */
   async shipped(orderId: string): Promise<SendResult | null> {
-    return this.dispatch(orderId, 'order_shipped', (data) => orderShipped(data));
+    return this.dispatch(orderId, 'order_shipped', (data) =>
+      orderShipped(data),
+    );
   }
 
   async delivered(orderId: string): Promise<SendResult | null> {
