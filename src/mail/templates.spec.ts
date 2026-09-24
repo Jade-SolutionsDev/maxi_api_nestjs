@@ -264,4 +264,17 @@ describe('plantillas de correo', () => {
       expect(paymentReceived(order).html).not.toContain('stkn=');
     });
   });
+  // La tienda vende en USD y hay pedidos de cinco cifras: sin separador hay
+  // que contar los dígitos para saber si son cinco mil o cincuenta mil, y el
+  // correo del pago es donde menos se quiere dudar.
+  it('los importes llevan separador de miles', () => {
+    const caro = paymentReceived({ ...order, total: '51840.00' });
+    expect(caro.text).toContain('$51,840.00');
+    expect(caro.text).not.toContain('$51840.00');
+  });
+
+  it('un importe pequeño no gana comas de más', () => {
+    const barato = paymentReceived({ ...order, total: '60.00' });
+    expect(barato.text).toContain('$60.00');
+  });
 });

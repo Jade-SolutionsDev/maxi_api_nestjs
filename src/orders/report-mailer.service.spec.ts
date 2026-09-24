@@ -98,15 +98,13 @@ describe('ReportMailerService', () => {
   });
 
   // El asunto adelanta las dos cifras: se responde a un «¿cómo vamos?» desde
-  // la lista del móvil, sin abrir el adjunto.
-  //
-  // El importe sale sin separador de miles porque así lo formatea `money` en
-  // todas las plantillas; cambiarlo afectaría a los diez correos y es decisión
-  // aparte.
+  // la lista del móvil, sin abrir el adjunto. Con separador de miles, porque
+  // «$12480.00» obliga a contar dígitos para saber si son doce mil o ciento
+  // veinticuatro mil.
   it('el asunto lleva el número de pedidos y el importe', async () => {
     await service.enviar(['ana@maxihabana.com'], pdf, 'pedidos.pdf', datos);
     const { subject } = mail.send.mock.calls[0][0] as { subject: string };
     expect(subject).toContain('47');
-    expect(subject).toContain('12480.00');
+    expect(subject).toContain('12,480.00');
   });
 });
