@@ -9,7 +9,13 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { DataSource, EntityManager, IsNull, Repository } from 'typeorm';
+import {
+  DataSource,
+  EntityManager,
+  IsNull,
+  Repository,
+  SelectQueryBuilder,
+} from 'typeorm';
 import { CartService } from '../cart/cart.service';
 import { CartItem } from '../cart/entities/cart-item.entity';
 import { Client } from '../clients/entities/client.entity';
@@ -548,14 +554,18 @@ export class OrdersService {
 
   // ---------------- Admin ----------------
 
-  async findAllAdmin(
+  /**
+   * Los filtros del listado, en un solo sitio.
+   *
+   * Vivían dentro de `findAllAdmin`, y el reporte en PDF (MxH-0120) necesita
+   * exactamente los mismos: si cada uno armara su consulta, acabarían diciendo
+   * cosas distintas y un informe que no cuadra con la pantalla es peor que no
+   * tenerlo.
+   */
+  private aplicarFiltros(
+    qb: SelectQueryBuilder<Order>,
     query: AdminOrdersQueryDto,
-  ): Promise<PaginatedResponse<OrderResponseDto>> {
-    const { page, limit, skip } = getPaginationParams(query);
-    const qb = this.orderRepository
-      .createQueryBuilder('order')
-      .leftJoinAndSelect('order.client', 'client');
-
+  ): void {
     if (query.id) {
       qb.andWhere('order.id IN (:...ids)', { ids: query.id.split(',') });
     }
@@ -599,6 +609,16 @@ export class OrdersService {
           : { paymentMethod: query.paymentMethod },
       );
     }
+    if (query.from) {
+      qb.andWhere('order.createdAt >= :desde', { desde: new Date(query.from) });
+    }
+    if (query.to) {
+      // Hasta el final de ese día: quien pide «hasta el 24» cuenta con los
+      // pedidos de esa tarde, no con que se corten a medianoche del 23.
+      const hasta = new Date(query.to);
+      hasta.setHours(23, 59, 59, 999);
+      qb.andWhere('order.createdAt <= :hasta', { hasta });
+    }
     if (query.needsTransfer) {
       // Pickup orders still holding RESERVED stock away from their counter —
       // derived from the reservations so it clears itself once settled.
@@ -608,6 +628,17 @@ export class OrdersService {
              AND r.location_id <> order.pickup_location_id)`,
       );
     }
+  }
+
+  async findAllAdmin(
+    query: AdminOrdersQueryDto,
+  ): Promise<PaginatedResponse<OrderResponseDto>> {
+    const { page, limit, skip } = getPaginationParams(query);
+    const qb = this.orderRepository
+      .createQueryBuilder('order')
+      .leftJoinAndSelect('order.client', 'client');
+
+    this.aplicarFiltros(qb, query);
 
     const sortColumns: Record<string, string> = {
       orderNumber: 'order.orderNumber',
@@ -631,6 +662,65 @@ export class OrdersService {
       page,
       limit,
     );
+  }
+
+  /**
+   * Todos los pedidos que casen con el filtro, sin paginar: el listado enseña
+   * de diez en diez y un reporte de la página que estás mirando no es un
+   * reporte. El tope existe para que una petición sin filtros no se lleve la
+   * tabla entera por delante.
+   */
+  async findAllForReport(
+    query: AdminOrdersQueryDto,
+    tope = 5000,
+  ): Promise<{
+    pedidos: OrderResponseDto[];
+    total: number;
+    recortado: boolean;
+  }> {
+    const qb = this.orderRepository
+      .createQueryBuilder('order')
+      .leftJoinAndSelect('order.client', 'client');
+    this.aplicarFiltros(qb, query);
+    qb.orderBy('order.createdAt', 'DESC').addOrderBy('order.id', 'DESC');
+
+    const total = await qb.getCount();
+    const orders = await qb.take(tope).getMany();
+    return {
+      pedidos: await this.withPaymentMethods(orders),
+      total,
+      recortado: total > tope,
+    };
+  }
+
+  /**
+   * Los totales del reporte, por estado.
+   *
+   * Se calculan en la base sobre **todo** el conjunto filtrado, no sumando en
+   * memoria las filas que se trajeron: si el filtro abarca 152 pedidos y la
+   * tabla se recortó en el tope, sumar lo traído haría que el PDF dijera un
+   * número y la realidad fuera otra. Un informe que no cuadra es peor que no
+   * tenerlo.
+   */
+  async totalesForReport(
+    query: AdminOrdersQueryDto,
+  ): Promise<{ estado: string; pedidos: number; importe: string }[]> {
+    const qb = this.orderRepository
+      .createQueryBuilder('order')
+      .leftJoin('order.client', 'client');
+    this.aplicarFiltros(qb, query);
+    const filas = await qb
+      .select('order.status', 'estado')
+      .addSelect('COUNT(*)', 'pedidos')
+      .addSelect('COALESCE(SUM(order.total), 0)', 'importe')
+      .groupBy('order.status')
+      .orderBy('order.status', 'ASC')
+      .getRawMany<{ estado: string; pedidos: string; importe: string }>();
+    return filas.map((f) => ({
+      estado: f.estado,
+      pedidos: Number(f.pedidos),
+      importe: f.importe,
+    }));
   }
 
   async findOneAdmin(id: string): Promise<OrderResponseDto> {

@@ -2,8 +2,10 @@ import { StreamableFile } from '@nestjs/common';
 import { Test, TestingModule } from '@nestjs/testing';
 import type { Response } from 'express';
 import { OrderPdfService } from './order-pdf.service';
+import { OrdersReportPdfService } from './orders-report-pdf.service';
 import { OrdersController } from './orders.controller';
 import { OrdersService } from './orders.service';
+import { OrderStatus } from './entities/order.entity';
 
 describe('OrdersController · descarga del comprobante', () => {
   let controller: OrdersController;
@@ -12,6 +14,7 @@ describe('OrdersController · descarga del comprobante', () => {
     generate: jest.Mock;
     fileNameFor: jest.Mock;
   };
+  let reportePdf: { generate: jest.Mock; nombreDelFichero: jest.Mock };
   let res: { set: jest.Mock };
 
   beforeEach(async () => {
@@ -22,6 +25,10 @@ describe('OrdersController · descarga del comprobante', () => {
       generate: jest.fn().mockResolvedValue(Buffer.from('%PDF-1.3 contenido')),
       fileNameFor: jest.fn().mockReturnValue('ORD-20260148.pdf'),
     };
+    reportePdf = {
+      generate: jest.fn().mockResolvedValue(Buffer.from('%PDF-1.4 reporte')),
+      nombreDelFichero: jest.fn().mockReturnValue('pedidos.pdf'),
+    };
     res = { set: jest.fn() };
 
     const module: TestingModule = await Test.createTestingModule({
@@ -29,6 +36,7 @@ describe('OrdersController · descarga del comprobante', () => {
       providers: [
         { provide: OrdersService, useValue: {} },
         { provide: OrderPdfService, useValue: pdfService },
+        { provide: OrdersReportPdfService, useValue: reportePdf },
       ],
     })
       .overrideGuard(class {})
@@ -54,5 +62,72 @@ describe('OrdersController · descarga del comprobante', () => {
     await controller.pdf('o-1', res as unknown as Response);
 
     expect(pdfService.findOrderOrFail).toHaveBeenCalledWith('o-1');
+  });
+});
+describe('OrdersController · reporte de pedidos', () => {
+  let controller: OrdersController;
+  let ordersService: {
+    findAllForReport: jest.Mock;
+    totalesForReport: jest.Mock;
+  };
+  let reportePdf: { generate: jest.Mock; nombreDelFichero: jest.Mock };
+  let res: { set: jest.Mock };
+
+  beforeEach(async () => {
+    ordersService = {
+      findAllForReport: jest
+        .fn()
+        .mockResolvedValue({ pedidos: [], total: 0, recortado: false }),
+      totalesForReport: jest.fn().mockResolvedValue([]),
+    };
+    reportePdf = {
+      generate: jest.fn().mockResolvedValue(Buffer.from('%PDF-1.4 reporte')),
+      nombreDelFichero: jest.fn().mockReturnValue('pedidos-cancelado.pdf'),
+    };
+    res = { set: jest.fn() };
+
+    const module: TestingModule = await Test.createTestingModule({
+      controllers: [OrdersController],
+      providers: [
+        { provide: OrdersService, useValue: ordersService },
+        { provide: OrderPdfService, useValue: {} },
+        { provide: OrdersReportPdfService, useValue: reportePdf },
+      ],
+    })
+      .overrideGuard(class {})
+      .useValue({ canActivate: () => true })
+      .compile();
+
+    controller = module.get(OrdersController);
+  });
+
+  // Lo que se ve en pantalla es lo que sale: los filtros llegan tal cual al
+  // servicio, sin que el controlador invente ni recorte ninguno.
+  it('pasa los filtros de la pantalla a la consulta del reporte', async () => {
+    const filtros = {
+      status: OrderStatus.CANCELLED,
+      from: '2026-09-01',
+      to: '2026-09-24',
+    };
+
+    await controller.reportePdf(filtros, res as unknown as Response);
+
+    expect(ordersService.findAllForReport).toHaveBeenCalledWith(filtros);
+    expect(ordersService.totalesForReport).toHaveBeenCalledWith(filtros);
+  });
+
+  it('devuelve el PDF con un nombre que dice qué contiene', async () => {
+    const archivo = await controller.reportePdf(
+      { status: OrderStatus.CANCELLED },
+      res as unknown as Response,
+    );
+
+    expect(archivo).toBeInstanceOf(StreamableFile);
+    expect(res.set).toHaveBeenCalledWith(
+      expect.objectContaining({
+        'Content-Type': 'application/pdf',
+        'Content-Disposition': 'attachment; filename="pedidos-cancelado.pdf"',
+      }),
+    );
   });
 });

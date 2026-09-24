@@ -38,6 +38,7 @@ import { UpdateOrderItemsDto } from './dto/update-order-items.dto';
 import { UpdateOrderStatusDto } from './dto/update-order-status.dto';
 import { UpdatePaymentStatusDto } from './dto/update-payment-status.dto';
 import { OrderPdfService } from './order-pdf.service';
+import { OrdersReportPdfService } from './orders-report-pdf.service';
 import { OrdersService } from './orders.service';
 
 // Backoffice order management, gated per-action by managed permissions
@@ -52,6 +53,7 @@ export class OrdersController {
   constructor(
     private readonly ordersService: OrdersService,
     private readonly orderPdfService: OrderPdfService,
+    private readonly ordersReportPdfService: OrdersReportPdfService,
   ) {}
 
   @Get()
@@ -234,6 +236,40 @@ export class OrdersController {
       chargeId,
       dto.reason,
     );
+  }
+
+  // Antes de `:id/pdf` a propósito: si fuera después, Nest tomaría «report»
+  // por un id de pedido y devolvería un 400 por UUID inválido.
+  @Get('report/pdf')
+  @RequirePermission({ module: 'orders', action: 'read' })
+  @ApiOperation({
+    summary: 'Reporte de pedidos en PDF',
+    description:
+      'El listado filtrado, en papel: una fila por pedido y los totales por ' +
+      'estado al final. Acepta **los mismos filtros que el listado** —la ' +
+      'misma consulta—, así que lo que se ve en pantalla es lo que sale. Sin ' +
+      'paginar: trae todos los que casen, no la página que se esté mirando.',
+  })
+  async reportePdf(
+    @Query() query: AdminOrdersQueryDto,
+    @Res({ passthrough: true }) res: Response,
+  ): Promise<StreamableFile> {
+    const [{ pedidos, recortado }, totales] = await Promise.all([
+      this.ordersService.findAllForReport(query),
+      this.ordersService.totalesForReport(query),
+    ]);
+    const pdf = await this.ordersReportPdfService.generate(
+      pedidos,
+      totales,
+      query,
+      recortado,
+    );
+    res.set({
+      'Content-Type': 'application/pdf',
+      'Content-Disposition': `attachment; filename="${this.ordersReportPdfService.nombreDelFichero(query)}"`,
+      'Content-Length': pdf.length.toString(),
+    });
+    return new StreamableFile(pdf);
   }
 
   @Get(':id/pdf')
