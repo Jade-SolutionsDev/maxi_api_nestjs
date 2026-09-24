@@ -24,7 +24,7 @@ describe('ContactMailService', () => {
         {
           provide: ConfigService,
           useValue: {
-            get: (clave: string) =>
+            get: (clave: string): Record<string, string> =>
               clave === 'storefront'
                 ? { url: TIENDA }
                 : { whatsapp: '+53 5251 9414' },
@@ -36,7 +36,13 @@ describe('ContactMailService', () => {
     service = module.get(ContactMailService);
   });
 
-  const enviado = () => mail.send.mock.calls[0][0];
+  interface Enviado {
+    subject: string;
+    html: string;
+    text: string;
+  }
+
+  const enviado = (): Enviado => mail.send.mock.calls[0][0] as Enviado;
 
   /**
    * Era el único correo del sistema armado a mano, fuera del layout: salía sin
