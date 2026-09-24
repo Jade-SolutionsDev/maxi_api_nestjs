@@ -68,8 +68,28 @@ const esc = (value: string | null | undefined): string =>
     .replace(/"/g, '&quot;')
     .replace(/'/g, '&#39;');
 
+/**
+ * Los importes, con separador de miles.
+ *
+ * La tienda vende en USD y hay pedidos de cinco cifras: `$51840.00` obliga a
+ * contar los dígitos para saber si son cinco mil o cincuenta mil, y el correo
+ * del pago es justo donde nadie quiere dudar. El PDF del comprobante ya los
+ * escribía así; esto pone de acuerdo a los dos documentos.
+ *
+ * Separadores en inglés (coma para miles, punto para decimales) porque es la
+ * convención de la moneda y la que ya usan la tienda y el panel.
+ */
+const numero = (valor: string | number): string =>
+  Number(valor).toLocaleString('en-US', {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  });
+
 const money = (amount: string, currency = 'USD'): string =>
-  `${currency === 'USD' ? '$' : ''}${Number(amount).toFixed(2)}${currency === 'USD' ? '' : ` ${currency}`}`;
+  `${currency === 'USD' ? '$' : ''}${numero(amount)}${currency === 'USD' ? '' : ` ${currency}`}`;
+
+/** Cantidades enteras —pedidos, unidades—: sin decimales, con miles. */
+const cantidad = (valor: number): string => valor.toLocaleString('en-US');
 
 const greeting = (name: string | null): string =>
   name ? `Hola, ${esc(name)}:` : 'Hola:';
@@ -713,7 +733,7 @@ export const reportReady = (data: ReportMailData): RenderedEmail => {
     ),
     datos([
       ['Criterios', esc(data.criterios)],
-      ['Pedidos', String(data.pedidos)],
+      ['Pedidos', cantidad(data.pedidos)],
       ['Importe total', money(data.importe, 'USD')],
     ]),
     p(
@@ -722,7 +742,7 @@ export const reportReady = (data: ReportMailData): RenderedEmail => {
   ].join('\n');
 
   return {
-    subject: `Reporte de pedidos · ${data.pedidos} pedidos · ${money(data.importe, 'USD')}`,
+    subject: `Reporte de pedidos · ${cantidad(data.pedidos)} pedidos · ${money(data.importe, 'USD')}`,
     ...render({
       title: 'Reporte de pedidos',
       body,
