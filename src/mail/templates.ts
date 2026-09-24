@@ -458,6 +458,41 @@ export const refundRequested = (
   };
 };
 
+export interface ContactReplyMailData {
+  /** Lo que escribe soporte, en texto plano y con sus saltos. */
+  body: string;
+  storeUrl: string | null;
+  whatsapp: string;
+}
+
+/**
+ * La respuesta de soporte a un mensaje de contacto.
+ *
+ * Era el único correo del sistema que no pasaba por aquí: se armaba con un
+ * `<div>` suelto en `contact-mail.service.ts`, sin cabecera, sin marca, sin pie
+ * y sin decir por qué le llegaba. Justo el correo que recibe alguien que ya
+ * escribió con una duda, y el que peor clasifica un filtro.
+ *
+ * El cuerpo lo teclea una persona del back-office: se escapa entero y se
+ * respetan sus saltos de línea, que es como lo escribió.
+ */
+export const contactReply = (
+  data: ContactReplyMailData,
+): { html: string; text: string } => {
+  const cuerpo = `<div style="margin:0 0 16px;font-size:15px;line-height:1.7;color:#2f3b36;white-space:pre-wrap;">${esc(data.body)}</div>`;
+
+  // Sin `subject`: el asunto lo escribe quien responde desde el back-office,
+  // y normalmente es el del mensaje original. La plantilla no se lo inventa.
+  return render({
+    title: 'Te respondemos',
+    body: cuerpo,
+    whatsapp: data.whatsapp,
+    storeUrl: data.storeUrl,
+    estado: { texto: 'RESPUESTA DE MAXI HABANA', tono: 'bien' },
+    motivo: 'Recibes este correo porque nos escribiste a través de la tienda.',
+  });
+};
+
 export interface WelcomeMailData {
   customerName: string | null;
   /** Raíz de la tienda, sin barra final. Los enlaces del pie cuelgan de aquí. */

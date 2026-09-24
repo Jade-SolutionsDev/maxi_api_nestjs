@@ -1,6 +1,9 @@
 import { Injectable, ServiceUnavailableException } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
+import { StorefrontConfig, SupportConfig } from '../config/configuration';
 import { EmailStatus } from '../mail/entities/email-log.entity';
 import { MailService } from '../mail/mail.service';
+import { contactReply } from '../mail/templates';
 
 /**
  * Respuestas a los mensajes de contacto.
@@ -12,7 +15,10 @@ import { MailService } from '../mail/mail.service';
  */
 @Injectable()
 export class ContactMailService {
-  constructor(private readonly mail: MailService) {}
+  constructor(
+    private readonly mail: MailService,
+    private readonly configService: ConfigService,
+  ) {}
 
   get configured(): boolean {
     return this.mail.configured;
@@ -24,11 +30,18 @@ export class ContactMailService {
         'RESEND_API_KEY is not configured; platform replies are disabled',
       );
     }
+    const { html, text } = contactReply({
+      body,
+      storeUrl:
+        this.configService.get<StorefrontConfig>('storefront')?.url ?? null,
+      whatsapp:
+        this.configService.get<SupportConfig>('support')?.whatsapp ?? '',
+    });
     const result = await this.mail.send({
       to,
       subject,
-      text: body,
-      html: this.asHtml(body),
+      text,
+      html,
       template: 'contact_reply',
     });
     if (result.status !== EmailStatus.SENT) {
@@ -38,14 +51,5 @@ export class ContactMailService {
         `No se pudo enviar la respuesta: ${result.error ?? 'error desconocido'}`,
       );
     }
-  }
-
-  /** El cuerpo lo escribe una persona en texto plano; se respetan sus saltos. */
-  private asHtml(body: string): string {
-    const escaped = body
-      .replace(/&/g, '&amp;')
-      .replace(/</g, '&lt;')
-      .replace(/>/g, '&gt;');
-    return `<div style="font-family:Helvetica,Arial,sans-serif;font-size:15px;line-height:1.6;color:#1c1917;white-space:pre-wrap;">${escaped}</div>`;
   }
 }
