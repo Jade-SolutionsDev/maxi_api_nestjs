@@ -1,6 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { In, IsNull, Repository } from 'typeorm';
+import { In, Repository } from 'typeorm';
 import { UserRole } from '../permissions/entities/user-role.entity';
 import { User } from '../users/entities/user.entity';
 
@@ -12,14 +12,16 @@ export interface Destinatarios {
   /** Roles pedidos que no tienen a nadie con correo: hay que avisarlo. */
   rolesVacios: string[];
   /**
-   * Gente del rol a la que no se le pudo mandar por no tener dirección.
+   * Gente del rol que queda fuera, con el motivo. Quien marca «Economista»
+   * esperando seis y recibe cinco tiene que saber cuál falta y por qué; si no,
+   * lo descubre cuando alguien se queja de que no le llegó.
    *
    * Los usuarios del back-office nacen de una invitación de Clerk y su fila
    * local se rellena por webhook: si alguna se quedó a medias, hay personas en
    * el rol sin correo. Quien pulsa el botón tiene que enterarse de que a dos de
    * los seis economistas no les llegó nada, en vez de suponer que sí.
    */
-  sinCorreo: { nombre: string | null; rol: string }[];
+  sinCorreo: { nombre: string | null; rol: string; motivo: string }[];
 }
 
 /**
@@ -73,11 +75,13 @@ export class ReportRecipientsService {
       }
 
       const todosLosIds = asignaciones.map((a) => a.userId);
+      // Se traen TODOS, activos o no, y el descarte se hace aquí: filtrarlo en
+      // la consulta dejaba a los desactivados fuera en silencio, sin poder
+      // decir que existían.
       const usuarios = todosLosIds.length
         ? await this.userRepository.find({
-            // Sin borrados y sin desactivados: mandarle el reporte a quien ya
-            // no trabaja aquí es filtrar cifras de la empresa fuera de ella.
-            where: { id: In(todosLosIds), isActive: true, deletedAt: IsNull() },
+            where: { id: In(todosLosIds) },
+            withDeleted: true,
           })
         : [];
       const porId = new Map(usuarios.map((u) => [u.id, u]));
@@ -86,15 +90,37 @@ export class ReportRecipientsService {
         const activos = datos.usuarios
           .map((id) => porId.get(id))
           .filter((u): u is User => Boolean(u));
-        for (const usuario of activos.filter((u) => !u.email)) {
-          sinCorreo.push({
-            nombre:
-              [usuario.firstName, usuario.lastName].filter(Boolean).join(' ') ||
-              null,
-            rol: datos.nombre || roleId,
-          });
+        const nombreDe = (u: User) =>
+          [u.firstName, u.lastName].filter(Boolean).join(' ') ||
+          u.email ||
+          null;
+
+        for (const usuario of activos) {
+          // Mandarle las cifras de la empresa a quien ya no trabaja aquí es
+          // sacarlas fuera de ella: se descarta, pero se dice.
+          if (usuario.deletedAt) {
+            sinCorreo.push({
+              nombre: nombreDe(usuario),
+              rol: datos.nombre || roleId,
+              motivo: 'cuenta borrada',
+            });
+          } else if (!usuario.isActive) {
+            sinCorreo.push({
+              nombre: nombreDe(usuario),
+              rol: datos.nombre || roleId,
+              motivo: 'cuenta desactivada',
+            });
+          } else if (!usuario.email) {
+            sinCorreo.push({
+              nombre: nombreDe(usuario),
+              rol: datos.nombre || roleId,
+              motivo: 'sin correo',
+            });
+          }
         }
-        const conCorreo = activos.filter((u) => Boolean(u.email));
+        const conCorreo = activos.filter(
+          (u) => u.isActive && !u.deletedAt && Boolean(u.email),
+        );
         if (!conCorreo.length) {
           rolesVacios.push(datos.nombre || roleId);
           continue;
