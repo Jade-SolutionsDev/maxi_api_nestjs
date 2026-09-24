@@ -88,7 +88,7 @@ describe('OrderMailerService', () => {
       ...pedido,
       client: null,
       contactSnapshot: null,
-    } as unknown as Order);
+    });
 
     await expect(service.orderReceived('abc-123')).resolves.toBeNull();
     expect(mail.send).not.toHaveBeenCalled();
