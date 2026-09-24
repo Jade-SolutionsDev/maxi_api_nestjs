@@ -88,8 +88,27 @@ export interface FiltrosDelReporte {
   status?: string;
   paymentStatus?: string;
   paymentMethod?: string;
+  fulfillmentType?: string;
+  pickupLocationId?: string;
+  minTotal?: string;
+  maxTotal?: string;
   q?: string;
 }
+
+/** Cómo se agrupa el resumen: por día, por semana o por mes. */
+export type Periodo = 'day' | 'week' | 'month';
+
+export interface FilaDelResumen {
+  /** Inicio del periodo, en ISO. */
+  periodo: string;
+  pedidos: number;
+  importe: string;
+}
+
+const ENTREGAS: Record<string, string> = {
+  delivery: 'A domicilio',
+  pickup: 'Recogida en tienda',
+};
 
 export interface TotalPorEstado {
   estado: string;
@@ -115,6 +134,7 @@ export class OrdersReportPdfService {
     totales: TotalPorEstado[],
     filtros: FiltrosDelReporte,
     recortado = false,
+    resumen: { periodo: Periodo; filas: FilaDelResumen[] } | null = null,
   ): Promise<Buffer> {
     const doc = new PDFDocument({
       size: [ANCHO_PAGINA, ALTO_PAGINA],
@@ -145,6 +165,9 @@ export class OrdersReportPdfService {
     this.titulo(doc, filtros, pedidos.length, recortado);
     this.tabla(doc, pedidos);
     this.totales(doc, totales);
+    if (resumen && resumen.filas.length) {
+      this.resumenPorPeriodo(doc, resumen.periodo, resumen.filas);
+    }
     this.marcaEnTodasLasPaginas(doc, filtros);
 
     doc.end();
@@ -192,6 +215,22 @@ export class OrdersReportPdfService {
     }
     if (filtros.paymentMethod) {
       partes.push(`Método: ${filtros.paymentMethod}`);
+    }
+    if (filtros.fulfillmentType) {
+      partes.push(
+        `Entrega: ${ENTREGAS[filtros.fulfillmentType] ?? filtros.fulfillmentType}`,
+      );
+    }
+    if (filtros.minTotal || filtros.maxTotal) {
+      const min = filtros.minTotal ? dinero(filtros.minTotal) : null;
+      const max = filtros.maxTotal ? dinero(filtros.maxTotal) : null;
+      partes.push(
+        min && max
+          ? `Importe: de ${min} a ${max}`
+          : min
+            ? `Importe: desde ${min}`
+            : `Importe: hasta ${max}`,
+      );
     }
     if (filtros.q) partes.push(`Búsqueda: «${filtros.q}»`);
     return partes.join('  ·  ');
@@ -377,6 +416,98 @@ export class OrdersReportPdfService {
       width: 110,
       align: 'right',
     });
+  }
+
+  /**
+   * El resumen por periodo: la tendencia, que el total solo no enseña. Saber
+   * que en septiembre entraron $22.000 dice menos que ver que la última
+   * semana cayeron a la mitad.
+   */
+  private resumenPorPeriodo(
+    doc: PDFKit.PDFDocument,
+    periodo: Periodo,
+    filas: FilaDelResumen[],
+  ): void {
+    if (doc.y > ALTO_PAGINA - MARGEN - ALTO_PIE - 120) {
+      doc.addPage();
+      doc.y = MARGEN + ALTO_CABECERA;
+    }
+
+    doc.moveDown(1.2);
+    const titulos: Record<Periodo, string> = {
+      day: 'RESUMEN POR DÍAS',
+      week: 'RESUMEN POR SEMANAS',
+      month: 'RESUMEN POR MESES',
+    };
+    doc
+      .font('Helvetica-Bold')
+      .fontSize(10)
+      .fillColor(TINTA)
+      .text(titulos[periodo], MARGEN, doc.y);
+    doc.moveDown(0.5);
+
+    const anchoEtiqueta = 220;
+    let sumaPedidos = 0;
+    let sumaImporte = 0;
+
+    doc.font('Helvetica').fontSize(9.5);
+    for (const fila of filas) {
+      if (doc.y > ALTO_PAGINA - MARGEN - ALTO_PIE - 30) {
+        doc.addPage();
+        doc.y = MARGEN + ALTO_CABECERA;
+      }
+      sumaPedidos += fila.pedidos;
+      sumaImporte += Number(fila.importe);
+      const y = doc.y;
+      doc
+        .fillColor(GRIS)
+        .text(this.etiquetaDelPeriodo(fila.periodo, periodo), MARGEN, y, {
+          width: anchoEtiqueta,
+        });
+      doc.fillColor(TINTA).text(`${fila.pedidos}`, MARGEN + anchoEtiqueta, y, {
+        width: 60,
+        align: 'right',
+      });
+      doc
+        .fillColor(TINTA)
+        .text(dinero(fila.importe), MARGEN + anchoEtiqueta + 70, y, {
+          width: 110,
+          align: 'right',
+        });
+      doc.y = y + 14;
+    }
+
+    const yTotal = doc.y + 2;
+    doc
+      .moveTo(MARGEN, yTotal)
+      .lineTo(MARGEN + anchoEtiqueta + 180, yTotal)
+      .strokeColor(LINEA)
+      .stroke();
+    doc.font('Helvetica-Bold').fontSize(10).fillColor(TINTA);
+    doc.text('Total', MARGEN, yTotal + 6, { width: anchoEtiqueta });
+    doc.text(`${sumaPedidos}`, MARGEN + anchoEtiqueta, yTotal + 6, {
+      width: 60,
+      align: 'right',
+    });
+    doc.text(dinero(sumaImporte), MARGEN + anchoEtiqueta + 70, yTotal + 6, {
+      width: 110,
+      align: 'right',
+    });
+  }
+
+  /** «03/09/2026», «Del 01 al 07 de septiembre» o «Septiembre de 2026». */
+  private etiquetaDelPeriodo(iso: string, periodo: Periodo): string {
+    const d = new Date(iso);
+    if (periodo === 'day') return fechaLarga(iso);
+    if (periodo === 'month') {
+      const mes = d.toLocaleDateString('es', { month: 'long' });
+      return `${mes.charAt(0).toUpperCase()}${mes.slice(1)} de ${d.getFullYear()}`;
+    }
+    const fin = new Date(d);
+    fin.setDate(fin.getDate() + 6);
+    return `Del ${String(d.getDate()).padStart(2, '0')} al ${String(
+      fin.getDate(),
+    ).padStart(2, '0')} de ${fin.toLocaleDateString('es', { month: 'long' })}`;
   }
 
   /**
