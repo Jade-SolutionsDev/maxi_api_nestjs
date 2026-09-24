@@ -9,19 +9,32 @@ import {
   Query,
 } from '@nestjs/common';
 import { RequirePermission } from '../permissions/decorators/require-permission.decorator';
+import { ClientInvitationsService } from './client-invitations.service';
 import { ClientsService } from './clients.service';
+import {
+  ClientInvitationResponseDto,
+  InviteClientDto,
+} from './dto/invite-client.dto';
 import { CreateClientDto } from './dto/create-client.dto';
 import { UpdateClientDto } from './dto/update-client.dto';
 import { ClientResponseDto } from './dto/client-response.dto';
 import { ListClientsQueryDto } from './dto/list-clients-query.dto';
 import type { PaginatedResponse } from '../common/dto/pagination.dto';
-import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
+import {
+  ApiBearerAuth,
+  ApiOkResponse,
+  ApiOperation,
+  ApiTags,
+} from '@nestjs/swagger';
 
 @ApiTags('clients')
 @ApiBearerAuth()
 @Controller('clients')
 export class ClientsController {
-  constructor(private readonly clientsService: ClientsService) {}
+  constructor(
+    private readonly clientsService: ClientsService,
+    private readonly invitations: ClientInvitationsService,
+  ) {}
 
   @Get()
   @RequirePermission({ module: 'clients', action: 'list' })
@@ -61,6 +74,22 @@ export class ClientsController {
   @RequirePermission({ module: 'clients', action: 'read' })
   async findOne(@Param('id') id: string): Promise<ClientResponseDto> {
     return ClientResponseDto.fromEntity(await this.clientsService.findOne(id));
+  }
+
+  /**
+   * Alta de un cliente que compró por otro canal.
+   *
+   * Va antes que `POST /clients` a propósito: ese espeja una cuenta que YA
+   * existe en Clerk y pide su `clerkId`; este crea la cuenta de verdad.
+   */
+  @Post('invitations')
+  @RequirePermission({ module: 'clients', action: 'create' })
+  @ApiOperation({ summary: 'Invitar a alguien a tener cuenta en la tienda' })
+  @ApiOkResponse({ type: ClientInvitationResponseDto })
+  async invite(
+    @Body() dto: InviteClientDto,
+  ): Promise<ClientInvitationResponseDto> {
+    return this.invitations.invite(dto);
   }
 
   @Post()
