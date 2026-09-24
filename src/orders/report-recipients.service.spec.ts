@@ -67,20 +67,51 @@ describe('ReportRecipientsService', () => {
     expect(r.correos).toEqual(['ana@maxihabana.com']);
   });
 
-  // Mandarle las cifras de la empresa a quien ya no trabaja aquí es filtrarlas
-  // fuera de ella. El repositorio se consulta con `isActive` y sin borrados.
-  it('no incluye a los desactivados ni a los borrados', async () => {
+  // Mandarle las cifras de la empresa a quien ya no trabaja aquí es sacarlas
+  // fuera de ella. Pero se descarta **diciéndolo**: filtrarlo en la consulta
+  // dejaba al desactivado fuera en silencio, y quien marca un rol de seis y
+  // recibe cinco no tenía forma de saber cuál faltaba.
+  it('descarta a los desactivados, y dice por qué', async () => {
     userRoleRepo.find.mockResolvedValue([
       { userId: 'u1', roleId: 'r1', role: { name: 'Economista' } },
+      { userId: 'u2', roleId: 'r1', role: { name: 'Economista' } },
+    ]);
+    userRepo.find.mockResolvedValue([
+      usuario(),
+      usuario({
+        id: 'u2',
+        email: 'fuera@maxihabana.com',
+        firstName: 'Ya',
+        lastName: 'No',
+        isActive: false,
+      }),
     ]);
 
-    await service.resolver([], ['r1']);
+    const r = await service.resolver([], ['r1']);
 
-    expect(userRepo.find).toHaveBeenCalledWith(
-      expect.objectContaining({
-        where: expect.objectContaining({ isActive: true }),
+    expect(r.correos).toEqual(['ana@maxihabana.com']);
+    expect(r.sinCorreo).toEqual([
+      { nombre: 'Ya No', rol: 'Economista', motivo: 'cuenta desactivada' },
+    ]);
+  });
+
+  it('descarta a los borrados, y también lo dice', async () => {
+    userRoleRepo.find.mockResolvedValue([
+      { userId: 'u2', roleId: 'r1', role: { name: 'Economista' } },
+    ]);
+    userRepo.find.mockResolvedValue([
+      usuario({
+        id: 'u2',
+        firstName: 'Borrado',
+        lastName: '',
+        deletedAt: new Date(),
       }),
-    );
+    ]);
+
+    const r = await service.resolver([], ['r1']);
+
+    expect(r.correos).toEqual([]);
+    expect(r.sinCorreo[0].motivo).toBe('cuenta borrada');
   });
 
   // Los usuarios del back-office nacen de una invitación y su fila local se
@@ -99,7 +130,9 @@ describe('ReportRecipientsService', () => {
     const r = await service.resolver([], ['r1']);
 
     expect(r.correos).toEqual(['ana@maxihabana.com']);
-    expect(r.sinCorreo).toEqual([{ nombre: 'Sin Correo', rol: 'Economista' }]);
+    expect(r.sinCorreo).toEqual([
+      { nombre: 'Sin Correo', rol: 'Economista', motivo: 'sin correo' },
+    ]);
   });
 
   it('avisa del rol que no tiene a nadie', async () => {
