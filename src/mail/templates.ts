@@ -493,6 +493,62 @@ export const contactReply = (
   });
 };
 
+export interface ClientInvitationMailData {
+  customerName: string | null;
+  /** Enlace de aceptación de Clerk: es la credencial, no un enlace cualquiera. */
+  invitationUrl: string;
+  storeUrl: string | null;
+  whatsapp: string;
+}
+
+/**
+ * Alta de un cliente que compró por otro canal y al que damos cuenta nosotros.
+ *
+ * El correo lo manda la tienda, no Clerk. Clerk sabe mandarlo, pero ya se ha
+ * visto aceptar la invitación y no entregar nada —le pasó a un trabajador el
+ * 22-sep—, y aquí el enlace es lo único que el cliente tiene para entrar. Con
+ * nuestro envío queda registrado en `email_log` y se sabe si salió.
+ *
+ * No promete nada que no sepamos: ni pedidos, ni saldo, ni historial. Solo dice
+ * quién le abrió la cuenta y qué tiene que hacer.
+ */
+export const clientInvitation = (
+  data: ClientInvitationMailData,
+): RenderedEmail => {
+  const body = [
+    p(
+      `Te abrimos una cuenta en <strong>Maxi Habana</strong> para que puedas seguir tus pedidos y comprar tú mismo cuando quieras.`,
+    ),
+    p(
+      `Solo falta que elijas tu contraseña. El enlace es personal: no lo compartas.`,
+    ),
+    button(data.invitationUrl, 'Elegir mi contraseña'),
+    p(
+      `Si el botón no te funciona, copia esta dirección en tu navegador:<br><span style="word-break:break-all;color:#5d6c65;font-size:13px;">${esc(data.invitationUrl)}</span>`,
+    ),
+    box(
+      'Si no esperabas este correo, puedes ignorarlo: sin elegir contraseña, la cuenta no se activa.',
+    ),
+  ].join('\n');
+
+  return {
+    subject: data.customerName
+      ? `${data.customerName}, tu cuenta de Maxi Habana está lista para activar`
+      : 'Tu cuenta de Maxi Habana está lista para activar',
+    ...render({
+      title: data.customerName
+        ? `Hola, ${esc(data.customerName)}`
+        : 'Te abrimos una cuenta',
+      body,
+      whatsapp: data.whatsapp,
+      storeUrl: data.storeUrl,
+      estado: { texto: 'FALTA ACTIVAR TU CUENTA', tono: 'atencion' },
+      motivo:
+        'Recibes este correo porque alguien de Maxi Habana te abrió una cuenta.',
+    }),
+  };
+};
+
 export interface WelcomeMailData {
   customerName: string | null;
   /** Raíz de la tienda, sin barra final. Los enlaces del pie cuelgan de aquí. */
