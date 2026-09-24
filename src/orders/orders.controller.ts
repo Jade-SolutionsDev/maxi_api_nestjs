@@ -38,7 +38,10 @@ import { UpdateOrderItemsDto } from './dto/update-order-items.dto';
 import { UpdateOrderStatusDto } from './dto/update-order-status.dto';
 import { UpdatePaymentStatusDto } from './dto/update-payment-status.dto';
 import { OrderPdfService } from './order-pdf.service';
-import { OrdersReportPdfService } from './orders-report-pdf.service';
+import {
+  OrdersReportPdfService,
+  type Periodo,
+} from './orders-report-pdf.service';
 import { OrdersService } from './orders.service';
 
 // Backoffice order management, gated per-action by managed permissions
@@ -252,17 +255,28 @@ export class OrdersController {
   })
   async reportePdf(
     @Query() query: AdminOrdersQueryDto,
+    @Query('groupBy') groupBy: Periodo | undefined,
     @Res({ passthrough: true }) res: Response,
   ): Promise<StreamableFile> {
-    const [{ pedidos, recortado }, totales] = await Promise.all([
+    // El resumen es opcional: sin `groupBy` sale el listado y los totales, que
+    // es lo que se pedía antes de que Jade viera la referencia con tendencia.
+    const periodo: Periodo | null =
+      groupBy === 'day' || groupBy === 'week' || groupBy === 'month'
+        ? groupBy
+        : null;
+    const [{ pedidos, recortado }, totales, filasResumen] = await Promise.all([
       this.ordersService.findAllForReport(query),
       this.ordersService.totalesForReport(query),
+      periodo
+        ? this.ordersService.resumenPorPeriodo(query, periodo)
+        : Promise.resolve([]),
     ]);
     const pdf = await this.ordersReportPdfService.generate(
       pedidos,
       totales,
       query,
       recortado,
+      periodo ? { periodo, filas: filasResumen } : null,
     );
     res.set({
       'Content-Type': 'application/pdf',

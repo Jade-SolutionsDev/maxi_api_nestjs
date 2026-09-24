@@ -103,4 +103,41 @@ describe('OrdersReportPdfService', () => {
     const paginas = pdf.toString('latin1').match(/\/Type\s*\/Page[^s]/g) ?? [];
     expect(paginas.length).toBeGreaterThan(1);
   });
+  describe('resumen por periodo', () => {
+    const filas = [
+      { periodo: '2026-09-01T00:00:00.000Z', pedidos: 18, importe: '4320.00' },
+      { periodo: '2026-09-08T00:00:00.000Z', pedidos: 24, importe: '6150.00' },
+    ];
+
+    it('sale cuando se pide, y no cuando no', async () => {
+      const con = await service.generate([pedido()], totales, {}, false, {
+        periodo: 'week',
+        filas,
+      });
+      const sin = await service.generate([pedido()], totales, {});
+      expect(con.length).toBeGreaterThan(sin.length);
+    });
+
+    it('no revienta con un resumen vacío', async () => {
+      const pdf = await service.generate([pedido()], totales, {}, false, {
+        periodo: 'month',
+        filas: [],
+      });
+      expect(pdf.subarray(0, 5).toString()).toBe('%PDF-');
+    });
+  });
+
+  // Los filtros nuevos tienen que decirse en el papel: un reporte que no
+  // cuenta de qué está hecho no se puede archivar ni enseñar.
+  it('el documento nombra los filtros de entrega e importe', async () => {
+    const pdf = await service.generate([pedido()], totales, {
+      fulfillmentType: 'pickup',
+      minTotal: '100',
+      maxTotal: '5000',
+    });
+    // El texto del PDF va comprimido; se comprueba que el documento crece
+    // respecto al mismo reporte sin esos filtros.
+    const sinFiltros = await service.generate([pedido()], totales, {});
+    expect(pdf.length).toBeGreaterThan(sinFiltros.length);
+  });
 });

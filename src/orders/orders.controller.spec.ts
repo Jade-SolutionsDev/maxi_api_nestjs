@@ -79,6 +79,7 @@ describe('OrdersController · reporte de pedidos', () => {
         .fn()
         .mockResolvedValue({ pedidos: [], total: 0, recortado: false }),
       totalesForReport: jest.fn().mockResolvedValue([]),
+      resumenPorPeriodo: jest.fn().mockResolvedValue([]),
     };
     reportePdf = {
       generate: jest.fn().mockResolvedValue(Buffer.from('%PDF-1.4 reporte')),
@@ -110,7 +111,7 @@ describe('OrdersController · reporte de pedidos', () => {
       to: '2026-09-24',
     };
 
-    await controller.reportePdf(filtros, res as unknown as Response);
+    await controller.reportePdf(filtros, undefined, res as unknown as Response);
 
     expect(ordersService.findAllForReport).toHaveBeenCalledWith(filtros);
     expect(ordersService.totalesForReport).toHaveBeenCalledWith(filtros);
@@ -119,6 +120,7 @@ describe('OrdersController · reporte de pedidos', () => {
   it('devuelve el PDF con un nombre que dice qué contiene', async () => {
     const archivo = await controller.reportePdf(
       { status: OrderStatus.CANCELLED },
+      undefined,
       res as unknown as Response,
     );
 
@@ -129,5 +131,26 @@ describe('OrdersController · reporte de pedidos', () => {
         'Content-Disposition': 'attachment; filename="pedidos-cancelado.pdf"',
       }),
     );
+  });
+  // El resumen es opcional: sin `groupBy` no se pide, para no gastar una
+  // consulta de agregación en un reporte que no lo lleva.
+  it('sin agrupación no consulta el resumen', async () => {
+    await controller.reportePdf({}, undefined, res as unknown as Response);
+    expect(ordersService.resumenPorPeriodo).not.toHaveBeenCalled();
+  });
+
+  it('con agrupación pide el resumen de ese periodo', async () => {
+    await controller.reportePdf({}, 'week', res as unknown as Response);
+    expect(ordersService.resumenPorPeriodo).toHaveBeenCalledWith({}, 'week');
+  });
+
+  // Un `groupBy` inventado no puede colarse en el SQL del `date_trunc`.
+  it('ignora una agrupación que no reconoce', async () => {
+    await controller.reportePdf(
+      {},
+      'año; DROP TABLE orders' as never,
+      res as unknown as Response,
+    );
+    expect(ordersService.resumenPorPeriodo).not.toHaveBeenCalled();
   });
 });

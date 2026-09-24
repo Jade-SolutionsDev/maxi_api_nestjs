@@ -3,13 +3,18 @@ import {
   IsBoolean,
   IsDateString,
   IsEnum,
+  IsNumberString,
   IsOptional,
   IsString,
   IsUUID,
 } from 'class-validator';
 import { toOptionalBoolean } from '../../common/dto/query-transforms';
 import { PaginationQueryDto } from '../../common/dto/pagination.dto';
-import { OrderStatus, PaymentStatus } from '../entities/order.entity';
+import {
+  FulfillmentType,
+  OrderStatus,
+  PaymentStatus,
+} from '../entities/order.entity';
 
 /** Pedidos que no llegaron a tener ningún intento de pago. */
 export const SIN_METODO_DE_PAGO = 'none';
@@ -74,4 +79,27 @@ export class AdminOrdersQueryDto extends PaginationQueryDto {
   @IsOptional()
   @IsDateString()
   to?: string;
+
+  /** A domicilio o recogida en mostrador. */
+  @IsOptional()
+  @IsEnum(FulfillmentType)
+  fulfillmentType?: FulfillmentType;
+
+  /** El mostrador donde se recoge: da a cada local su propio listado. */
+  @IsOptional()
+  @IsUUID()
+  pickupLocationId?: string;
+
+  /**
+   * Rango de importe del pedido, inclusivo. Llega como texto porque el total
+   * es `decimal` y pasarlo por `number` perdería céntimos en los importes
+   * grandes: la tienda vende en USD y hay pedidos de cinco cifras.
+   */
+  @IsOptional()
+  @IsNumberString()
+  minTotal?: string;
+
+  @IsOptional()
+  @IsNumberString()
+  maxTotal?: string;
 }

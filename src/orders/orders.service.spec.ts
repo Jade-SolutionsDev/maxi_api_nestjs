@@ -687,6 +687,45 @@ describe('OrdersService', () => {
     });
   });
 
+  describe('los filtros nuevos del reporte', () => {
+    it('filtra por tipo de entrega y punto de recogida', async () => {
+      const qb = filtrosFalsos();
+      orderRepo.createQueryBuilder.mockReturnValue(qb);
+
+      await service.findAllAdmin({
+        fulfillmentType: FulfillmentType.PICKUP,
+        pickupLocationId: '8325f708-021b-4045-bc92-42c3b90aedfc',
+      });
+
+      const condiciones = (qb.andWhere.mock.calls as [string, unknown][]).map(
+        ([c]) => c,
+      );
+      expect(condiciones).toContain('order.fulfillmentType = :fulfillmentType');
+      expect(condiciones).toContain(
+        'order.pickupLocationId = :pickupLocationId',
+      );
+    });
+
+    // El total es `decimal`. Pasarlo por el `number` de JavaScript redondea
+    // céntimos en importes de cinco cifras —y aquí los hay, hay pedidos de
+    // $51.840— y dejaría pedidos fuera del rango por un cent.
+    it('compara los importes sin pasarlos por number', async () => {
+      const qb = filtrosFalsos();
+      orderRepo.createQueryBuilder.mockReturnValue(qb);
+
+      await service.findAllAdmin({ minTotal: '100.00', maxTotal: '51840.55' });
+
+      const llamadas = qb.andWhere.mock.calls as [
+        string,
+        Record<string, unknown>,
+      ][];
+      const min = llamadas.find(([c]) => c.includes('>= :minTotal'));
+      const max = llamadas.find(([c]) => c.includes('<= :maxTotal'));
+      expect(min?.[1].minTotal).toBe('100.00');
+      expect(max?.[1].maxTotal).toBe('51840.55');
+    });
+  });
+
   describe('el reporte usa los mismos filtros que el listado', () => {
     // Si el reporte armara su propia consulta, acabaría diciendo algo distinto
     // de lo que muestra la pantalla, y un informe que no cuadra con el listado

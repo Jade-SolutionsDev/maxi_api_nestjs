@@ -619,6 +619,25 @@ export class OrdersService {
       hasta.setHours(23, 59, 59, 999);
       qb.andWhere('order.createdAt <= :hasta', { hasta });
     }
+    if (query.fulfillmentType) {
+      qb.andWhere('order.fulfillmentType = :fulfillmentType', {
+        fulfillmentType: query.fulfillmentType,
+      });
+    }
+    if (query.pickupLocationId) {
+      qb.andWhere('order.pickupLocationId = :pickupLocationId', {
+        pickupLocationId: query.pickupLocationId,
+      });
+    }
+    // El total es `decimal`: se compara contra texto para no pasar por el
+    // `number` de JavaScript, que en importes de cinco cifras redondea
+    // céntimos y dejaría pedidos fuera del rango por un cent.
+    if (query.minTotal) {
+      qb.andWhere('order.total >= :minTotal', { minTotal: query.minTotal });
+    }
+    if (query.maxTotal) {
+      qb.andWhere('order.total <= :maxTotal', { maxTotal: query.maxTotal });
+    }
     if (query.needsTransfer) {
       // Pickup orders still holding RESERVED stock away from their counter —
       // derived from the reservations so it clears itself once settled.
@@ -718,6 +737,38 @@ export class OrdersService {
       .getRawMany<{ estado: string; pedidos: string; importe: string }>();
     return filas.map((f) => ({
       estado: f.estado,
+      pedidos: Number(f.pedidos),
+      importe: f.importe,
+    }));
+  }
+
+  /**
+   * El resumen del reporte: cuántos pedidos y cuánto dinero por día, semana o
+   * mes del rango elegido.
+   *
+   * Lo agrupa la base con `date_trunc`, no JavaScript: son las mismas filas que
+   * ya cuenta el motor, y traérselas para sumarlas aquí sería pedir 5000 filas
+   * para escribir doce.
+   *
+   * La semana de Postgres empieza en lunes, que es como se cuenta aquí.
+   */
+  async resumenPorPeriodo(
+    query: AdminOrdersQueryDto,
+    periodo: 'day' | 'week' | 'month',
+  ): Promise<{ periodo: string; pedidos: number; importe: string }[]> {
+    const qb = this.orderRepository
+      .createQueryBuilder('order')
+      .leftJoin('order.client', 'client');
+    this.aplicarFiltros(qb, query);
+    const filas = await qb
+      .select(`date_trunc('${periodo}', order.createdAt)`, 'periodo')
+      .addSelect('COUNT(*)', 'pedidos')
+      .addSelect('COALESCE(SUM(order.total), 0)', 'importe')
+      .groupBy('1')
+      .orderBy('1', 'ASC')
+      .getRawMany<{ periodo: Date; pedidos: string; importe: string }>();
+    return filas.map((f) => ({
+      periodo: new Date(f.periodo).toISOString(),
       pedidos: Number(f.pedidos),
       importe: f.importe,
     }));
