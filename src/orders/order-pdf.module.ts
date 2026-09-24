@@ -4,6 +4,7 @@ import { CmsModule } from '../cms/cms.module';
 import { OrderItem } from './entities/order-item.entity';
 import { Order } from './entities/order.entity';
 import { OrderPdfService } from './order-pdf.service';
+import { OrdersReportPdfService } from './orders-report-pdf.service';
 
 /**
  * El comprobante del pedido en PDF, en un módulo propio.
@@ -17,7 +18,7 @@ import { OrderPdfService } from './order-pdf.service';
  */
 @Module({
   imports: [TypeOrmModule.forFeature([Order, OrderItem]), CmsModule],
-  providers: [OrderPdfService],
-  exports: [OrderPdfService],
+  providers: [OrderPdfService, OrdersReportPdfService],
+  exports: [OrderPdfService, OrdersReportPdfService],
 })
 export class OrderPdfModule {}

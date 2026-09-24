@@ -1,6 +1,7 @@
 import { Transform } from 'class-transformer';
 import {
   IsBoolean,
+  IsDateString,
   IsEnum,
   IsOptional,
   IsString,
@@ -56,4 +57,21 @@ export class AdminOrdersQueryDto extends PaginationQueryDto {
   @Transform(toOptionalBoolean)
   @IsBoolean()
   needsTransfer?: boolean;
+
+  /**
+   * Rango de fechas de creación, inclusivo por los dos lados. `to` se entiende
+   * como el día entero: quien escribe «hasta el 24» espera que entren los
+   * pedidos de esa tarde, no que se corten a medianoche del 23.
+   *
+   * Nacieron con el reporte (MxH-0120), pero valen igual para el listado: con
+   * ciento cincuenta pedidos y subiendo, «los de esta semana» es la pregunta
+   * más frecuente.
+   */
+  @IsOptional()
+  @IsDateString()
+  from?: string;
+
+  @IsOptional()
+  @IsDateString()
+  to?: string;
 }

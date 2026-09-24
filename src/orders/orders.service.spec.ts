@@ -593,6 +593,40 @@ describe('OrdersService', () => {
     });
   });
 
+  const filtrosFalsos = () => {
+    const qb = {
+      leftJoinAndSelect: jest.fn(),
+      leftJoin: jest.fn(),
+      andWhere: jest.fn(),
+      orderBy: jest.fn(),
+      addOrderBy: jest.fn(),
+      skip: jest.fn(),
+      take: jest.fn(),
+      select: jest.fn(),
+      addSelect: jest.fn(),
+      groupBy: jest.fn(),
+      getCount: jest.fn().mockResolvedValue(0),
+      getMany: jest.fn().mockResolvedValue([]),
+      getRawMany: jest.fn().mockResolvedValue([]),
+      getManyAndCount: jest.fn().mockResolvedValue([[], 0]),
+    };
+    for (const metodo of [
+      'leftJoinAndSelect',
+      'leftJoin',
+      'andWhere',
+      'orderBy',
+      'addOrderBy',
+      'skip',
+      'take',
+      'select',
+      'addSelect',
+      'groupBy',
+    ] as const) {
+      qb[metodo].mockReturnValue(qb);
+    }
+    return qb;
+  };
+
   describe('findAllAdmin', () => {
     it('busca pedidos por el nombre completo y teléfono del cliente', async () => {
       const qb = {
@@ -627,6 +661,66 @@ describe('OrdersService', () => {
       );
       expect(condition).toContain('client.phone');
       expect(parameters).toEqual({ q: '%Aurelio García%' });
+    });
+
+    // «Hasta el 24» tiene que incluir los pedidos de esa tarde. Cortar a
+    // medianoche del 23 deja fuera un día entero sin que nadie lo note, y el
+    // reporte cuadra mal justo el día que se saca.
+    it('el rango de fechas incluye el último día completo', async () => {
+      const qb = filtrosFalsos();
+      orderRepo.createQueryBuilder.mockReturnValue(qb);
+
+      await service.findAllAdmin({ from: '2026-09-01', to: '2026-09-24' });
+
+      const llamadas = qb.andWhere.mock.calls as [
+        string,
+        Record<string, Date>,
+      ][];
+      const desde = llamadas.find(([c]) => c.includes('>= :desde'));
+      const hasta = llamadas.find(([c]) => c.includes('<= :hasta'));
+      expect(desde).toBeDefined();
+      expect(hasta).toBeDefined();
+      const fin = hasta?.[1].hasta as Date;
+      expect(fin.getDate()).toBe(24);
+      expect(fin.getHours()).toBe(23);
+      expect(fin.getMinutes()).toBe(59);
+    });
+  });
+
+  describe('el reporte usa los mismos filtros que el listado', () => {
+    // Si el reporte armara su propia consulta, acabaría diciendo algo distinto
+    // de lo que muestra la pantalla, y un informe que no cuadra con el listado
+    // es peor que no tenerlo.
+    it('aplica el filtro de estado igual que el listado', async () => {
+      const qbListado = filtrosFalsos();
+      orderRepo.createQueryBuilder.mockReturnValue(qbListado);
+      await service.findAllAdmin({ status: OrderStatus.CANCELLED });
+      const delListado = (qbListado.andWhere.mock.calls as [string, unknown][])
+        .map(([c]) => c)
+        .filter((c) => c.includes('order.status'));
+
+      const qbReporte = filtrosFalsos();
+      orderRepo.createQueryBuilder.mockReturnValue(qbReporte);
+      paymentsService.latestMethodsFor.mockResolvedValue(new Map());
+      await service.findAllForReport({ status: OrderStatus.CANCELLED });
+      const delReporte = (qbReporte.andWhere.mock.calls as [string, unknown][])
+        .map(([c]) => c)
+        .filter((c) => c.includes('order.status'));
+
+      expect(delReporte).toEqual(delListado);
+    });
+
+    // El listado enseña de diez en diez; un reporte de la página que estás
+    // mirando no es un reporte.
+    it('no arrastra la paginación del listado', async () => {
+      const qb = filtrosFalsos();
+      orderRepo.createQueryBuilder.mockReturnValue(qb);
+      paymentsService.latestMethodsFor.mockResolvedValue(new Map());
+
+      await service.findAllForReport({ status: OrderStatus.CANCELLED });
+
+      expect(qb.skip).not.toHaveBeenCalled();
+      expect(qb.take).toHaveBeenCalledWith(5000);
     });
   });
 
