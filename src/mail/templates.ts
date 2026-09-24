@@ -49,6 +49,8 @@ export interface OrderMailData {
   pickupAddress: string | null;
   whatsapp: string;
   storeUrl: string | null;
+  /** La ficha del pedido en la tienda, para pagarlo y seguirlo. */
+  orderUrl: string | null;
 }
 
 /**
@@ -243,12 +245,70 @@ const strip = (html: string): string =>
   html
     .replace(/<br\s*\/?>/g, '\n')
     .replace(/<\/p>|<\/div>/g, '\n\n')
+    // Las tablas de `datos()` salían pegadas —«PedidoORD-20260199Se recoge
+    // en…»— porque al quitar las etiquetas no quedaba nada entre celda y
+    // celda. Separador dentro de la fila, salto al acabarla.
+    .replace(/<\/td>/g, ': ')
+    .replace(/<\/tr>/g, '\n')
     .replace(/<[^>]+>/g, '')
+    // La última celda de cada fila también deja su separador: se quita.
+    .replace(/:[ \t]*\n/g, '\n')
     .replace(/\n{3,}/g, '\n\n')
     .replace(/[ \t]+/g, ' ')
     .trim();
 
 /** Pago confirmado: el pedido ya se puede recoger. */
+/**
+ * El pedido acaba de nacer y todavía no está pagado.
+ *
+ * Es el primer correo que recibe quien compra, y llega en el momento de más
+ * dudas: acaba de dar sus datos y no tiene nada en la mano. Por eso lleva el
+ * número del pedido —que es lo que le van a pedir si escribe— y el enlace para
+ * pagarlo, y por eso dice que la reserva caduca: quien cierra la pestaña
+ * creyendo que ya está, pierde el pedido.
+ *
+ * No promete fecha de entrega ni da instrucciones de pago: eso depende del
+ * método que elija y vive en la página del pedido, donde además hay una cuenta
+ * atrás de verdad.
+ */
+export const orderReceived = (order: OrderMailData): RenderedEmail => {
+  const body = [
+    p(
+      `${greeting(order.customerName)} tenemos tu pedido <strong>${esc(order.orderNumber)}</strong> guardado. Todavía falta el pago: mientras tanto te apartamos los productos.`,
+    ),
+    datos([
+      ['Pedido', esc(order.orderNumber)],
+      ...(order.pickupAddress
+        ? ([['Se recoge en', esc(order.pickupAddress)]] as Array<
+            [string, string]
+          >)
+        : []),
+    ]),
+    destacado(
+      'TOTAL A PAGAR',
+      money(order.total, order.currency),
+      'Puedes pagarlo desde la página del pedido.',
+    ),
+    ...(order.orderUrl ? [button(order.orderUrl, 'Pagar mi pedido')] : []),
+    box(
+      'La reserva no dura para siempre: si no recibimos el pago a tiempo, el pedido se cancela y los productos vuelven a la tienda. En la página del pedido ves cuánto tiempo te queda.',
+    ),
+  ].join('\n');
+
+  return {
+    subject: `Pedido ${order.orderNumber}: lo tenemos guardado, falta el pago`,
+    ...render({
+      title: '¡Listo! Tenemos tu pedido',
+      body,
+      whatsapp: order.whatsapp,
+      storeUrl: order.storeUrl,
+      estado: { texto: 'PENDIENTE DE PAGO', tono: 'atencion' },
+      motivo:
+        'Recibes este correo porque acabas de hacer un pedido en Maxi Habana.',
+    }),
+  };
+};
+
 export const paymentReceived = (order: OrderMailData): RenderedEmail => {
   const body = [
     p(

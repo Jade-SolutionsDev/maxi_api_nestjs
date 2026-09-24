@@ -2,6 +2,7 @@ import {
   BadRequestException,
   ConflictException,
   ForbiddenException,
+  Logger,
   NotFoundException,
 } from '@nestjs/common';
 import { Test, TestingModule } from '@nestjs/testing';
@@ -122,6 +123,7 @@ describe('OrdersService', () => {
   let permissionsService: { hasPermission: jest.Mock };
   let orderEvents: { record: jest.Mock; listForOrder: jest.Mock };
   let mailer: {
+    orderReceived: jest.Mock;
     paymentReceived: jest.Mock;
     shipped: jest.Mock;
     delivered: jest.Mock;
@@ -217,6 +219,7 @@ describe('OrdersService', () => {
         ),
     };
     mailer = {
+      orderReceived: jest.fn().mockResolvedValue(null),
       paymentReceived: jest.fn().mockResolvedValue(null),
       shipped: jest.fn().mockResolvedValue(null),
       delivered: jest.fn().mockResolvedValue(null),
@@ -529,6 +532,37 @@ describe('OrdersService', () => {
       ).rejects.toBeInstanceOf(BadRequestException);
       expect(orderRepo.save).not.toHaveBeenCalled();
       expect(inventoryService.reserve).not.toHaveBeenCalled();
+    });
+
+    it('avisa al cliente por correo de que su pedido quedó guardado', async () => {
+      await service.checkout(makeClient(), {});
+
+      expect(mailer.orderReceived).toHaveBeenCalled();
+    });
+
+    it('un correo que falla no tumba la compra, y queda anotado', async () => {
+      // El pedido ya está comprometido cuando se avisa: si el proveedor de
+      // correo se cae, la venta no se puede perder por eso.
+      //
+      // Se comprueba que el fallo quedó ATENDIDO, no solo que el checkout
+      // devolvió: sin el `.catch()` el rechazo queda suelto, y un rechazo
+      // suelto no hace fallar esta prueba, tumba el proceso entero. Esperar al
+      // siguiente tick es lo que deja que la promesa del aviso se asiente
+      // dentro de la prueba y no después de ella.
+      const anotado = jest
+        .spyOn(Logger.prototype, 'error')
+        .mockImplementation(() => undefined);
+      mailer.orderReceived.mockRejectedValue(new Error('resend caído'));
+
+      await expect(service.checkout(makeClient(), {})).resolves.toBeDefined();
+      await new Promise((sigue) => setImmediate(sigue));
+
+      expect(mailer.orderReceived).toHaveBeenCalled();
+      expect(anotado).toHaveBeenCalledWith(
+        expect.stringContaining('No se pudo avisar por correo'),
+        expect.anything(),
+      );
+      anotado.mockRestore();
     });
 
     it('survives a payment-initiation failure: order stays pending', async () => {
