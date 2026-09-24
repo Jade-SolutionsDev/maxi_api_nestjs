@@ -687,6 +687,54 @@ export const orderCancelled = (
   };
 };
 
+export interface ReportMailData {
+  /** Los filtros en palabras, tal como los describe el propio PDF. */
+  criterios: string;
+  pedidos: number;
+  importe: string;
+  /** Quién lo pidió, para que el que lo recibe sepa de dónde sale. */
+  solicitante: string | null;
+  whatsapp: string;
+  storeUrl: string | null;
+}
+
+/**
+ * El reporte de pedidos, que viaja adjunto.
+ *
+ * Es el único correo del sistema que **no va a un cliente**: va a quien lleva
+ * las cuentas. Por eso el cuerpo adelanta las dos cifras que se van a mirar
+ * primero —cuántos pedidos y cuánto dinero—, y así se puede responder a un
+ * «¿cómo vamos?» desde el móvil sin abrir el PDF.
+ */
+export const reportReady = (data: ReportMailData): RenderedEmail => {
+  const body = [
+    p(
+      `Aquí tienes el reporte de pedidos que ${data.solicitante ? `pidió ${esc(data.solicitante)}` : 'se ha solicitado'}. Va adjunto en PDF.`,
+    ),
+    datos([
+      ['Criterios', esc(data.criterios)],
+      ['Pedidos', String(data.pedidos)],
+      ['Importe total', money(data.importe, 'USD')],
+    ]),
+    p(
+      `El detalle, con el listado completo y los totales por estado, está en el documento adjunto.`,
+    ),
+  ].join('\n');
+
+  return {
+    subject: `Reporte de pedidos · ${data.pedidos} pedidos · ${money(data.importe, 'USD')}`,
+    ...render({
+      title: 'Reporte de pedidos',
+      body,
+      whatsapp: data.whatsapp,
+      storeUrl: data.storeUrl,
+      estado: { texto: 'DOCUMENTO INTERNO', tono: 'bien' },
+      motivo:
+        'Recibes este correo porque alguien del equipo pidió este reporte, o por el rol que tienes asignado en el panel.',
+    }),
+  };
+};
+
 export const welcome = (data: WelcomeMailData): RenderedEmail => {
   const store = data.storeUrl.replace(/\/+$/, '');
   const body = [

@@ -13,17 +13,21 @@ import { OrderEventsModule } from '../order-events/order-events.module';
 import { UploadsModule } from '../uploads/uploads.module';
 import { ProductsModule } from '../products/products.module';
 import { OrderItem } from './entities/order-item.entity';
+import { User } from '../users/entities/user.entity';
+import { UserRole } from '../permissions/entities/user-role.entity';
 import { Order } from './entities/order.entity';
 import { OrdersController } from './orders.controller';
 import { OrderPdfModule } from './order-pdf.module';
 import { OrdersService } from './orders.service';
+import { ReportMailerService } from './report-mailer.service';
+import { ReportRecipientsService } from './report-recipients.service';
 import { PermissionsModule } from '../permissions/permissions.module';
 import { OrderTrackingController } from './order-tracking.controller';
 import { StorefrontOrdersController } from './storefront-orders.controller';
 
 @Module({
   imports: [
-    TypeOrmModule.forFeature([Order, OrderItem]),
+    TypeOrmModule.forFeature([Order, OrderItem, User, UserRole]),
     forwardRef(() => AuthModule),
     CartModule,
     ClientAddressesModule,
@@ -44,6 +48,6 @@ import { StorefrontOrdersController } from './storefront-orders.controller';
     StorefrontOrdersController,
     OrderTrackingController,
   ],
-  providers: [OrdersService],
+  providers: [OrdersService, ReportRecipientsService, ReportMailerService],
 })
 export class OrdersModule {}

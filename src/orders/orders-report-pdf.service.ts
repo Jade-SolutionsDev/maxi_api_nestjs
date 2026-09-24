@@ -192,6 +192,10 @@ export class OrdersReportPdfService {
   }
 
   /** Los filtros, en palabras, para que el papel diga qué se está mirando. */
+  criteriosEnPalabras(filtros: FiltrosDelReporte): string {
+    return this.filtrosEnPalabras(filtros);
+  }
+
   private filtrosEnPalabras(filtros: FiltrosDelReporte): string {
     const partes: string[] = [];
     if (filtros.from && filtros.to) {

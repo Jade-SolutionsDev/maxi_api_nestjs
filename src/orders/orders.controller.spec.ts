@@ -3,9 +3,23 @@ import { Test, TestingModule } from '@nestjs/testing';
 import type { Response } from 'express';
 import { OrderPdfService } from './order-pdf.service';
 import { OrdersReportPdfService } from './orders-report-pdf.service';
+import { ReportMailerService } from './report-mailer.service';
+import { ReportRecipientsService } from './report-recipients.service';
 import { OrdersController } from './orders.controller';
 import { OrdersService } from './orders.service';
 import { OrderStatus } from './entities/order.entity';
+
+const destinatarios = {
+  resolver: jest.fn().mockResolvedValue({
+    correos: [],
+    detalle: [],
+    rolesVacios: [],
+    sinCorreo: [],
+  }),
+};
+const correo = {
+  enviar: jest.fn().mockResolvedValue({ enviados: [], fallidos: [] }),
+};
 
 describe('OrdersController · descarga del comprobante', () => {
   let controller: OrdersController;
@@ -37,6 +51,8 @@ describe('OrdersController · descarga del comprobante', () => {
         { provide: OrdersService, useValue: {} },
         { provide: OrderPdfService, useValue: pdfService },
         { provide: OrdersReportPdfService, useValue: reportePdf },
+        { provide: ReportRecipientsService, useValue: destinatarios },
+        { provide: ReportMailerService, useValue: correo },
       ],
     })
       .overrideGuard(class {})
@@ -69,6 +85,7 @@ describe('OrdersController · reporte de pedidos', () => {
   let ordersService: {
     findAllForReport: jest.Mock;
     totalesForReport: jest.Mock;
+    resumenPorPeriodo: jest.Mock;
   };
   let reportePdf: { generate: jest.Mock; nombreDelFichero: jest.Mock };
   let res: { set: jest.Mock };
@@ -93,6 +110,8 @@ describe('OrdersController · reporte de pedidos', () => {
         { provide: OrdersService, useValue: ordersService },
         { provide: OrderPdfService, useValue: {} },
         { provide: OrdersReportPdfService, useValue: reportePdf },
+        { provide: ReportRecipientsService, useValue: destinatarios },
+        { provide: ReportMailerService, useValue: correo },
       ],
     })
       .overrideGuard(class {})

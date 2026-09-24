@@ -1,5 +1,6 @@
 import type { Response } from 'express';
 import {
+  BadRequestException,
   Body,
   Controller,
   Delete,
@@ -27,6 +28,7 @@ import { Roles } from '../common/decorators/roles.decorator';
 import { RequirePermission } from '../permissions/decorators/require-permission.decorator';
 import { Role } from '../users/entities/user.entity';
 import { AdminOrdersQueryDto } from './dto/admin-orders-query.dto';
+import { SendReportDto } from './dto/send-report.dto';
 import { OrderEventResponseDto } from '../order-events/dto/order-event-response.dto';
 import { OrderResponseDto } from './dto/order-response.dto';
 import {
@@ -42,6 +44,8 @@ import {
   OrdersReportPdfService,
   type Periodo,
 } from './orders-report-pdf.service';
+import { ReportMailerService } from './report-mailer.service';
+import { ReportRecipientsService } from './report-recipients.service';
 import { OrdersService } from './orders.service';
 
 // Backoffice order management, gated per-action by managed permissions
@@ -57,6 +61,8 @@ export class OrdersController {
     private readonly ordersService: OrdersService,
     private readonly orderPdfService: OrderPdfService,
     private readonly ordersReportPdfService: OrdersReportPdfService,
+    private readonly reportRecipients: ReportRecipientsService,
+    private readonly reportMailer: ReportMailerService,
   ) {}
 
   @Get()
@@ -284,6 +290,73 @@ export class OrdersController {
       'Content-Length': pdf.length.toString(),
     });
     return new StreamableFile(pdf);
+  }
+
+  @Post('report/email')
+  @RequirePermission({ module: 'orders', action: 'read' })
+  @ApiOperation({
+    summary: 'Mandar el reporte por correo',
+    description:
+      'Genera el mismo PDF y lo manda adjunto a las direcciones indicadas y ' +
+      'a **todos los usuarios de los roles** elegidos. Los roles se resuelven ' +
+      'en el momento del envío: quien entre mañana en el rol lo recibirá sin ' +
+      'que nadie actualice una lista. Devuelve a quién se le mandó y a quién ' +
+      'no se pudo.',
+  })
+  async enviarReporte(
+    @Body() dto: SendReportDto,
+    @Req() req: AuthenticatedUserRequest,
+  ) {
+    const filtros = dto.filtros ?? {};
+    const destinatarios = await this.reportRecipients.resolver(
+      dto.emails,
+      dto.roleIds,
+    );
+    if (!destinatarios.correos.length) {
+      throw new BadRequestException(
+        'No hay ninguna dirección a la que mandar el reporte: ni correos escritos ni usuarios con correo en los roles elegidos.',
+      );
+    }
+
+    const [{ pedidos, recortado }, totales, filasResumen] = await Promise.all([
+      this.ordersService.findAllForReport(filtros),
+      this.ordersService.totalesForReport(filtros),
+      dto.groupBy
+        ? this.ordersService.resumenPorPeriodo(filtros, dto.groupBy)
+        : Promise.resolve([]),
+    ]);
+    const pdf = await this.ordersReportPdfService.generate(
+      pedidos,
+      totales,
+      filtros,
+      recortado,
+      dto.groupBy ? { periodo: dto.groupBy, filas: filasResumen } : null,
+    );
+
+    const solicitante =
+      [req.user?.firstName, req.user?.lastName].filter(Boolean).join(' ') ||
+      req.user?.email ||
+      null;
+    const envio = await this.reportMailer.enviar(
+      destinatarios.correos,
+      pdf,
+      this.ordersReportPdfService.nombreDelFichero(filtros),
+      {
+        criterios: this.ordersReportPdfService.criteriosEnPalabras(filtros),
+        pedidos: totales.reduce((suma, t) => suma + t.pedidos, 0),
+        importe: totales
+          .reduce((suma, t) => suma + Number(t.importe), 0)
+          .toFixed(2),
+        solicitante,
+      },
+    );
+
+    return {
+      ...envio,
+      destinatarios: destinatarios.detalle,
+      rolesVacios: destinatarios.rolesVacios,
+      sinCorreo: destinatarios.sinCorreo,
+    };
   }
 
   @Get(':id/pdf')
