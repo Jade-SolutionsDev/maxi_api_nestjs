@@ -3,6 +3,7 @@ import {
   orderCancelled,
   orderDelivered,
   orderShipped,
+  orderReceived,
   paymentReceived,
   refundCompleted,
   welcome,
@@ -16,6 +17,7 @@ const order: OrderMailData = {
   pickupAddress: 'Calle 23 esq. 43, Cárdenas',
   whatsapp: '+53 5251 9414',
   storeUrl: null,
+  orderUrl: null,
 };
 
 describe('plantillas de correo', () => {
@@ -131,6 +133,72 @@ describe('plantillas de correo', () => {
     expect(orderDelivered(order).subject).toContain('ORD-20260001');
     expect(orderCancelled(order, null).subject).toContain('ORD-20260001');
   });
+
+  describe('pedido recibido: el primero, y todavía sin pagar', () => {
+    const conTienda: OrderMailData = {
+      ...order,
+      storeUrl: 'https://www.maxihabana.com',
+      orderUrl: 'https://www.maxihabana.com/pedidos/abc-123',
+    };
+
+    it('lleva el número del pedido y el total, que es lo que le van a pedir', () => {
+      const { subject, html } = orderReceived(conTienda);
+
+      expect(subject).toContain('ORD-20260001');
+      expect(html).toContain('ORD-20260001');
+      expect(html).toContain('$60.00');
+    });
+
+    it('lleva el botón para ir a pagarlo', () => {
+      const { html } = orderReceived(conTienda);
+
+      expect(html).toContain('https://www.maxihabana.com/pedidos/abc-123');
+      expect(html).toContain('Pagar mi pedido');
+    });
+
+    it('sin enlace al pedido no pinta un botón roto', () => {
+      const { html } = orderReceived({ ...conTienda, orderUrl: null });
+
+      expect(html).not.toContain('Pagar mi pedido');
+      expect(html).not.toContain('href="null');
+    });
+
+    it('avisa de que la reserva caduca, que es lo que pierde pedidos', () => {
+      const { html } = orderReceived(conTienda);
+
+      expect(html).toContain('se cancela');
+    });
+
+    it('no dice que esté pagado ni promete fecha de entrega', () => {
+      const { html, subject } = orderReceived(conTienda);
+
+      expect(`${subject} ${html}`).not.toMatch(/pago recibido|ya está pagado/i);
+      expect(html).not.toMatch(/te lo entregamos el|fecha de entrega/i);
+    });
+
+    it('en texto plano la tabla no sale pegada', () => {
+      // Antes: «PedidoORD-20260001Se recoge en…», todo junto, porque al quitar
+      // las etiquetas no quedaba nada entre celda y celda.
+      const { text } = orderReceived(conTienda);
+
+      expect(text).toContain('Pedido: ORD-20260001');
+      expect(text).not.toContain('PedidoORD-20260001');
+    });
+
+    it('la versión de texto empieza por el título, no a media frase', () => {
+      const { text } = orderReceived(conTienda);
+
+      expect(text.startsWith('¡Listo! Tenemos tu pedido')).toBe(true);
+    });
+
+    it('tutea', () => {
+      const { html } = orderReceived(conTienda);
+
+      expect(html).not.toMatch(/\btenés\b|\bpodés\b|\bpagá\b/);
+      expect(html).toContain('tu pedido');
+    });
+  });
+
   describe('el pie y la marca, iguales en todos', () => {
     // Antes solo la bienvenida llevaba enlaces legales: las otras siete salían
     // sin política de privacidad ni términos, que es de lo primero que mira un
@@ -148,6 +216,7 @@ describe('plantillas de correo', () => {
     };
 
     it('todos los correos de pedido llevan los enlaces legales', () => {
+      expect(conEnlaces(orderReceived(conTienda).html)).toBe(true);
       expect(conEnlaces(paymentReceived(conTienda).html)).toBe(true);
       expect(conEnlaces(orderShipped(conTienda).html)).toBe(true);
       expect(conEnlaces(orderDelivered(conTienda).html)).toBe(true);

@@ -384,6 +384,21 @@ export class OrdersService {
 
     void this.initiatePayment(orderId, resolvedPayment);
 
+    // Tampoco se espera: el pedido ya está guardado y el correo no puede
+    // retrasar la respuesta ni tumbarla si el proveedor falla. Sale antes de
+    // que el cliente elija cómo pagar, que es cuando más falta le hace tener
+    // el número del pedido por escrito.
+    void this.orderMailer.orderReceived(orderId).catch((err) => {
+      // `dispatch` ya se traga sus errores, pero el `.catch()` es la garantía
+      // de que ningún fallo futuro ahí dentro se convierta en un rechazo sin
+      // atender: eso tumba el proceso de Node, y tumbarlo justo después de
+      // cobrar es la peor forma de perder una venta.
+      this.logger.error(
+        `No se pudo avisar por correo del pedido ${orderId}`,
+        err instanceof Error ? err.stack : String(err),
+      );
+    });
+
     return this.findOneForClient(client.id, orderId);
   }
 

@@ -122,6 +122,7 @@ describe('OrdersService', () => {
   let permissionsService: { hasPermission: jest.Mock };
   let orderEvents: { record: jest.Mock; listForOrder: jest.Mock };
   let mailer: {
+    orderReceived: jest.Mock;
     paymentReceived: jest.Mock;
     shipped: jest.Mock;
     delivered: jest.Mock;
@@ -217,6 +218,7 @@ describe('OrdersService', () => {
         ),
     };
     mailer = {
+      orderReceived: jest.fn().mockResolvedValue(null),
       paymentReceived: jest.fn().mockResolvedValue(null),
       shipped: jest.fn().mockResolvedValue(null),
       delivered: jest.fn().mockResolvedValue(null),
@@ -529,6 +531,20 @@ describe('OrdersService', () => {
       ).rejects.toBeInstanceOf(BadRequestException);
       expect(orderRepo.save).not.toHaveBeenCalled();
       expect(inventoryService.reserve).not.toHaveBeenCalled();
+    });
+
+    it('avisa al cliente por correo de que su pedido quedó guardado', async () => {
+      await service.checkout(makeClient(), {});
+
+      expect(mailer.orderReceived).toHaveBeenCalled();
+    });
+
+    it('un correo que falla no tumba la compra', async () => {
+      // El pedido ya está comprometido cuando se avisa: si el proveedor de
+      // correo se cae, la venta no se puede perder por eso.
+      mailer.orderReceived.mockRejectedValue(new Error('resend caído'));
+
+      await expect(service.checkout(makeClient(), {})).resolves.toBeDefined();
     });
 
     it('survives a payment-initiation failure: order stays pending', async () => {

@@ -2,7 +2,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
-import { SupportConfig } from '../config/configuration';
+import { StorefrontConfig, SupportConfig } from '../config/configuration';
 import { Order } from '../orders/entities/order.entity';
 import { MailService, SendResult } from './mail.service';
 import {
@@ -12,6 +12,7 @@ import {
   RenderedEmail,
   orderCancelled,
   orderDelivered,
+  orderReceived,
   orderShipped,
   paymentReceived,
   pickupReminder,
@@ -39,6 +40,20 @@ export class OrderMailerService {
 
   get configured(): boolean {
     return this.mail.configured;
+  }
+
+  /**
+   * El pedido acaba de crearse y no está pagado.
+   *
+   * Sale siempre que nace un pedido, aunque el cliente pague acto seguido y
+   * reciba el de pago a los dos minutos: son dos cosas distintas —«lo tenemos»
+   * y «ya está pagado»— y este lleva el número del pedido, que es lo que le
+   * piden si escribe. Quien no pague en el acto es justo quien más lo necesita.
+   */
+  async orderReceived(orderId: string): Promise<SendResult | null> {
+    return this.dispatch(orderId, 'order_received', (data) =>
+      orderReceived(data),
+    );
   }
 
   async paymentReceived(orderId: string): Promise<SendResult | null> {
@@ -159,6 +174,7 @@ export class OrderMailerService {
 
   private toMailData(order: Order): OrderMailData {
     const client = order.client;
+    const tienda = this.configService.get<StorefrontConfig>('storefront')?.url;
     const name =
       [client?.firstName, client?.lastName].filter(Boolean).join(' ').trim() ||
       null;
@@ -170,7 +186,10 @@ export class OrderMailerService {
       pickupAddress: this.pickupAddress(order),
       whatsapp:
         this.configService.get<SupportConfig>('support')?.whatsapp ?? '',
-      storeUrl: null,
+      // Estaba fijo a null, así que el pie con la política de privacidad y los
+      // términos no salía en ningún correo aunque el layout supiera armarlo.
+      storeUrl: tienda ?? null,
+      orderUrl: tienda ? `${tienda}/pedidos/${order.id}` : null,
     };
   }
 
