@@ -91,6 +91,15 @@ const money = (amount: string, currency = 'USD'): string =>
 /** Cantidades enteras —pedidos, unidades—: sin decimales, con miles. */
 const cantidad = (valor: number): string => valor.toLocaleString('en-US');
 
+/**
+ * «1 pedido» y «47 pedidos».
+ *
+ * Un asunto que dice «1 pedidos» se lee como descuido, y es lo primero que ve
+ * quien recibe el reporte.
+ */
+const plural = (valor: number, singular: string, plural: string): string =>
+  `${cantidad(valor)} ${valor === 1 ? singular : plural}`;
+
 const greeting = (name: string | null): string =>
   name ? `Hola, ${esc(name)}:` : 'Hola:';
 
@@ -742,7 +751,7 @@ export const reportReady = (data: ReportMailData): RenderedEmail => {
   ].join('\n');
 
   return {
-    subject: `Reporte de pedidos · ${cantidad(data.pedidos)} pedidos · ${money(data.importe, 'USD')}`,
+    subject: `Reporte de pedidos · ${plural(data.pedidos, 'pedido', 'pedidos')} · ${money(data.importe, 'USD')}`,
     ...render({
       title: 'Reporte de pedidos',
       body,

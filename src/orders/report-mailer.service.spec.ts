@@ -107,4 +107,16 @@ describe('ReportMailerService', () => {
     expect(subject).toContain('47');
     expect(subject).toContain('12,480.00');
   });
+  // «1 pedidos» en el asunto se lee como descuido, y es lo primero que ve
+  // quien recibe el reporte.
+  it('concuerda el singular en el asunto', async () => {
+    await service.enviar(['ana@maxihabana.com'], pdf, 'pedidos.pdf', {
+      ...datos,
+      pedidos: 1,
+      importe: '1455.00',
+    });
+    const { subject } = mail.send.mock.calls[0][0] as { subject: string };
+    expect(subject).toContain('1 pedido ');
+    expect(subject).not.toContain('1 pedidos');
+  });
 });
