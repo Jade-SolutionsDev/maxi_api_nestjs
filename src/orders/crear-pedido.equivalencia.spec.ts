@@ -8,7 +8,12 @@ import { InventoryService } from '../inventory/inventory.service';
 import { ProductsService } from '../products/products.service';
 import { Role, User } from '../users/entities/user.entity';
 import { OrderItem } from './entities/order-item.entity';
-import { Order, OrderStatus, PaymentStatus } from './entities/order.entity';
+import {
+  FulfillmentType,
+  Order,
+  OrderStatus,
+  PaymentStatus,
+} from './entities/order.entity';
 import { OrdersService } from './orders.service';
 import { ClientAddressesService } from '../client-addresses/client-addresses.service';
 import { FulfillmentService } from '../fulfillment/fulfillment.service';
@@ -340,6 +345,30 @@ describe('la tienda y el panel crean el mismo pedido', () => {
     expect(porLaTienda.pedido.promiseDays).toBe(3);
     expect(porLaTienda.pedido.total).toBe('17.50');
 
+    // Ancla ABSOLUTA para las reservas: el mismo defecto que ya se cazó
+    // arriba para `promiseDays` y `total`, y que le da nombre a esta prueba
+    // («aparta el mismo stock»). Si `crearPedido()` dejara de reservar,
+    // las DOS vías darían `[]` por igual y `expect(porElPanel.reservas)
+    // .toEqual(porLaTienda.reservas)`, más abajo, seguiría en verde sin que
+    // se apartara ni una unidad. El valor de abajo es lo que de verdad hace
+    // falta apartar para esta línea: 2 unidades de `prod-2`, en los
+    // almacenes que cubren `mun-1` (`coveringLocationIds` → `['loc-1']`),
+    // sin preferencia porque es entrega a domicilio, no recogida.
+    expect(porLaTienda.reservas).toEqual([
+      [
+        'prod-2',
+        2,
+        { allowedLocationIds: ['loc-1'], preferredLocationId: undefined },
+      ],
+    ]);
+    // Mismo motivo para `cobertura` y `resolucionDeEntrega`: los dos salen de
+    // `.at(-1)` sobre un array de llamadas, y valen `undefined` si nadie
+    // llamó al resolutor compartido. Sin este ancla, dos `undefined` (uno por
+    // camino) pasarían la comparación relativa de abajo igual que dos
+    // valores reales e iguales.
+    expect(porLaTienda.cobertura).toBeDefined();
+    expect(porLaTienda.resolucionDeEntrega).toBeDefined();
+
     jest.clearAllMocks();
 
     // --- Vía 2: el alta desde el panel ---
@@ -540,5 +569,121 @@ describe('la tienda y el panel crean el mismo pedido', () => {
       idCard: null,
       contactPhone: '55512345',
     });
+  });
+
+  it('recogida con cobro ya hecho: el pedido entero sale igual, salvo lo que diverge por diseño', async () => {
+    // El escenario más rico de los cuatro: recogida (no entrega) Y con el
+    // cobro ya sellado por el panel (`cobro`), la única combinación que
+    // hasta ahora solo se probaba con aserciones sueltas. `checkout()` no
+    // tiene equivalente a `cobro`: la tienda jamás abre un pedido ya
+    // cobrado, así que ESTE camino nace pendiente a propósito, y eso es lo
+    // que hace legítimas (no un defecto) las exclusiones de abajo.
+    const contactoRecogida = {
+      recipientName: 'Aitor Bravo',
+      idCard: '99050112345',
+      contactPhone: '52345678',
+    };
+
+    fulfillmentService.resolveChoice.mockResolvedValue({
+      type: FulfillmentType.PICKUP,
+      fee: '0.00',
+      deliveryOptionId: null,
+      deliveryOptionLabel: null,
+      pickupLocationId: 'loc-9',
+      pickupAddressId: null,
+      pickupAddressSnapshot: null,
+      promiseDays: 1,
+    });
+
+    // --- Vía 1: el checkout de la tienda (recogida, sin cobro: no existe
+    // forma de que la tienda entregue un pedido ya cobrado) ---
+    cartService.getCart.mockResolvedValue({
+      items: [cartLine],
+      totalItems: 2,
+      subtotal: 15,
+    });
+    orderRepo.findOne.mockResolvedValue(makeOrder({ items: [] }));
+
+    await service.checkout(makeClient(), {
+      fulfillmentType: FulfillmentType.PICKUP,
+      contact: contactoRecogida,
+    });
+    // Copia, no referencia: aunque este camino no tiene hook que siga
+    // mutando `order` después del guardado, se copia igual para no depender
+    // de que eso se mantenga así — es el mismo motivo que obliga a copiar
+    // más abajo, donde sí hace falta.
+    const porLaTienda = {
+      pedido: { ...orderRepo.save.mock.calls.at(-1)?.[0] },
+    };
+
+    jest.clearAllMocks();
+
+    // --- Vía 2: el alta desde el panel, recogida y cobrada ya ---
+    orderRepo.findOne.mockResolvedValue(makeOrder({ items: [] }));
+    productsService.availableForArea = jest
+      .fn()
+      .mockResolvedValue(new Map([['prod-2', 10]]));
+    clientRepo.findOne.mockResolvedValue({
+      id: 'client-1',
+      defaultMunicipalityId: 'mun-1',
+      isActive: true,
+    });
+
+    await service.crearParaCliente(makeUser(Role.ADMIN), {
+      clientId: 'client-1',
+      items: [mismasLineas],
+      fulfillmentType: FulfillmentType.PICKUP,
+      contact: contactoRecogida,
+      cobro: { paymentMethod: 'manual', reference: 'TRF-1234' },
+    });
+    // Copia OBLIGATORIA aquí, no opcional: dentro de `crearPedido`, el hook
+    // del cobro (`alFinalizar`) reutiliza el MISMO objeto `order` que ya se
+    // había guardado antes (con el número y el tracking) y lo vuelve a
+    // guardar tras sellarlo — misma referencia en `orderRepo.save.mock.calls`
+    // para las dos llamadas. Jest guarda los argumentos por REFERENCIA, no
+    // por valor: sin copiar en este instante, cualquier lectura de una
+    // llamada anterior a ésta (`mock.calls[n]` para un `n` que no sea el
+    // último) vería el pedido ya en PAID, aunque en ese momento todavía
+    // estuviera PENDING. Mismo defecto, mismo arreglo que ya usa
+    // `orders.service.spec.ts` (ver su comentario en el describe del cobro).
+    const porElPanel = {
+      pedido: { ...orderRepo.save.mock.calls.at(-1)?.[0] },
+    };
+
+    // El pedido ENTERO, salvo lo que diverge por diseño entre los dos
+    // caminos:
+    // - `trackingId`: aleatorio (randomBytes), nunca puede coincidir entre
+    //   dos pedidos (igual que en la primera prueba de este fichero).
+    // - `deliveryAddress`: aquí los dos caminos lo dejan en `null` (una
+    //   recogida no lleva dirección), pero NO se compara ni siquiera así:
+    //   la tienda lo construiría con `snapshotAddress` sobre una dirección
+    //   propia, y el panel lo manda ya montado tal cual llega — dos formas
+    //   distintas de construirlo que en un escenario con dirección no
+    //   coincidirían, y da igual para el caso.
+    // - `paymentStatus`, `paymentRef`, `paidAt`, `promisedAt`: SOLO el panel
+    //   puede nacer ya cobrado (`cobro`); `checkout()` no tiene ningún
+    //   `cobro` que ofrecer y el pedido de la tienda queda PENDING siempre.
+    //   Es justo la diferencia que motiva este escenario, no un defecto —
+    //   se comprueban aparte, en concreto, un poco más abajo.
+    const sinLoQueDivergePorDiseno = (pedido: Record<string, unknown>) => ({
+      ...pedido,
+      trackingId: null,
+      deliveryAddress: null,
+      paymentStatus: null,
+      paymentRef: null,
+      paidAt: null,
+      promisedAt: null,
+    });
+    expect(sinLoQueDivergePorDiseno(porElPanel.pedido)).toEqual(
+      sinLoQueDivergePorDiseno(porLaTienda.pedido),
+    );
+
+    // Lo que sí tiene que ser distinto, en concreto: el panel nace cobrado y
+    // la tienda no.
+    expect(porElPanel.pedido.paymentStatus).toBe(PaymentStatus.PAID);
+    expect(porElPanel.pedido.paymentRef).toBe('TRF-1234');
+    expect(porElPanel.pedido.paidAt).toBeInstanceOf(Date);
+    expect(porLaTienda.pedido.paymentStatus).toBe(PaymentStatus.PENDING);
+    expect(porLaTienda.pedido.paidAt ?? null).toBeNull();
   });
 });
