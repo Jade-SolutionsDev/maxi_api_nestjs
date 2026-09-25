@@ -86,11 +86,16 @@ export const MODULE_ACTIONS: Record<string, readonly string[]> = {
   // Support inbox + reply templates share one module; `reply` is split from
   // `update` so triage and customer-facing replies are separately grantable.
   contact: [...CRUD, 'reply'],
+  // `create` es crear un pedido en nombre de un cliente, desde el panel: para
+  // quien compra por WhatsApp o por teléfono. Va aparte de `update-status`
+  // porque mueve stock e inventa deuda, que no es lo mismo que avanzar un
+  // pedido que ya existe.
   // `update-status-direct` allows jumping straight to any status (manual
   // warehouse sales); `update-status` alone only advances fulfillment.
   orders: [
     'list',
     'read',
+    'create',
     'update-status',
     'update-status-direct',
     'update-payment-status',

@@ -185,6 +185,13 @@ describe('PermissionsService', () => {
       expect(concedidos.filter((p) => p.startsWith('orders:'))).toHaveLength(0);
     });
 
+    it('ofrece «create» en pedidos, separado de los cambios de estado', () => {
+      expect(MODULE_ACTIONS.orders).toContain('create');
+      // Crear un pedido ajeno mueve stock e inventa deuda: no puede venir
+      // colgado del permiso de avanzar uno que ya existe.
+      expect(MODULE_ACTIONS.orders).toContain('update-status');
+    });
+
     it('seeds only missing permission rows (diff, not blind insert)', async () => {
       const [first, ...rest] = catalogRows;
       permissionRepo.find
