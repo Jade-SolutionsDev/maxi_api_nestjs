@@ -328,6 +328,18 @@ describe('la tienda y el panel crean el mismo pedido', () => {
       resolucionDeEntrega: fulfillmentService.resolveChoice.mock.calls.at(-1),
     };
 
+    // Ancla ABSOLUTA, no relativa: una prueba de equivalencia compara los dos
+    // caminos ENTRE SÍ, nunca contra la verdad. Como los dos comparten
+    // crearPedido(), si `orders.service.ts` dejara de persistir `promiseDays`
+    // (o lo persistiera mal), las dos vías degradarían igual —las dos
+    // valdrían `undefined`, o las dos el mismo valor equivocado— y todas las
+    // comparaciones de abajo seguirían en verde. `toEqual` tampoco lo vería:
+    // ignora las claves que faltan en los dos objetos por igual. Sin este
+    // ancla, y sin ninguna otra prueba del repo que verifique que crear un
+    // pedido persiste el plazo, ese defecto no lo detectaría nadie.
+    expect(porLaTienda.pedido.promiseDays).toBe(3);
+    expect(porLaTienda.pedido.total).toBe('17.50');
+
     jest.clearAllMocks();
 
     // --- Vía 2: el alta desde el panel ---
@@ -410,12 +422,16 @@ describe('la tienda y el panel crean el mismo pedido', () => {
     // haría que la prueba fallara por algo que no es un defecto.
   });
 
-  it('el precio sale del catálogo igual que en la tienda cuando el panel no pacta uno propio', async () => {
-    // Aquí el panel NO manda `unitPrice`: tiene que salir de la MISMA fórmula
-    // de catálogo que ya usa el carrito (basePrice con su descuento), no de
-    // un número que la propia prueba puso a mano en las dos vías. La línea
-    // de mismasLineas con `unitPrice: 7.5` no puede detectar que esta fórmula
-    // se separe algún día entre los dos caminos: cortocircuita el cálculo.
+  it('sin unitPrice pactado, el panel calcula el precio con la fórmula entera del catálogo', async () => {
+    // OJO con lo que esta prueba compara y lo que no: el lado "tienda" sigue
+    // siendo el mismo mock de siempre — `cartLine.unitPrice: 7.5` es un
+    // número que puse yo, no algo que calcule ninguna fórmula del carrito.
+    // Esta prueba NO compara "la fórmula del carrito" contra "la fórmula del
+    // panel"; compara la fórmula que SÍ corre de verdad en resolveLines()
+    // (basePrice con su descuento, cuando el panel no manda `unitPrice`)
+    // contra un número puesto a mano que sabemos que tiene que dar 7,50. La
+    // línea de `mismasLineas`, que sí manda `unitPrice: 7.5`, cortocircuita
+    // esa fórmula y por eso no sirve para esto.
     cartService.getCart.mockResolvedValue({
       items: [cartLine],
       totalItems: 2,
@@ -434,14 +450,16 @@ describe('la tienda y el panel crean el mismo pedido', () => {
     productsService.availableForArea = jest
       .fn()
       .mockResolvedValue(new Map([['prod-2', 10]]));
-    // Ficha de catálogo que vale EXACTAMENTE lo mismo que cartLine (7,50 sin
-    // descuento): así la prueba compara fórmulas de precio, no compara un
-    // número pactado contra otro.
+    // basePrice y discount elegidos para que el TÉRMINO DEL DESCUENTO no
+    // valga 1: con `discount: '0'`, `1 - discount/100` da 1 y la prueba
+    // seguiría en verde aunque alguien borrara ese término de
+    // `resolveLines()`. Con 10,00 al 25% sí se ejercita la fórmula completa,
+    // y el resultado (7,50) es el mismo que cartLine para poder comparar.
     productsService.findOne = jest.fn().mockResolvedValue({
       id: 'prod-2',
       name: 'Malta 355ml',
-      basePrice: '7.50',
-      discount: '0',
+      basePrice: '10.00',
+      discount: '25',
       isActive: true,
       deletedAt: null,
     });
