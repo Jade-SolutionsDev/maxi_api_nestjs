@@ -53,10 +53,16 @@ function makeOrder(overrides: Partial<Order> = {}): Order {
   } as Order;
 }
 
+// `prod-2` a propósito, no `prod-1`: es lo que devuelve el fixture de
+// `productsService.findOne` en el `beforeEach`. Si la línea pidiera `prod-1`,
+// el panel llamaría a `findOne('prod-1')` y el mock le devolvería igual un
+// producto con `id: 'prod-2'` — un catálogo que se contradice a sí mismo.
+// Inocuo mientras nadie compare las líneas del pedido, pero confuso para
+// quien lo haga.
 const cartLine = {
-  productId: 'prod-1',
-  name: 'Cola 1L',
-  slug: 'cola-1l',
+  productId: 'prod-2',
+  name: 'Malta 355ml',
+  slug: 'malta-355ml',
   imageUrl: null,
   format: null,
   measureUnit: 'unidad',
@@ -266,12 +272,32 @@ describe('la tienda y el panel crean el mismo pedido', () => {
     service = module.get(OrdersService);
   });
 
-  // El mismo pedido por las dos vías: dos unidades de prod-1 a 7,50, entrega
+  // El mismo pedido por las dos vías: dos unidades de prod-2 a 7,50, entrega
   // a domicilio sin recargo. Si los dos caminos divergen algún día en stock,
   // totales o plazo, esta prueba lo dice antes que un cliente.
-  const mismasLineas = { productId: 'prod-1', quantity: 2, unitPrice: 7.5 };
+  const mismasLineas = { productId: 'prod-2', quantity: 2, unitPrice: 7.5 };
+
+  // Plazo y tarifa NO triviales a propósito: con `promiseDays: undefined` (el
+  // valor por defecto del mock) o `fee: '0.00'`, comparar esos campos entre
+  // los dos caminos es una tautología — los dos leen el mismo mock y los dos
+  // guardan lo mismo aunque `crearPedido` dejara de persistirlos. Con un
+  // valor real, la comparación deja de ser gratis.
+  function fulfillmentNoTrivial() {
+    return {
+      type: 'delivery',
+      fee: '2.50',
+      deliveryOptionId: null,
+      deliveryOptionLabel: null,
+      pickupLocationId: null,
+      pickupAddressId: null,
+      pickupAddressSnapshot: null,
+      promiseDays: 3,
+    };
+  }
 
   it('aparta el mismo stock, calcula el mismo total y congela el mismo plazo', async () => {
+    fulfillmentService.resolveChoice.mockResolvedValue(fulfillmentNoTrivial());
+
     // --- Vía 1: el checkout de la tienda ---
     cartService.getCart.mockResolvedValue({
       items: [cartLine],
@@ -282,8 +308,24 @@ describe('la tienda y el panel crean el mismo pedido', () => {
 
     await service.checkout(makeClient(), {});
     const porLaTienda = {
-      reserva: inventoryService.reserve.mock.calls.at(-1),
+      // TODAS las reservas, no solo la última: con una sola línea da igual,
+      // pero si un día uno de los dos caminos aparta stock de más (o de
+      // menos) líneas que el otro, comparar solo `.at(-1)` no lo vería.
+      reservas: inventoryService.reserve.mock.calls.map((c: unknown[]) =>
+        c.slice(2),
+      ),
       pedido: orderRepo.save.mock.calls.at(-1)?.[0],
+      // Lo que cada camino le pide a los resolutores COMPARTIDOS, antes de
+      // llegar a crearPedido(). crearPedido() es la misma función para los
+      // dos, así que comparar solo su salida con entradas que la prueba ya
+      // igualó a mano es casi una tautología: lo que de verdad puede
+      // divergir es cómo cada llamador resuelve el municipio y la zona de
+      // cobertura ANTES de llamarlo (ej.: checkout cae a
+      // `client.defaultMunicipalityId`, crearParaCliente también — pero si
+      // uno de los dos dejara de hacerlo, esto lo detecta aunque
+      // crearPedido() nunca se entere).
+      cobertura: productsService.coveringLocationIds.mock.calls.at(-1),
+      resolucionDeEntrega: fulfillmentService.resolveChoice.mock.calls.at(-1),
     };
 
     jest.clearAllMocks();
@@ -297,7 +339,112 @@ describe('la tienda y el panel crean el mismo pedido', () => {
     orderRepo.findOne.mockResolvedValue(makeOrder({ items: [] }));
     productsService.availableForArea = jest
       .fn()
-      .mockResolvedValue(new Map([['prod-1', 10]]));
+      .mockResolvedValue(new Map([['prod-2', 10]]));
+    clientRepo.findOne.mockResolvedValue({
+      id: 'client-1',
+      defaultMunicipalityId: 'mun-1',
+      isActive: true,
+    });
+    // `jest.clearAllMocks()` limpia las llamadas registradas pero no borra
+    // `mockResolvedValue` (eso lo haría `mockReset`), así que
+    // `resolveChoice` sigue devolviendo `fulfillmentNoTrivial()` aquí sin
+    // volver a fijarlo.
+
+    await service.crearParaCliente(makeUser(Role.ADMIN), {
+      clientId: 'client-1',
+      items: [mismasLineas],
+    });
+    const porElPanel = {
+      reservas: inventoryService.reserve.mock.calls.map((c: unknown[]) =>
+        c.slice(2),
+      ),
+      pedido: orderRepo.save.mock.calls.at(-1)?.[0],
+      cobertura: productsService.coveringLocationIds.mock.calls.at(-1),
+      resolucionDeEntrega: fulfillmentService.resolveChoice.mock.calls.at(-1),
+    };
+
+    // Mismos productos, mismas cantidades, mismos almacenes permitidos —
+    // línea por línea, no solo la última.
+    expect(porElPanel.reservas).toEqual(porLaTienda.reservas);
+    // Mismo municipio y misma zona de cobertura resueltos ANTES de crear el
+    // pedido: si uno de los dos caminos dejara de resolverlos igual, esto
+    // falla aunque crearPedido() sea idéntico para los dos.
+    expect(porElPanel.cobertura).toEqual(porLaTienda.cobertura);
+    expect(porElPanel.resolucionDeEntrega).toEqual(
+      porLaTienda.resolucionDeEntrega,
+    );
+
+    // El pedido ENTERO, no seis campos elegidos a dedo: un campo nuevo que
+    // alguien añada a Order queda cubierto solo, sin que nadie tenga que
+    // acordarse de sumarlo aquí.
+    //
+    // Lo único que se excluye, y por qué:
+    // - `trackingId`: 32 bytes aleatorios que `crearPedido` genera de
+    //   nuevo en cada pedido (randomBytes). Dos pedidos "iguales" nunca
+    //   pueden compartirlo; comparar el valor real compararía aleatoriedad,
+    //   no diseño.
+    expect({ ...porElPanel.pedido, trackingId: null }).toEqual({
+      ...porLaTienda.pedido,
+      trackingId: null,
+    });
+
+    // Las mismas aserciones concretas de antes, ADEMÁS de la comparación
+    // completa: si algo se rompe, dicen exactamente qué campo fue, en vez de
+    // forzar a leer un diff de objeto entero.
+    expect(porElPanel.pedido.subtotal).toBe(porLaTienda.pedido.subtotal);
+    expect(porElPanel.pedido.total).toBe(porLaTienda.pedido.total);
+    expect(porElPanel.pedido.promiseDays).toBe(porLaTienda.pedido.promiseDays);
+    expect(porElPanel.pedido.fulfillmentType).toBe(
+      porLaTienda.pedido.fulfillmentType,
+    );
+    expect(porElPanel.pedido.status).toBe(porLaTienda.pedido.status);
+    expect(porElPanel.pedido.paymentStatus).toBe(
+      porLaTienda.pedido.paymentStatus,
+    );
+
+    // Deliberadamente FUERA de la comparación —ni en el objeto entero (no
+    // forman parte de la fila de `orders`) ni en aserciones aparte—: el
+    // `actor` del evento de creación (empleado vs. cliente) y el aviso por
+    // correo / vaciado de carrito (uno abre el carrito, el otro no lo toca).
+    // Esas son las diferencias legítimas entre los dos caminos; compararlas
+    // haría que la prueba fallara por algo que no es un defecto.
+  });
+
+  it('el precio sale del catálogo igual que en la tienda cuando el panel no pacta uno propio', async () => {
+    // Aquí el panel NO manda `unitPrice`: tiene que salir de la MISMA fórmula
+    // de catálogo que ya usa el carrito (basePrice con su descuento), no de
+    // un número que la propia prueba puso a mano en las dos vías. La línea
+    // de mismasLineas con `unitPrice: 7.5` no puede detectar que esta fórmula
+    // se separe algún día entre los dos caminos: cortocircuita el cálculo.
+    cartService.getCart.mockResolvedValue({
+      items: [cartLine],
+      totalItems: 2,
+      subtotal: 15,
+    });
+    orderRepo.findOne.mockResolvedValue(makeOrder({ items: [] }));
+
+    await service.checkout(makeClient(), {});
+    const porLaTienda = {
+      pedido: orderRepo.save.mock.calls.at(-1)?.[0],
+    };
+
+    jest.clearAllMocks();
+
+    orderRepo.findOne.mockResolvedValue(makeOrder({ items: [] }));
+    productsService.availableForArea = jest
+      .fn()
+      .mockResolvedValue(new Map([['prod-2', 10]]));
+    // Ficha de catálogo que vale EXACTAMENTE lo mismo que cartLine (7,50 sin
+    // descuento): así la prueba compara fórmulas de precio, no compara un
+    // número pactado contra otro.
+    productsService.findOne = jest.fn().mockResolvedValue({
+      id: 'prod-2',
+      name: 'Malta 355ml',
+      basePrice: '7.50',
+      discount: '0',
+      isActive: true,
+      deletedAt: null,
+    });
     clientRepo.findOne.mockResolvedValue({
       id: 'client-1',
       defaultMunicipalityId: 'mun-1',
@@ -306,31 +453,13 @@ describe('la tienda y el panel crean el mismo pedido', () => {
 
     await service.crearParaCliente(makeUser(Role.ADMIN), {
       clientId: 'client-1',
-      items: [mismasLineas],
+      items: [{ productId: 'prod-2', quantity: 2 }], // sin unitPrice
     });
     const porElPanel = {
-      reserva: inventoryService.reserve.mock.calls.at(-1),
       pedido: orderRepo.save.mock.calls.at(-1)?.[0],
     };
 
-    // Mismo producto, misma cantidad, mismos almacenes permitidos.
-    expect(porElPanel.reserva?.slice(2)).toEqual(porLaTienda.reserva?.slice(2));
-    // Mismo dinero y mismo compromiso de entrega.
     expect(porElPanel.pedido.subtotal).toBe(porLaTienda.pedido.subtotal);
     expect(porElPanel.pedido.total).toBe(porLaTienda.pedido.total);
-    expect(porElPanel.pedido.promiseDays).toBe(porLaTienda.pedido.promiseDays);
-    expect(porElPanel.pedido.fulfillmentType).toBe(
-      porLaTienda.pedido.fulfillmentType,
-    );
-    // Y el mismo estado de salida: pendiente de pago.
-    expect(porElPanel.pedido.status).toBe(porLaTienda.pedido.status);
-    expect(porElPanel.pedido.paymentStatus).toBe(
-      porLaTienda.pedido.paymentStatus,
-    );
-    // Deliberadamente FUERA de la comparación: `actor` en el evento de
-    // creación (empleado vs. cliente) y el aviso por correo (uno abre el
-    // carrito, el otro no lo toca). Esas son las diferencias legítimas entre
-    // los dos caminos; compararlas también haría que la prueba fallara por
-    // algo que no es un defecto.
   });
 });
