@@ -616,6 +616,15 @@ describe('la tienda y el panel crean el mismo pedido', () => {
       pedido: { ...orderRepo.save.mock.calls.at(-1)?.[0] },
     };
 
+    // Anclas ABSOLUTAS, el mismo defecto ya cazado en la primera prueba de
+    // este fichero: los dos caminos comparten `crearPedido` y aquí les doy
+    // el MISMO mock de `resolveChoice`, así que si el núcleo dejara de
+    // persistir `pickupLocationId` o de congelar `promiseDays`, los dos
+    // lados darían `undefined` por igual y el `toEqual` de más abajo
+    // seguiría en verde sin haber guardado nada de eso.
+    expect(porLaTienda.pedido.pickupLocationId).toBe('loc-9');
+    expect(porLaTienda.pedido.promiseDays).toBe(1);
+
     jest.clearAllMocks();
 
     // --- Vía 2: el alta desde el panel, recogida y cobrada ya ---
