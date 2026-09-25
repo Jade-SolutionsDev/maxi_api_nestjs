@@ -12,6 +12,7 @@ describe('MailService', () => {
     fromAddress?: string;
     replyTo?: string;
     configured: boolean;
+    plantillasApagadas?: string[];
   };
 
   const build = async (): Promise<MailService> => {
@@ -199,5 +200,57 @@ describe('MailService', () => {
 
     const cuerpo = JSON.parse(fetchMock.mock.calls[0][1].body as string);
     expect('attachments' in cuerpo).toBe(false);
+  });
+
+  describe('plantillas apagadas', () => {
+    const encendido = {
+      apiKey: 'k',
+      fromAddress: 'Maxi <no-reply@x.cu>',
+      configured: true,
+    };
+
+    it('no manda una plantilla apagada, aunque haya credenciales', async () => {
+      resend = { ...encendido, plantillasApagadas: ['order_received'] };
+      service = await build();
+      const fetchMock = jest.fn();
+      global.fetch = fetchMock;
+
+      const result = await service.send({
+        ...email,
+        template: 'order_received',
+      });
+
+      expect(fetchMock).not.toHaveBeenCalled();
+      expect(result.status).toBe(EmailStatus.SKIPPED);
+      expect(saved[0]).toMatchObject({
+        template: 'order_received',
+        status: EmailStatus.SKIPPED,
+      });
+      expect(saved[0].errorMessage).toContain('MAIL_TEMPLATES_OFF');
+    });
+
+    it('apagar una plantilla no apaga las demás', async () => {
+      resend = { ...encendido, plantillasApagadas: ['order_received'] };
+      service = await build();
+      const fetchMock = jest.fn().mockResolvedValue({
+        ok: true,
+        json: () => Promise.resolve({ id: 'res-1' }),
+      });
+      global.fetch = fetchMock;
+
+      const result = await service.send({
+        ...email,
+        template: 'payment_received',
+      });
+
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+      expect(result.status).toBe(EmailStatus.SENT);
+    });
+
+    it('la lista vacía no apaga nada', async () => {
+      resend = { ...encendido, plantillasApagadas: [] };
+      service = await build();
+      expect(service.apagada('order_received')).toBe(false);
+    });
   });
 });

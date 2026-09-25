@@ -114,6 +114,19 @@ export interface ResendConfig {
   replyTo: string | undefined;
   /** Credentials present. Platform email replies stay disabled without this. */
   configured: boolean;
+  /**
+   * Plantillas que no se mandan en este entorno, por clave (`order_received`,
+   * `order_cancelled_payment_not_received`, …).
+   *
+   * Existe porque el volumen y el destinatario de un correo no son la misma
+   * decisión que su código. En producción el 92% de los pedidos nacen y
+   * caducan sin pagarse (3.173 de 3.441 en el mes previo al 25-sep-2026): los
+   * avisos de «pedido recibido» y de caducidad irían a gente que abandonó el
+   * carrito, unos 220 correos diarios que nadie pidió. Quemarían la
+   * reputación del dominio, que es nuevo, y con ella los avisos que sí
+   * importan. Se apagan por entorno para poder seguir probándolos en staging.
+   */
+  plantillasApagadas: string[];
 }
 
 /** Datos de contacto que aparecen en los correos al cliente. */
@@ -293,6 +306,10 @@ export const resendConfig = (): ResendConfig => {
     fromAddress,
     replyTo: process.env.RESEND_REPLY_TO,
     configured: isConfigured(apiKey, fromAddress),
+    plantillasApagadas: (process.env.MAIL_TEMPLATES_OFF ?? '')
+      .split(',')
+      .map((clave) => clave.trim())
+      .filter(Boolean),
   };
 };
 

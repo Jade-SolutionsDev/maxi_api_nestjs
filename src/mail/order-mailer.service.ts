@@ -80,12 +80,20 @@ export class OrderMailerService {
     );
   }
 
-  /** El motivo elige el texto; `null` es la cancelación ordinaria. */
+  /**
+   * El motivo elige el texto; `null` es la cancelación ordinaria.
+   *
+   * El motivo entra también en la clave del registro
+   * (`order_cancelled_payment_not_received`) porque no son el mismo aviso:
+   * que un operario cancele un pedido y que caduque solo por no pagarse son
+   * cosas distintas para el cliente, se miden aparte y se apagan aparte.
+   */
   async cancelled(
     orderId: string,
     motivo: MotivoCancelacion = null,
   ): Promise<SendResult | null> {
-    return this.dispatch(orderId, 'order_cancelled', (data) =>
+    const clave = motivo ? `order_cancelled_${motivo}` : 'order_cancelled';
+    return this.dispatch(orderId, clave, (data) =>
       orderCancelled(data, motivo),
     );
   }

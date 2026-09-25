@@ -44,7 +44,12 @@ const SEND_TIMEOUT_MS = 10_000;
  * 1. **Cerrado por defecto.** Sin `RESEND_API_KEY` + `RESEND_FROM` no se
  *    inventa un transporte ni se falla en silencio: se registra `skipped` y se
  *    devuelve. Quien necesite tratarlo como error mira `configured` primero.
- * 2. **Nunca tumba la operación que lo llama.** Un reembolso confirmado sigue
+ * 2. **Apagable por plantilla.** `MAIL_TEMPLATES_OFF` corta plantillas
+ *    concretas sin tocar el código que las dispara: el envío se registra
+ *    `skipped` con el motivo y quien llamaba no se entera. Es lo que permite
+ *    tener un correo escrito y probado en staging y aún no encendido en
+ *    producción.
+ * 3. **Nunca tumba la operación que lo llama.** Un reembolso confirmado sigue
  *    confirmado aunque el correo no salga; el fallo queda en `email_log` con
  *    su mensaje para poder reenviarlo. Perder un aviso es malo, perder el
  *    registro de que devolvimos dinero sería peor.
@@ -79,8 +84,29 @@ export class MailService {
     return count > 0;
   }
 
+  /** ¿Está apagada esta plantilla en este entorno? */
+  apagada(template: string): boolean {
+    const resend = this.configService.get<ResendConfig>('resend');
+    return resend?.plantillasApagadas?.includes(template) ?? false;
+  }
+
   async send(email: OutgoingEmail): Promise<SendResult> {
     const resend = this.configService.get<ResendConfig>('resend');
+
+    // Antes que lo demás: una plantilla apagada no se manda ni aunque haya
+    // credenciales. Se registra igual, para que el día que se encienda se
+    // pueda ver cuántos se habrían mandado.
+    if (this.apagada(email.template)) {
+      this.logger.log(
+        `Correo "${email.template}" no enviado a ${email.to}: plantilla apagada en este entorno`,
+      );
+      return this.record(email, {
+        status: EmailStatus.SKIPPED,
+        providerId: null,
+        error: 'plantilla apagada por MAIL_TEMPLATES_OFF',
+      });
+    }
+
     if (!resend?.configured || !resend.apiKey || !resend.fromAddress) {
       this.logger.warn(
         `Correo "${email.template}" no enviado a ${email.to}: falta RESEND_API_KEY / RESEND_FROM`,

@@ -93,4 +93,28 @@ describe('OrderMailerService', () => {
     await expect(service.orderReceived('abc-123')).resolves.toBeNull();
     expect(mail.send).not.toHaveBeenCalled();
   });
+
+  /**
+   * El aviso de caducidad por impago y la cancelación que hace un operario
+   * comparten plantilla pero no son el mismo correo: se cuentan aparte y, en
+   * producción, el primero está apagado y el segundo no. Si los dos se
+   * registraran como `order_cancelled`, apagar uno apagaría los dos.
+   */
+  describe('la clave del registro distingue el motivo', () => {
+    it('sin motivo registra order_cancelled', async () => {
+      await service.cancelled('abc-123');
+      expect(mail.send).toHaveBeenCalledWith(
+        expect.objectContaining({ template: 'order_cancelled' }),
+      );
+    });
+
+    it('por impago registra order_cancelled_payment_not_received', async () => {
+      await service.cancelled('abc-123', 'payment_not_received');
+      expect(mail.send).toHaveBeenCalledWith(
+        expect.objectContaining({
+          template: 'order_cancelled_payment_not_received',
+        }),
+      );
+    });
+  });
 });
