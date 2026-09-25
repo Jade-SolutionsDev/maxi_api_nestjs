@@ -37,9 +37,13 @@ describe('Orders (e2e)', () => {
   let categories: Repository<Category>;
   let inventory: Repository<Inventory>;
   let productId: string;
+  let clientId: string;
 
   const clientAuth = { Authorization: 'Bearer mock:clerk_client_1' };
   const adminAuth = { Authorization: 'Bearer mock:clerk_admin_1' };
+  // Personal sin ningún permiso concedido: default-deny, igual que en
+  // rbac.e2e-spec.ts — no hace falta sembrar roles para probar el 403.
+  const staffAuth = { Authorization: 'Bearer mock:clerk_staff_1' };
   const locationId = '00000000-0000-4000-8000-000000000002';
 
   beforeAll(async () => {
@@ -61,14 +65,23 @@ describe('Orders (e2e)', () => {
 
   beforeEach(async () => {
     await clients.query(`TRUNCATE TABLE ${TABLES} CASCADE`);
-    await clients.save(
+    const client = await clients.save(
       clients.create({ clerkId: 'clerk_client_1', email: 'c1@example.com' }),
     );
+    clientId = client.id;
     await users.save(
       users.create({
         clerkId: 'clerk_admin_1',
         email: 'admin@example.com',
         role: Role.ADMIN,
+        isActive: true,
+      }),
+    );
+    await users.save(
+      users.create({
+        clerkId: 'clerk_staff_1',
+        email: 'staff@example.com',
+        role: Role.STAFF,
         isActive: true,
       }),
     );
@@ -156,6 +169,28 @@ describe('Orders (e2e)', () => {
       .get('/api/storefront/orders')
       .expect(401);
     await request(app.getHttpServer()).get('/api/orders').expect(401);
+  });
+
+  it('POST /api/orders crea un pedido a nombre de un cliente', async () => {
+    const res = await request(app.getHttpServer())
+      .post('/api/orders')
+      .set(adminAuth)
+      .send({
+        clientId,
+        items: [{ productId, quantity: 2 }],
+      })
+      .expect(201);
+
+    expect(res.body.data.clientId).toBe(clientId);
+    expect(res.body.data.status).toBe('pending');
+  });
+
+  it('POST /api/orders sin el permiso responde 403', async () => {
+    await request(app.getHttpServer())
+      .post('/api/orders')
+      .set(staffAuth)
+      .send({ clientId, items: [{ productId, quantity: 1 }] })
+      .expect(403);
   });
 
   it('checkout reserves stock: public availability drops, physical stock does not', async () => {
