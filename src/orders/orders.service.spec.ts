@@ -85,6 +85,11 @@ const contacto = {
 
 describe('OrdersService', () => {
   let service: OrdersService;
+  // Expuesto para que un describe puntual pueda sustituir, solo para sus
+  // propias pruebas, el repositorio que `manager.getRepository(Order)`
+  // entrega dentro de la transacción — así se puede distinguir un guardado
+  // hecho DENTRO de la transacción de uno hecho con `this.orderRepository`.
+  let dataSource: { transaction: jest.Mock };
   let orderRepo: {
     findOne: jest.Mock;
     findAndCount: jest.Mock;
@@ -250,7 +255,7 @@ describe('OrdersService', () => {
         return null;
       },
     };
-    const dataSource = {
+    dataSource = {
       transaction: jest.fn((cb: (m: unknown) => unknown) => cb(manager)),
     };
 
@@ -2416,15 +2421,70 @@ describe('OrdersService', () => {
         cobro: { paymentMethod: 'manual', reference: 'TRF-9912' },
       };
 
+      // El repositorio que entrega manager.getRepository(Order) DENTRO de la
+      // transacción, distinto a propósito del `orderRepo` inyectado
+      // (`this.orderRepository`): si fueran el mismo objeto, sellar el cobro
+      // dentro o fuera de la transacción sería indistinguible para una
+      // prueba, y esa distinción es la razón de ser de toda la tarea.
+      //
+      // `save` registra una COPIA (`{ ...o }`) de cada llamada en un array
+      // aparte, en vez de dejar que se lea de `mock.calls`: el propio
+      // `crearPedido` reutiliza el mismo objeto `order` entre su segundo
+      // guardado (con el número y el tracking) y el que hace el hook al
+      // sellar el cobro, y Jest guarda los argumentos por REFERENCIA. Sin la
+      // copia, mutar `order` a PAID en el hook "repinta" retroactivamente la
+      // llamada anterior en `mock.calls`, y una prueba que compare contra eso
+      // pasaría aunque el hook nunca llegase a guardar nada.
+      let txOrderRepo: { create: jest.Mock; save: jest.Mock };
+      let txSaveSnapshots: Partial<Order>[];
+
+      beforeEach(() => {
+        txSaveSnapshots = [];
+        txOrderRepo = {
+          create: jest.fn().mockImplementation((o: unknown) => o),
+          save: jest.fn().mockImplementation((o: Partial<Order>) => {
+            txSaveSnapshots.push({ ...o });
+            return Promise.resolve({ id: 'order-1', seq: 1, ...o });
+          }),
+        };
+        dataSource.transaction.mockImplementation(
+          (cb: (m: unknown) => unknown) =>
+            cb({
+              getRepository: (entity: unknown) => {
+                if (entity === Order) return txOrderRepo;
+                if (entity === OrderItem) return orderItemRepo;
+                if (entity === CartItem) return cartItemRepo;
+                return null;
+              },
+            }),
+        );
+      });
+
       it('el pedido nace pagado y con su plazo contando', async () => {
         await service.crearParaCliente(makeUser(Role.ADMIN), conCobro);
 
-        expect(orderRepo.save).toHaveBeenCalledWith(
-          expect.objectContaining({
-            paymentStatus: PaymentStatus.PAID,
-            paidAt: expect.any(Date),
-          }),
+        const guardado = txSaveSnapshots.find(
+          (o) => o.paymentStatus === PaymentStatus.PAID,
         );
+        expect(guardado).toBeDefined();
+        expect(guardado?.paidAt).toBeInstanceOf(Date);
+      });
+
+      it('sella el cobro en el repositorio DE LA TRANSACCIÓN, no aparte', async () => {
+        await service.crearParaCliente(makeUser(Role.ADMIN), conCobro);
+
+        // Si el sellado ocurriera después de crearPedido, con
+        // this.orderRepository en vez del manager de la transacción, el hueco
+        // entre crear y cobrar existiría de verdad: no habría ninguna copia
+        // en PAID dentro de txSaveSnapshots, y en cambio orderRepo.save sí se
+        // habría llamado. (Se mira la copia, no `toHaveBeenCalledWith`: por
+        // la misma razón que arriba, `txOrderRepo.save` también recibe el
+        // `order` que reutiliza `crearPedido`.)
+        expect(orderRepo.save).not.toHaveBeenCalled();
+        const selladoEnLaTransaccion = txSaveSnapshots.some(
+          (o) => o.paymentStatus === PaymentStatus.PAID,
+        );
+        expect(selladoEnLaTransaccion).toBe(true);
       });
 
       it('deja el cobro en el historial, aparte de la creación', async () => {
@@ -2455,11 +2515,19 @@ describe('OrdersService', () => {
             Promise.resolve(action !== 'update-payment-status'),
         );
 
-        await expect(
-          service.crearParaCliente(makeUser(Role.STAFF), conCobro),
-        ).rejects.toBeInstanceOf(ForbiddenException);
+        const error: unknown = await service
+          .crearParaCliente(makeUser(Role.STAFF), conCobro)
+          .catch((e: unknown) => e);
+
+        expect(error).toBeInstanceOf(ForbiddenException);
+        // No cualquier ForbiddenException: el mensaje concreto, para que no
+        // la satisfaga uno que aparezca mañana por otro motivo.
+        expect((error as ForbiddenException).message).toBe(
+          'No puedes marcar un pedido como cobrado; créalo pendiente',
+        );
         // La comprobación va ANTES de abrir la transacción.
         expect(orderRepo.save).not.toHaveBeenCalled();
+        expect(txOrderRepo.save).not.toHaveBeenCalled();
         expect(inventoryService.reserve).not.toHaveBeenCalled();
       });
 
@@ -2469,6 +2537,45 @@ describe('OrdersService', () => {
         await expect(
           service.crearParaCliente(makeUser(Role.STAFF), dtoBase),
         ).resolves.toBeDefined();
+      });
+
+      it('el método del cobro pasa por el mismo catálogo: 400 si no existe', async () => {
+        paymentMethodsService.resolve.mockImplementation(
+          (code?: string): Promise<{ code: string }> =>
+            code === 'manual'
+              ? Promise.resolve({ code: 'manual' })
+              : Promise.reject(
+                  new BadRequestException(
+                    `Payment method "${String(code)}" is not available`,
+                  ),
+                ),
+        );
+
+        await expect(
+          service.crearParaCliente(makeUser(Role.ADMIN), {
+            ...dtoBase,
+            cobro: { paymentMethod: 'inventado' },
+          }),
+        ).rejects.toBeInstanceOf(BadRequestException);
+        expect(orderRepo.save).not.toHaveBeenCalled();
+        expect(txOrderRepo.save).not.toHaveBeenCalled();
+      });
+
+      it('sin método de pago propio, el evento de creación anota el del cobro', async () => {
+        // Antes de esta corrección, `paymentMethodCode` salía siempre de
+        // `dto.paymentMethod`: si solo llegaba `cobro`, el evento de creación
+        // anotaba `null` mientras el de PAYMENT_STATUS_CHANGED, un renglón
+        // más abajo, decía «manual» — dos eventos de la misma alta contando
+        // cosas distintas.
+        await service.crearParaCliente(makeUser(Role.ADMIN), conCobro);
+
+        expect(orderEvents.record).toHaveBeenCalledWith(
+          expect.anything(),
+          expect.objectContaining({
+            kind: OrderEventKind.CREATED,
+            meta: expect.objectContaining({ paymentMethod: 'manual' }),
+          }),
+        );
       });
     });
   });

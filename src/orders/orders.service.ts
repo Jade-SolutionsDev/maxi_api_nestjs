@@ -526,6 +526,12 @@ export class OrdersService {
       : null;
     void resolvedPayment;
 
+    // El código del cobro pasa por el mismo catálogo que dto.paymentMethod:
+    // sin esto, un código inventado entraría tal cual al historial.
+    if (cobro) {
+      await this.paymentMethodsService.resolve(cobro.paymentMethod);
+    }
+
     const allowedLocationIds = await this.resolveAllowedLocationIds(
       deliveryMunicipalityId,
       fulfillment,
@@ -550,7 +556,11 @@ export class OrdersService {
       customerNotes: dto.customerNotes ?? null,
       allowedLocationIds,
       actor: { userId: user.id },
-      paymentMethodCode: dto.paymentMethod ?? null,
+      // Si no viene un método de pago propio (no se abre ningún intento), el
+      // del cobro ya hecho manda: sin esto, el evento de creación decía
+      // `null` mientras el de cobro, un renglón más abajo, decía el método
+      // real — dos eventos de la misma alta contando cosas distintas.
+      paymentMethodCode: dto.paymentMethod ?? cobro?.paymentMethod ?? null,
       metaExtra: {
         canal: 'back-office',
         ...(lineasConPrecioPactado.length > 0
