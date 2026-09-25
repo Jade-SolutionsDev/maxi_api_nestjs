@@ -323,6 +323,32 @@ describe('OrdersService', () => {
       expect(pedidoGuardado.paymentStatus).toBe(PaymentStatus.PENDING);
     });
 
+    it('el subtotal de la cabecera es la suma de los lineTotal de sus líneas', async () => {
+      // Dos líneas, no una: si el subtotal viniera de otro lado (por ejemplo,
+      // un total pasado por parámetro) y no de sumar estas mismas líneas,
+      // aquí divergirían.
+      cartService.getCart.mockResolvedValue({
+        items: [
+          { ...cartLine, productId: 'prod-1', quantity: 3, unitPrice: 0.1 },
+          { ...cartLine, productId: 'prod-2', quantity: 1, unitPrice: 2.005 },
+        ],
+        totalItems: 4,
+        subtotal: 2.31,
+      });
+
+      await service.checkout(makeClient(), {});
+
+      const pedidoGuardado = orderRepo.save.mock.calls[0][0];
+      const centavosDeLasLineas = orderItemRepo.save.mock.calls.reduce(
+        (centavos: number, [item]: [{ lineTotal: string }]) =>
+          centavos + Math.round(Number(item.lineTotal) * 100),
+        0,
+      );
+      expect(pedidoGuardado.subtotal).toBe(
+        (centavosDeLasLineas / 100).toFixed(2),
+      );
+    });
+
     it('holds pickup stock in the storage the customer collects from', async () => {
       fulfillmentService.resolveChoice.mockResolvedValue({
         type: 'pickup',

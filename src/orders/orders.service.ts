@@ -166,8 +166,6 @@ interface LineaResuelta {
 interface CrearPedidoParams {
   clientId: string;
   lineas: LineaResuelta[];
-  /** Suma de las líneas, ya redondeada por quien las resolvió. */
-  subtotal: number;
   fulfillment: FulfillmentChoice;
   deliveryMunicipalityId?: string;
   deliveryAddress: Record<string, unknown> | null;
@@ -330,7 +328,6 @@ export class OrdersService {
         quantity: line.quantity,
         unitPrice: line.unitPrice,
       })),
-      subtotal: cart.subtotal,
       fulfillment,
       deliveryMunicipalityId,
       deliveryAddress: address
@@ -397,9 +394,16 @@ export class OrdersService {
    */
   private async crearPedido(params: CrearPedidoParams): Promise<string> {
     return this.dataSource.transaction(async (manager) => {
-      const total = (params.subtotal + Number(params.fulfillment.fee)).toFixed(
-        2,
-      );
+      // En céntimos y dividiendo al final: la misma cuenta que hace cada
+      // lineTotal más abajo, para que la cabecera nunca pueda descuadrar de
+      // sus líneas por redondeo. El carrito ya sumaba lo mismo
+      // (cart-response.dto.ts) pero aquí el núcleo lo impone, no lo hereda.
+      const subtotal =
+        params.lineas.reduce(
+          (c, l) => c + Math.round(l.unitPrice * l.quantity * 100),
+          0,
+        ) / 100;
+      const total = (subtotal + Number(params.fulfillment.fee)).toFixed(2);
 
       const orderRepo = manager.getRepository(Order);
       const order = await orderRepo.save(
@@ -407,7 +411,7 @@ export class OrdersService {
           clientId: params.clientId,
           status: OrderStatus.PENDING,
           paymentStatus: PaymentStatus.PENDING,
-          subtotal: params.subtotal.toFixed(2),
+          subtotal: subtotal.toFixed(2),
           deliveryFee: params.fulfillment.fee,
           total,
           fulfillmentType: params.fulfillment.type,
@@ -476,10 +480,10 @@ export class OrdersService {
         field: 'status',
         nextValue: OrderStatus.PENDING,
         meta: {
+          ...params.metaExtra,
           total,
           fulfillmentType: params.fulfillment.type,
           paymentMethod: params.paymentMethodCode,
-          ...params.metaExtra,
         },
       });
 
