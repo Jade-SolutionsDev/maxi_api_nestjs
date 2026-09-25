@@ -156,6 +156,38 @@ const snapshotContact = (
   return { recipientName, idCard, contactPhone };
 };
 
+// Un valor que no sea texto (u otro `Record` anidado, un número, …) se trata
+// como ausente, igual que si el campo no existiera: `deliveryAddress` es de
+// forma libre y no se valida su estructura (ver create-order-for-client.dto).
+const comoTextoOAusente = (value: unknown): string | null | undefined =>
+  typeof value === 'string' || value === null ? value : undefined;
+
+/**
+ * Lee el destinatario de una dirección de entrega de forma libre
+ * (`Record<string, unknown>`), con el mismo contrato que espera
+ * `snapshotContact` — sin ensanchar su firma ni recurrir a `any`.
+ *
+ * Existe para que `crearParaCliente` haga lo mismo que `checkout()`: si no
+ * llega `contact`, el destinatario sale de la dirección. Sin esto, el panel
+ * no tiene de dónde sacarlo y se ve obligado a exigir `contact` —con carné
+ * cubano obligatorio— para una entrega a domicilio que la tienda resuelve
+ * sin pedir carné nunca (`CreateClientAddressDto.idCard` es opcional).
+ */
+const contactoDesdeDireccion = (
+  address: Record<string, unknown> | null | undefined,
+): {
+  recipientName?: string | null;
+  idCard?: string | null;
+  contactPhone?: string | null;
+} | null => {
+  if (!address) return null;
+  return {
+    recipientName: comoTextoOAusente(address.recipientName),
+    idCard: comoTextoOAusente(address.idCard),
+    contactPhone: comoTextoOAusente(address.contactPhone),
+  };
+};
+
 /** Una línea ya valorada: el núcleo no vuelve a mirar el catálogo. */
 interface LineaResuelta {
   productId: string;
@@ -549,10 +581,14 @@ export class OrdersService {
       fulfillment,
       deliveryMunicipalityId,
       deliveryAddress: dto.deliveryAddress ?? null,
-      // Mismo `trim` y mismo criterio de «tres nulos = nada» que checkout,
-      // para que el PDF y el correo no rendericen distinto según por dónde
-      // entró el pedido.
-      contactSnapshot: snapshotContact(dto.contact ?? null),
+      // Mismo `trim` y mismo criterio de «tres nulos = nada» que checkout, y
+      // el mismo fallback a la dirección cuando no llega `contact`: en
+      // recogida sigue siendo obligatorio (comprobado más arriba, no hay
+      // dirección de la que sacarlo), pero en entrega el panel no puede
+      // exigir más datos que la tienda.
+      contactSnapshot: snapshotContact(
+        dto.contact ?? contactoDesdeDireccion(dto.deliveryAddress),
+      ),
       customerNotes: dto.customerNotes ?? null,
       allowedLocationIds,
       actor: { userId: user.id },

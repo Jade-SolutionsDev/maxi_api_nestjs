@@ -480,4 +480,65 @@ describe('la tienda y el panel crean el mismo pedido', () => {
     expect(porElPanel.pedido.subtotal).toBe(porLaTienda.pedido.subtotal);
     expect(porElPanel.pedido.total).toBe(porLaTienda.pedido.total);
   });
+
+  it('el destinatario sale de la dirección igual en los dos caminos, aunque falte el carné', async () => {
+    // El caso que motiva la tarea: entrega a domicilio, sin `contact`
+    // explícito, y la dirección sin carné (CreateClientAddressDto.idCard es
+    // opcional, igual que en el panel). La tienda nunca lo exige aquí; si el
+    // panel divergiera y lo exigiera, esta prueba lo diría antes que un
+    // empleado atascado en el formulario.
+    const direccionSinCarne = {
+      street: 'Calle 23 #456',
+      municipalityId: 'mun-1',
+      recipientName: 'Ana Pérez',
+      contactPhone: '55512345',
+    };
+
+    // --- Vía 1: el checkout de la tienda ---
+    cartService.getCart.mockResolvedValue({
+      items: [cartLine],
+      totalItems: 2,
+      subtotal: 15,
+    });
+    orderRepo.findOne.mockResolvedValue(makeOrder({ items: [] }));
+
+    await service.checkout(makeClient(), { address: direccionSinCarne });
+    const porLaTienda = {
+      pedido: orderRepo.save.mock.calls.at(-1)?.[0],
+    };
+
+    jest.clearAllMocks();
+
+    // --- Vía 2: el alta desde el panel ---
+    orderRepo.findOne.mockResolvedValue(makeOrder({ items: [] }));
+    productsService.availableForArea = jest
+      .fn()
+      .mockResolvedValue(new Map([['prod-2', 10]]));
+    clientRepo.findOne.mockResolvedValue({
+      id: 'client-1',
+      defaultMunicipalityId: 'mun-1',
+      isActive: true,
+    });
+
+    await service.crearParaCliente(makeUser(Role.ADMIN), {
+      clientId: 'client-1',
+      items: [mismasLineas],
+      deliveryAddress: direccionSinCarne,
+    });
+    const porElPanel = {
+      pedido: orderRepo.save.mock.calls.at(-1)?.[0],
+    };
+
+    expect(porElPanel.pedido.contactSnapshot).toEqual(
+      porLaTienda.pedido.contactSnapshot,
+    );
+    // Ancla ABSOLUTA, no solo relativa entre los dos caminos: sin esto, los
+    // dos podrían coincidir en `undefined` (o en cualquier otro valor
+    // equivocado) y la comparación de arriba seguiría en verde igual.
+    expect(porElPanel.pedido.contactSnapshot).toEqual({
+      recipientName: 'Ana Pérez',
+      idCard: null,
+      contactPhone: '55512345',
+    });
+  });
 });

@@ -2380,6 +2380,69 @@ describe('OrdersService', () => {
       });
     });
 
+    it('sin contact explícito, saca el destinatario de deliveryAddress: igual que el checkout', async () => {
+      // Es el caso que hoy pierde el destinatario: checkout() hace
+      // `snapshotContact(dto.contact ?? address)`, y esa `address` es un
+      // CreateClientAddressDto con recipientName/idCard/contactPhone los TRES
+      // opcionales — la tienda no exige carné en entrega a domicilio. Sin
+      // este arreglo, el panel no tiene de dónde sacar el destinatario y se
+      // ve obligado a exigir `contact`, que sí exige carné cubano válido.
+      await service.crearParaCliente(makeUser(Role.ADMIN), {
+        ...dtoBase,
+        deliveryAddress: {
+          municipalityId: 'mun-1',
+          street: 'Calle 23 #456',
+          recipientName: 'Ana Pérez',
+          contactPhone: '55512345',
+        },
+      });
+
+      const guardado = orderRepo.save.mock.calls.at(-1)?.[0];
+      expect(guardado.contactSnapshot).toEqual({
+        recipientName: 'Ana Pérez',
+        idCard: null,
+        contactPhone: '55512345',
+      });
+    });
+
+    it('contact explícito gana sobre lo que traiga deliveryAddress', async () => {
+      await service.crearParaCliente(makeUser(Role.ADMIN), {
+        ...dtoBase,
+        deliveryAddress: {
+          municipalityId: 'mun-1',
+          street: 'Calle 23 #456',
+          recipientName: 'De la dirección',
+          idCard: '90010112345',
+          contactPhone: '11111111',
+        },
+        contact: {
+          recipientName: 'Del contact',
+          idCard: '85010112345',
+          contactPhone: '22222222',
+        },
+      });
+
+      const guardado = orderRepo.save.mock.calls.at(-1)?.[0];
+      expect(guardado.contactSnapshot).toEqual({
+        recipientName: 'Del contact',
+        idCard: '85010112345',
+        contactPhone: '22222222',
+      });
+    });
+
+    it('deliveryAddress sin ningún dato de destinatario deja el snapshot en null', async () => {
+      await service.crearParaCliente(makeUser(Role.ADMIN), {
+        ...dtoBase,
+        deliveryAddress: {
+          municipalityId: 'mun-1',
+          street: 'Calle 23 #456',
+        },
+      });
+
+      const guardado = orderRepo.save.mock.calls.at(-1)?.[0];
+      expect(guardado.contactSnapshot).toBeNull();
+    });
+
     it('anota en el historial qué líneas trajeron un precio pactado a mano', async () => {
       await service.crearParaCliente(makeUser(Role.ADMIN), {
         clientId: 'client-1',
