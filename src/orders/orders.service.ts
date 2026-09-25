@@ -1,3 +1,4 @@
+import { randomBytes } from 'node:crypto';
 import { sinTildes } from '../common/search/accent-insensitive';
 import {
   BadRequestException,
@@ -8,7 +9,13 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { DataSource, IsNull, Repository } from 'typeorm';
+import {
+  DataSource,
+  EntityManager,
+  IsNull,
+  Repository,
+  SelectQueryBuilder,
+} from 'typeorm';
 import { CartService } from '../cart/cart.service';
 import { CartItem } from '../cart/entities/cart-item.entity';
 import { Client } from '../clients/entities/client.entity';
@@ -18,14 +25,29 @@ import {
   PaginatedResponse,
 } from '../common/dto/pagination.dto';
 import { InventoryService } from '../inventory/inventory.service';
+import {
+  isSystemAdmin,
+  PermissionsService,
+} from '../permissions/permissions.service';
 import { ProductsService } from '../products/products.service';
+import { OrderEventKind } from '../order-events/entities/order-event.entity';
+import { OrderEventsService } from '../order-events/order-events.service';
+import { OrderMailerService } from '../mail/order-mailer.service';
 import { Role, User } from '../users/entities/user.entity';
 import {
   AdminOrdersQueryDto,
   SIN_METODO_DE_PAGO,
 } from './dto/admin-orders-query.dto';
 import { CheckoutDto } from './dto/checkout.dto';
+import { CorrectOrderDto } from './dto/correct-order.dto';
 import { OrderResponseDto } from './dto/order-response.dto';
+import { PickedUpByDto } from './dto/update-order-status.dto';
+import {
+  ESTADO_PARA_EL_CLIENTE,
+  estaPagado,
+  OrderTrackingResponseDto,
+} from './dto/order-tracking.dto';
+import { UpdateOrderItemsDto } from './dto/update-order-items.dto';
 import { OrderItem } from './entities/order-item.entity';
 import {
   CancellationReason,
@@ -43,6 +65,20 @@ import {
   ResolvedPaymentMethod,
 } from '../payments/payment-methods.service';
 import { PaymentsService } from '../payments/payments.service';
+import { deshacerCobro, sellarCobro } from './payment-sealing';
+
+/**
+ * Qué hace el stock en cada estado: retenido (reserva viva), comprometido
+ * (ya descontado del almacén) o liberado. La corrección de superadmin mueve
+ * el stock entre fases, no entre estados.
+ */
+type StockPhase = 'held' | 'committed' | 'released';
+const stockPhase = (status: OrderStatus): StockPhase =>
+  status === OrderStatus.PENDING
+    ? 'held'
+    : status === OrderStatus.CANCELLED
+      ? 'released'
+      : 'committed';
 
 const TRANSITIONS: Record<OrderStatus, OrderStatus[]> = {
   [OrderStatus.PENDING]: [OrderStatus.CONFIRMED, OrderStatus.CANCELLED],
@@ -62,9 +98,18 @@ const PAYMENT_TRANSITIONS: Record<PaymentStatus, PaymentStatus[]> = {
   [PaymentStatus.REFUNDED]: [],
 };
 
-// Fulfillment steps a GROCER may drive; confirm/cancel (which move stock and
-// commit the sale) and payment stay with ADMIN+.
-const GROCER_TARGETS = [
+// Fulfillment steps non-admin staff may drive; confirm/cancel (which move
+// stock and commit the sale) and payment stay with ADMIN+.
+const STAFF_TARGETS = [
+  OrderStatus.PROCESSING,
+  OrderStatus.SHIPPED,
+  OrderStatus.DELIVERED,
+];
+
+// The fulfillment chain in order, for direct jumps (cancelled sits outside).
+const FORWARD_CHAIN = [
+  OrderStatus.PENDING,
+  OrderStatus.CONFIRMED,
   OrderStatus.PROCESSING,
   OrderStatus.SHIPPED,
   OrderStatus.DELIVERED,
@@ -87,6 +132,26 @@ const snapshotAddress = (
   contactPhone: address.contactPhone ?? null,
 });
 
+/**
+ * Quién recibe el pedido. La dirección lo lleva cuando hay dirección; en una
+ * recogida no la hay, y entonces viene suelto en `contact`.
+ */
+const snapshotContact = (
+  source: {
+    recipientName?: string | null;
+    idCard?: string | null;
+    contactPhone?: string | null;
+  } | null,
+): Record<string, unknown> | null => {
+  if (!source) return null;
+  const recipientName = source.recipientName?.trim() || null;
+  const idCard = source.idCard?.trim() || null;
+  const contactPhone = source.contactPhone?.trim() || null;
+  // Un objeto con los tres campos en null no dice nada y ensucia el jsonb.
+  if (!recipientName && !idCard && !contactPhone) return null;
+  return { recipientName, idCard, contactPhone };
+};
+
 @Injectable()
 export class OrdersService {
   private readonly logger = new Logger(OrdersService.name);
@@ -102,6 +167,9 @@ export class OrdersService {
     private readonly productsService: ProductsService,
     private readonly clientAddressesService: ClientAddressesService,
     private readonly geographyService: GeographyService,
+    private readonly permissionsService: PermissionsService,
+    private readonly orderEvents: OrderEventsService,
+    private readonly orderMailer: OrderMailerService,
     private readonly dataSource: DataSource,
   ) {}
 
@@ -172,6 +240,14 @@ export class OrdersService {
     // municipality — the same stock the catalog showed. A pickup order may
     // draw from sibling storages (the admin gets a transfer alert); pinning it
     // to the counter's own shelf would reject carts the shop can fulfil.
+    // En recogida no hay dirección ninguna, así que estos datos solo pueden
+    // llegar sueltos. Sin ellos nadie sabe a quién entregar en el mostrador.
+    if (fulfillment.type === FulfillmentType.PICKUP && !dto.contact) {
+      throw new BadRequestException(
+        'Faltan los datos de quien recoge el pedido',
+      );
+    }
+
     const cart = await this.cartService.getCart(client.id, {
       municipalityId: deliveryMunicipalityId,
     });
@@ -228,16 +304,27 @@ export class OrdersService {
           pickupLocationId: fulfillment.pickupLocationId,
           pickupAddressId: fulfillment.pickupAddressId,
           pickupAddressSnapshot: fulfillment.pickupAddressSnapshot,
+          // El plazo se congela aquí, como la etiqueta y la tarifa: cambiar
+          // la opción de entrega mañana no reescribe lo prometido hoy.
+          promiseDays: fulfillment.promiseDays,
           deliveryMunicipalityId: deliveryMunicipalityId ?? null,
           // A snapshot: the saved address may be edited or deleted later, the
           // order must still say where it was going.
           deliveryAddress: address
             ? snapshotAddress(address, place)
             : (dto.deliveryAddress ?? null),
+          // `contact` manda sobre la dirección: es lo que el cliente acaba de
+          // escribir en este checkout, mientras que la dirección guardada
+          // puede llevar meses ahí con otro destinatario.
+          contactSnapshot: snapshotContact(dto.contact ?? address),
           customerNotes: dto.customerNotes ?? null,
         }),
       );
       order.orderNumber = `ORD-${new Date().getFullYear()}${String(order.seq).padStart(4, '0')}`;
+      // El enlace de seguimiento se reparte por fuera (WhatsApp, correo), así
+      // que su identificador no puede deducirse del número de pedido, que es
+      // correlativo. 32 bytes aleatorios, y no cambia en toda la vida del pedido.
+      order.trackingId = randomBytes(32).toString('hex');
       await orderRepo.save(order);
 
       const itemRepo = manager.getRepository(OrderItem);
@@ -269,6 +356,18 @@ export class OrdersService {
       }
 
       await manager.getRepository(CartItem).delete({ clientId: client.id });
+      await this.orderEvents.record(manager, {
+        orderId: order.id,
+        kind: OrderEventKind.CREATED,
+        actor: { clientId: client.id },
+        field: 'status',
+        nextValue: OrderStatus.PENDING,
+        meta: {
+          total,
+          fulfillmentType: fulfillment.type,
+          paymentMethod: dto.paymentMethod ?? null,
+        },
+      });
       return order.id;
     });
 
@@ -290,6 +389,21 @@ export class OrdersService {
     }
 
     void this.initiatePayment(orderId, resolvedPayment);
+
+    // Tampoco se espera: el pedido ya está guardado y el correo no puede
+    // retrasar la respuesta ni tumbarla si el proveedor falla. Sale antes de
+    // que el cliente elija cómo pagar, que es cuando más falta le hace tener
+    // el número del pedido por escrito.
+    void this.orderMailer.orderReceived(orderId).catch((err) => {
+      // `dispatch` ya se traga sus errores, pero el `.catch()` es la garantía
+      // de que ningún fallo futuro ahí dentro se convierta en un rechazo sin
+      // atender: eso tumba el proceso de Node, y tumbarlo justo después de
+      // cobrar es la peor forma de perder una venta.
+      this.logger.error(
+        `No se pudo avisar por correo del pedido ${orderId}`,
+        err instanceof Error ? err.stack : String(err),
+      );
+    });
 
     return this.findOneForClient(client.id, orderId);
   }
@@ -422,22 +536,36 @@ export class OrdersService {
     }
     await this.dataSource.transaction(async (manager) => {
       await this.inventoryService.releaseReservations(manager, order.id);
+      const previous = order.status;
       order.status = OrderStatus.CANCELLED;
       await manager.getRepository(Order).save(order);
+      await this.orderEvents.record(manager, {
+        orderId: order.id,
+        kind: OrderEventKind.STATUS_CHANGED,
+        actor: { clientId },
+        field: 'status',
+        previousValue: previous,
+        nextValue: OrderStatus.CANCELLED,
+        reason: 'Cancelado por el cliente desde la tienda',
+      });
     });
     return this.findOneForClient(clientId, id);
   }
 
   // ---------------- Admin ----------------
 
-  async findAllAdmin(
+  /**
+   * Los filtros del listado, en un solo sitio.
+   *
+   * Vivían dentro de `findAllAdmin`, y el reporte en PDF (MxH-0120) necesita
+   * exactamente los mismos: si cada uno armara su consulta, acabarían diciendo
+   * cosas distintas y un informe que no cuadra con la pantalla es peor que no
+   * tenerlo.
+   */
+  private aplicarFiltros(
+    qb: SelectQueryBuilder<Order>,
     query: AdminOrdersQueryDto,
-  ): Promise<PaginatedResponse<OrderResponseDto>> {
-    const { page, limit, skip } = getPaginationParams(query);
-    const qb = this.orderRepository
-      .createQueryBuilder('order')
-      .leftJoinAndSelect('order.client', 'client');
-
+  ): void {
     if (query.id) {
       qb.andWhere('order.id IN (:...ids)', { ids: query.id.split(',') });
     }
@@ -447,7 +575,9 @@ export class OrdersService {
     if (query.q) {
       qb.andWhere(
         `(${sinTildes('order.orderNumber')} OR ${sinTildes('client.email')}
-          OR ${sinTildes('client.firstName')} OR ${sinTildes('client.lastName')})`,
+          OR ${sinTildes('client.firstName')} OR ${sinTildes('client.lastName')}
+          OR ${sinTildes("concat_ws(' ', client.firstName, client.lastName)")}
+          OR ${sinTildes('client.phone')})`,
         { q: `%${query.q}%` },
       );
     }
@@ -479,6 +609,35 @@ export class OrdersService {
           : { paymentMethod: query.paymentMethod },
       );
     }
+    if (query.from) {
+      qb.andWhere('order.createdAt >= :desde', { desde: new Date(query.from) });
+    }
+    if (query.to) {
+      // Hasta el final de ese día: quien pide «hasta el 24» cuenta con los
+      // pedidos de esa tarde, no con que se corten a medianoche del 23.
+      const hasta = new Date(query.to);
+      hasta.setHours(23, 59, 59, 999);
+      qb.andWhere('order.createdAt <= :hasta', { hasta });
+    }
+    if (query.fulfillmentType) {
+      qb.andWhere('order.fulfillmentType = :fulfillmentType', {
+        fulfillmentType: query.fulfillmentType,
+      });
+    }
+    if (query.pickupLocationId) {
+      qb.andWhere('order.pickupLocationId = :pickupLocationId', {
+        pickupLocationId: query.pickupLocationId,
+      });
+    }
+    // El total es `decimal`: se compara contra texto para no pasar por el
+    // `number` de JavaScript, que en importes de cinco cifras redondea
+    // céntimos y dejaría pedidos fuera del rango por un cent.
+    if (query.minTotal) {
+      qb.andWhere('order.total >= :minTotal', { minTotal: query.minTotal });
+    }
+    if (query.maxTotal) {
+      qb.andWhere('order.total <= :maxTotal', { maxTotal: query.maxTotal });
+    }
     if (query.needsTransfer) {
       // Pickup orders still holding RESERVED stock away from their counter —
       // derived from the reservations so it clears itself once settled.
@@ -488,6 +647,17 @@ export class OrdersService {
              AND r.location_id <> order.pickup_location_id)`,
       );
     }
+  }
+
+  async findAllAdmin(
+    query: AdminOrdersQueryDto,
+  ): Promise<PaginatedResponse<OrderResponseDto>> {
+    const { page, limit, skip } = getPaginationParams(query);
+    const qb = this.orderRepository
+      .createQueryBuilder('order')
+      .leftJoinAndSelect('order.client', 'client');
+
+    this.aplicarFiltros(qb, query);
 
     const sortColumns: Record<string, string> = {
       orderNumber: 'order.orderNumber',
@@ -511,6 +681,97 @@ export class OrdersService {
       page,
       limit,
     );
+  }
+
+  /**
+   * Todos los pedidos que casen con el filtro, sin paginar: el listado enseña
+   * de diez en diez y un reporte de la página que estás mirando no es un
+   * reporte. El tope existe para que una petición sin filtros no se lleve la
+   * tabla entera por delante.
+   */
+  async findAllForReport(
+    query: AdminOrdersQueryDto,
+    tope = 5000,
+  ): Promise<{
+    pedidos: OrderResponseDto[];
+    total: number;
+    recortado: boolean;
+  }> {
+    const qb = this.orderRepository
+      .createQueryBuilder('order')
+      .leftJoinAndSelect('order.client', 'client');
+    this.aplicarFiltros(qb, query);
+    qb.orderBy('order.createdAt', 'DESC').addOrderBy('order.id', 'DESC');
+
+    const total = await qb.getCount();
+    const orders = await qb.take(tope).getMany();
+    return {
+      pedidos: await this.withPaymentMethods(orders),
+      total,
+      recortado: total > tope,
+    };
+  }
+
+  /**
+   * Los totales del reporte, por estado.
+   *
+   * Se calculan en la base sobre **todo** el conjunto filtrado, no sumando en
+   * memoria las filas que se trajeron: si el filtro abarca 152 pedidos y la
+   * tabla se recortó en el tope, sumar lo traído haría que el PDF dijera un
+   * número y la realidad fuera otra. Un informe que no cuadra es peor que no
+   * tenerlo.
+   */
+  async totalesForReport(
+    query: AdminOrdersQueryDto,
+  ): Promise<{ estado: string; pedidos: number; importe: string }[]> {
+    const qb = this.orderRepository
+      .createQueryBuilder('order')
+      .leftJoin('order.client', 'client');
+    this.aplicarFiltros(qb, query);
+    const filas = await qb
+      .select('order.status', 'estado')
+      .addSelect('COUNT(*)', 'pedidos')
+      .addSelect('COALESCE(SUM(order.total), 0)', 'importe')
+      .groupBy('order.status')
+      .orderBy('order.status', 'ASC')
+      .getRawMany<{ estado: string; pedidos: string; importe: string }>();
+    return filas.map((f) => ({
+      estado: f.estado,
+      pedidos: Number(f.pedidos),
+      importe: f.importe,
+    }));
+  }
+
+  /**
+   * El resumen del reporte: cuántos pedidos y cuánto dinero por día, semana o
+   * mes del rango elegido.
+   *
+   * Lo agrupa la base con `date_trunc`, no JavaScript: son las mismas filas que
+   * ya cuenta el motor, y traérselas para sumarlas aquí sería pedir 5000 filas
+   * para escribir doce.
+   *
+   * La semana de Postgres empieza en lunes, que es como se cuenta aquí.
+   */
+  async resumenPorPeriodo(
+    query: AdminOrdersQueryDto,
+    periodo: 'day' | 'week' | 'month',
+  ): Promise<{ periodo: string; pedidos: number; importe: string }[]> {
+    const qb = this.orderRepository
+      .createQueryBuilder('order')
+      .leftJoin('order.client', 'client');
+    this.aplicarFiltros(qb, query);
+    const filas = await qb
+      .select(`date_trunc('${periodo}', order.createdAt)`, 'periodo')
+      .addSelect('COUNT(*)', 'pedidos')
+      .addSelect('COALESCE(SUM(order.total), 0)', 'importe')
+      .groupBy('1')
+      .orderBy('1', 'ASC')
+      .getRawMany<{ periodo: Date; pedidos: string; importe: string }>();
+    return filas.map((f) => ({
+      periodo: new Date(f.periodo).toISOString(),
+      pedidos: Number(f.pedidos),
+      importe: f.importe,
+    }));
   }
 
   async findOneAdmin(id: string): Promise<OrderResponseDto> {
@@ -598,24 +859,47 @@ export class OrdersService {
     user: User,
     id: string,
     status: OrderStatus,
+    direct = false,
+    pickedUpBy?: PickedUpByDto,
   ): Promise<OrderResponseDto> {
     const order = await this.orderRepository.findOne({ where: { id } });
     if (!order) {
       throw new NotFoundException(`Order with id "${id}" not found`);
     }
-    if (!TRANSITIONS[order.status].includes(status)) {
-      throw new ConflictException(
-        `Cannot move order from "${order.status}" to "${status}"`,
-      );
-    }
-    if (user.role === Role.GROCER && !GROCER_TARGETS.includes(status)) {
-      throw new ForbiddenException(
-        'Grocers can only advance fulfillment (processing, shipped, delivered)',
-      );
+
+    if (direct) {
+      await this.assertDirectJump(user, order, status);
+    } else {
+      if (!TRANSITIONS[order.status].includes(status)) {
+        throw new ConflictException(
+          `Cannot move order from "${order.status}" to "${status}"`,
+        );
+      }
+      // Confirm/cancel commit or release stock — admin-level decisions. Any
+      // non-admin granted `orders:update-status` is limited to advancing
+      // fulfillment.
+      if (!isSystemAdmin(user.role) && !STAFF_TARGETS.includes(status)) {
+        throw new ForbiddenException(
+          'Non-admin staff can only advance fulfillment (processing, shipped, delivered)',
+        );
+      }
     }
 
+    // El estado con el que entró, para no mandar correo cuando alguien vuelve
+    // a marcar lo que ya estaba marcado.
+    const previoAlCambio = order.status;
+
+    // A jump still owes the side effects of the steps it skips: stock is
+    // committed exactly once when the order passes (or lands on) confirmed,
+    // and released when it lands on cancelled.
+    const crossesConfirmed =
+      order.status === OrderStatus.PENDING &&
+      status !== OrderStatus.CANCELLED &&
+      FORWARD_CHAIN.indexOf(status) >=
+        FORWARD_CHAIN.indexOf(OrderStatus.CONFIRMED);
+
     await this.dataSource.transaction(async (manager) => {
-      if (status === OrderStatus.CONFIRMED) {
+      if (crossesConfirmed) {
         // The hold becomes a physical stock decrement, logged as an OUT sale.
         await this.inventoryService.confirmReservations(
           manager,
@@ -630,10 +914,98 @@ export class OrdersService {
           user.id,
         );
       }
+      const previous = order.status;
       order.status = status;
+      if (status === OrderStatus.DELIVERED && !order.deliveredAt) {
+        this.sealDelivery(order, user, pickedUpBy);
+      }
       await manager.getRepository(Order).save(order);
+      if (status === OrderStatus.DELIVERED && previous !== status) {
+        await this.orderEvents.record(manager, {
+          orderId: order.id,
+          kind: OrderEventKind.DELIVERED,
+          actor: { userId: user.id },
+          field: 'deliveredAt',
+          nextValue: order.deliveredAt?.toISOString() ?? null,
+          reason: 'Pedido entregado',
+          meta: { pickedUpBy: order.pickedUpBy },
+        });
+      }
+      await this.orderEvents.record(manager, {
+        orderId: order.id,
+        kind: OrderEventKind.STATUS_CHANGED,
+        actor: { userId: user.id },
+        field: 'status',
+        previousValue: previous,
+        nextValue: status,
+        meta: direct ? { direct: true } : null,
+      });
     });
+    // Fuera de la transacción y sin await: avisar no puede tumbar ni demorar
+    // el cambio de estado, igual que con el correo del pago. Si el envío
+    // falla, queda anotado en `email_log` con su motivo.
+    if (previoAlCambio !== status) {
+      this.avisarDelCambio(order.id, status, order.cancellationReason ?? null);
+    }
     return this.findOneAdmin(id);
+  }
+
+  /**
+   * Qué cambios de estado se le cuentan al cliente. Son tres de seis: de
+   * `confirmed` y `processing` no se avisa —el cliente acaba de recibir el
+   * correo del pago y no aportan nada que él pueda hacer—, y `pending` es
+   * donde nace el pedido.
+   */
+  private avisarDelCambio(
+    orderId: string,
+    status: OrderStatus,
+    motivo: CancellationReason | null,
+  ): void {
+    if (status === OrderStatus.SHIPPED) {
+      void this.orderMailer.shipped(orderId);
+    } else if (status === OrderStatus.DELIVERED) {
+      void this.orderMailer.delivered(orderId);
+    } else if (status === OrderStatus.CANCELLED) {
+      void this.orderMailer.cancelled(orderId, motivo);
+    }
+  }
+
+  // Direct jumps skip the step chain but never its rules of physics: forward
+  // only (or to cancelled), never out of a terminal state, and reserved for
+  // whoever runs manual in-store sales — a grantable permission, so admins
+  // decide per role. The step-by-step path stays the safe default.
+  private async assertDirectJump(
+    user: User,
+    order: Order,
+    status: OrderStatus,
+  ): Promise<void> {
+    const allowed = await this.permissionsService.hasPermission(
+      user.id,
+      user.role,
+      'orders',
+      'update-status-direct',
+    );
+    if (!allowed) {
+      throw new ForbiddenException(
+        'You need the direct status-change permission to do this',
+      );
+    }
+    if (TRANSITIONS[order.status].length === 0) {
+      throw new ConflictException(
+        `Order is already ${order.status}; nothing to change`,
+      );
+    }
+    if (status === order.status) {
+      throw new ConflictException(`Order is already ${status}`);
+    }
+    if (
+      status !== OrderStatus.CANCELLED &&
+      FORWARD_CHAIN.indexOf(status) <= FORWARD_CHAIN.indexOf(order.status)
+    ) {
+      throw new ConflictException(
+        `Cannot move order backwards from "${order.status}" to "${status}"`,
+      );
+    }
   }
 
   /**
@@ -665,46 +1037,31 @@ export class OrdersService {
 
     // Same storage rules as a fresh checkout: only storages covering the
     // delivery municipality, and the pickup counter first for a pickup.
-    const coveringIds = order.deliveryMunicipalityId
-      ? await this.productsService.coveringLocationIds({
-          municipalityId: order.deliveryMunicipalityId,
-        })
-      : undefined;
-    const allowedLocationIds =
-      coveringIds && order.pickupLocationId
-        ? [...new Set([...coveringIds, order.pickupLocationId])]
-        : coveringIds;
+    const allowedLocationIds = await this.allowedLocationsFor(order);
 
     await this.dataSource.transaction(async (manager) => {
-      const items = await manager
-        .getRepository(OrderItem)
-        .find({ where: { orderId: order.id } });
-      for (const item of items) {
-        try {
-          await this.inventoryService.reserve(
-            manager,
-            order.id,
-            item.productId,
-            item.quantity,
-            {
-              allowedLocationIds,
-              preferredLocationId: order.pickupLocationId ?? undefined,
-            },
-          );
-        } catch (err) {
-          if (err instanceof ConflictException) {
-            throw new ConflictException(
-              `No hay stock suficiente de "${item.productNameSnapshot}" (${item.quantity}) para restablecer el pedido`,
-            );
-          }
-          throw err;
-        }
-      }
+      await this.reserveOrderItems(
+        manager,
+        order,
+        allowedLocationIds,
+        'restablecer el pedido',
+      );
+      const previous = order.status;
       order.status = OrderStatus.PENDING;
       order.cancellationReason = null;
       order.reinstatedAt = new Date();
       order.reinstatedBy = user.id;
       await manager.getRepository(Order).save(order);
+      await this.orderEvents.record(manager, {
+        orderId: order.id,
+        kind: OrderEventKind.REINSTATED,
+        actor: { userId: user.id },
+        field: 'status',
+        previousValue: previous,
+        nextValue: OrderStatus.PENDING,
+        reason:
+          'Restablecida desde la administración; el plazo de pago vuelve a empezar',
+      });
     });
     this.logger.log(
       `Order ${order.orderNumber ?? order.id} reinstated by user ${user.id}: back to pending, stock re-reserved`,
@@ -715,6 +1072,7 @@ export class OrdersService {
   // Manual override (refunds, gateway-outage corrections). Guarded so an
   // admin can't produce nonsense like paid -> pending.
   async updatePaymentStatus(
+    user: User,
     id: string,
     paymentStatus: PaymentStatus,
   ): Promise<OrderResponseDto> {
@@ -727,8 +1085,663 @@ export class OrdersService {
         `Cannot move payment from "${order.paymentStatus}" to "${paymentStatus}"`,
       );
     }
+    const previous = order.paymentStatus;
     order.paymentStatus = paymentStatus;
+    // El reloj de la custodia y el plazo de entrega arrancan también cuando
+    // el pago se marca a mano; si no, el pedido nunca entraría ni en los
+    // recordatorios ni en lo comprometido.
+    if (paymentStatus === PaymentStatus.PAID) {
+      sellarCobro(order);
+    }
     await this.orderRepository.save(order);
+    await this.orderEvents.record(null, {
+      orderId: order.id,
+      kind: OrderEventKind.PAYMENT_STATUS_CHANGED,
+      actor: { userId: user.id },
+      field: 'paymentStatus',
+      previousValue: previous,
+      nextValue: paymentStatus,
+      reason: 'Marcado a mano desde la administración',
+    });
+    // Marcar pagado a mano es hoy la vía normal —la pasarela lleva semanas
+    // rechazando—, así que el cliente tiene que enterarse igual que si hubiera
+    // entrado por webhook. La corrección de superadmin no avisa: ahí se está
+    // arreglando un dato, no confirmando un cobro.
+    if (
+      paymentStatus === PaymentStatus.PAID &&
+      previous !== PaymentStatus.PAID &&
+      order.status !== OrderStatus.CANCELLED
+    ) {
+      void this.orderMailer.paymentReceived(order.id);
+    }
     return this.findOneAdmin(id);
+  }
+
+  /**
+   * Deja constancia de la entrega: cuándo, quién la registró y a quién se le
+   * dio. Desde `deliveredAt` cuenta el plazo para reclamar, así que la fecha
+   * se sella una sola vez: una corrección posterior no la reescribe.
+   */
+  private sealDelivery(
+    order: Order,
+    user: User,
+    pickedUpBy?: PickedUpByDto,
+  ): void {
+    order.deliveredAt = new Date();
+    order.deliveredBy = user.id;
+    const contact = order.contactSnapshot as {
+      name?: string;
+      fullName?: string;
+      idCard?: string;
+    } | null;
+    const name = pickedUpBy?.name ?? contact?.fullName ?? contact?.name ?? null;
+    const idCard = pickedUpBy?.idCard ?? contact?.idCard ?? null;
+    order.pickedUpBy = name || idCard ? { name, idCard } : null;
+  }
+
+  /** Almacenes donde este pedido puede apartar stock: los que cubren su municipio, y su mostrador. */
+  private async allowedLocationsFor(
+    order: Order,
+  ): Promise<string[] | undefined> {
+    const coveringIds = order.deliveryMunicipalityId
+      ? await this.productsService.coveringLocationIds({
+          municipalityId: order.deliveryMunicipalityId,
+        })
+      : undefined;
+    return coveringIds && order.pickupLocationId
+      ? [...new Set([...coveringIds, order.pickupLocationId])]
+      : coveringIds;
+  }
+
+  /** Vuelve a apartar cada línea del pedido; 409 nombrando el producto si falta. */
+  private async reserveOrderItems(
+    manager: EntityManager,
+    order: Order,
+    allowedLocationIds: string[] | undefined,
+    purpose: string,
+  ): Promise<void> {
+    const items = await manager
+      .getRepository(OrderItem)
+      .find({ where: { orderId: order.id } });
+    for (const item of items) {
+      try {
+        await this.inventoryService.reserve(
+          manager,
+          order.id,
+          item.productId,
+          item.quantity,
+          {
+            allowedLocationIds,
+            preferredLocationId: order.pickupLocationId ?? undefined,
+          },
+        );
+      } catch (err) {
+        if (err instanceof ConflictException) {
+          throw new ConflictException(
+            `No hay stock suficiente de "${item.productNameSnapshot}" (${item.quantity}) para ${purpose}`,
+          );
+        }
+        throw err;
+      }
+    }
+  }
+
+  /**
+   * Corrección de superadministrador: cualquier estado de pedido y de pago,
+   * en cualquier dirección, con el efecto que toca sobre el stock:
+   *
+   *   liberado (cancelado)        → retenido (pendiente): vuelve a apartar
+   *   liberado                    → comprometido (confirmado en adelante): aparta y descuenta
+   *   retenido                    → comprometido: descuenta
+   *   retenido                    → liberado: libera
+   *   comprometido                → retenido: devuelve al almacén y vuelve a apartar
+   *   comprometido                → liberado: devuelve al almacén
+   *
+   * Si el resultado es «pendiente y sin pagar», el plazo de pago vuelve a
+   * empezar desde ahora, como en un restablecimiento: si no, un pedido viejo
+   * caducaría en el siguiente barrido. Todo queda en el historial con el
+   * motivo y la marca de corrección.
+   */
+  async correct(
+    user: User,
+    id: string,
+    dto: CorrectOrderDto,
+  ): Promise<OrderResponseDto> {
+    if (user.role !== Role.SUPER_ADMIN) {
+      throw new ForbiddenException(
+        'Only a super admin can correct an order freely',
+      );
+    }
+    if (dto.status === undefined && dto.paymentStatus === undefined) {
+      throw new BadRequestException(
+        'Nothing to correct: pass a status, a payment status, or both',
+      );
+    }
+    const order = await this.orderRepository.findOne({ where: { id } });
+    if (!order) {
+      throw new NotFoundException(`Order with id "${id}" not found`);
+    }
+    const fromStatus = order.status;
+    const toStatus = dto.status ?? order.status;
+    const fromPayment = order.paymentStatus;
+    const toPayment = dto.paymentStatus ?? order.paymentStatus;
+    if (fromStatus === toStatus && fromPayment === toPayment) {
+      throw new ConflictException('The order is already in that state');
+    }
+
+    const allowedLocationIds =
+      stockPhase(fromStatus) !== stockPhase(toStatus) &&
+      stockPhase(toStatus) !== 'released'
+        ? await this.allowedLocationsFor(order)
+        : undefined;
+
+    await this.dataSource.transaction(async (manager) => {
+      if (fromStatus !== toStatus) {
+        const from = stockPhase(fromStatus);
+        const to = stockPhase(toStatus);
+        if (from !== to) {
+          if (from === 'committed') {
+            // Devuelve al almacén lo que ya se había descontado (queda como IN).
+            await this.inventoryService.releaseReservations(
+              manager,
+              order.id,
+              user.id,
+            );
+          } else if (from === 'held' && to === 'released') {
+            await this.inventoryService.releaseReservations(
+              manager,
+              order.id,
+              user.id,
+            );
+          }
+          if (to === 'held' || to === 'committed') {
+            if (from !== 'held') {
+              await this.reserveOrderItems(
+                manager,
+                order,
+                allowedLocationIds,
+                'corregir el pedido',
+              );
+            }
+            if (to === 'committed') {
+              await this.inventoryService.confirmReservations(
+                manager,
+                order.id,
+                user.id,
+              );
+            }
+          }
+        }
+        order.status = toStatus;
+        if (toStatus === OrderStatus.CANCELLED) {
+          order.cancellationReason = null;
+        } else if (fromStatus === OrderStatus.CANCELLED) {
+          order.cancellationReason = null;
+        }
+      }
+      if (fromPayment !== toPayment) {
+        order.paymentStatus = toPayment;
+        if (toPayment === PaymentStatus.PAID) {
+          sellarCobro(order);
+        } else if (fromPayment === PaymentStatus.PAID) {
+          // Deshacer un cobro deshace lo que colgaba de él: no hay plazo que
+          // contar desde un pago que ya no existe, ni custodia que corra.
+          deshacerCobro(order);
+        }
+      }
+      if (
+        order.status === OrderStatus.PENDING &&
+        order.paymentStatus !== PaymentStatus.PAID &&
+        (fromStatus !== OrderStatus.PENDING ||
+          fromPayment === PaymentStatus.PAID)
+      ) {
+        order.reinstatedAt = new Date();
+        order.reinstatedBy = user.id;
+      }
+      await manager.getRepository(Order).save(order);
+
+      if (fromStatus !== toStatus) {
+        await this.orderEvents.record(manager, {
+          orderId: order.id,
+          kind: OrderEventKind.STATUS_CHANGED,
+          actor: { userId: user.id },
+          field: 'status',
+          previousValue: fromStatus,
+          nextValue: toStatus,
+          reason: dto.reason,
+          meta: { correction: true },
+        });
+      }
+      if (fromPayment !== toPayment) {
+        await this.orderEvents.record(manager, {
+          orderId: order.id,
+          kind: OrderEventKind.PAYMENT_STATUS_CHANGED,
+          actor: { userId: user.id },
+          field: 'paymentStatus',
+          previousValue: fromPayment,
+          nextValue: toPayment,
+          reason: dto.reason,
+          meta: { correction: true },
+        });
+      }
+    });
+    this.logger.warn(
+      `Order ${order.orderNumber ?? order.id} corrected by super admin ${user.id}: ` +
+        `${fromStatus}/${fromPayment} -> ${toStatus}/${toPayment} (${dto.reason})`,
+    );
+    return this.findOneAdmin(id);
+  }
+
+  /**
+   * Corrección de las líneas de un pedido (capa 3): cambiar cantidades, quitar
+   * productos y añadir otros, con el total recalculado y el stock puesto al
+   * día. Solo superadministradores.
+   *
+   * Se recibe el pedido **como debe quedar** y aquí se deduce qué cambió. El
+   * stock se mueve según la fase en la que esté el pedido:
+   *
+   *   cancelado (liberado)  → no se toca stock: no hay nada apartado
+   *   pendiente (retenido)  → sube: aparta la diferencia; baja: la suelta
+   *   confirmado en adelante (comprometido) → sube: aparta y descuenta la
+   *                            diferencia (queda como salida); baja: la devuelve
+   *                            al almacén (queda como entrada)
+   *
+   * Las bajadas se aplican antes que las subidas: quien cambia un producto por
+   * otro libera stock que la subida puede necesitar. Si falta stock para alguna
+   * subida, no se guarda nada y se responde 409 nombrando el producto.
+   */
+  async updateItems(
+    user: User,
+    id: string,
+    dto: UpdateOrderItemsDto,
+  ): Promise<OrderResponseDto> {
+    if (user.role !== Role.SUPER_ADMIN) {
+      throw new ForbiddenException(
+        'Only a super admin can edit the lines of an order',
+      );
+    }
+    const productIds = dto.items.map((line) => line.productId);
+    if (new Set(productIds).size !== productIds.length) {
+      throw new BadRequestException(
+        'Un producto no puede aparecer dos veces; súmalo en una sola línea',
+      );
+    }
+    // **Sin `relations: { items }` a propósito.** Guardar más abajo un pedido que
+    // lleva su colección de líneas cargada hace que TypeORM reconcilie esa
+    // colección contra la base y borre lo que no esté en ella — incluida la
+    // línea que esta misma transacción acaba de insertar. Pasó en staging el
+    // 17-sep-2026 con ORD-20260134: la reserva de stock quedó hecha y la línea
+    // desapareció. Las líneas se leen aparte y el pedido se actualiza por campos.
+    const order = await this.orderRepository.findOne({ where: { id } });
+    if (!order) {
+      throw new NotFoundException(`Order with id "${id}" not found`);
+    }
+
+    const itemsRepo = this.orderRepository.manager.getRepository(OrderItem);
+    const current = new Map(
+      (await itemsRepo.find({ where: { orderId: id } })).map((item) => [
+        item.productId,
+        item,
+      ]),
+    );
+    // El catálogo solo hace falta para las líneas nuevas: las que ya estaban
+    // conservan su nombre y su precio de entonces.
+    const incoming = await this.resolveLines(dto.items, current);
+
+    const changes: Record<string, unknown>[] = [];
+    for (const line of incoming) {
+      const existing = current.get(line.productId);
+      if (!existing) {
+        changes.push({
+          type: 'added',
+          productId: line.productId,
+          name: line.name,
+          quantity: line.quantity,
+          unitPrice: line.unitPrice,
+        });
+        continue;
+      }
+      if (existing.quantity !== line.quantity) {
+        changes.push({
+          type: 'quantity',
+          productId: line.productId,
+          name: line.name,
+          from: existing.quantity,
+          to: line.quantity,
+        });
+      }
+      if (Number(existing.unitPrice) !== Number(line.unitPrice)) {
+        changes.push({
+          type: 'price',
+          productId: line.productId,
+          name: line.name,
+          from: Number(existing.unitPrice).toFixed(2),
+          to: line.unitPrice.toFixed(2),
+        });
+      }
+    }
+    const incomingIds = new Set(incoming.map((line) => line.productId));
+    for (const item of current.values()) {
+      if (!incomingIds.has(item.productId)) {
+        changes.push({
+          type: 'removed',
+          productId: item.productId,
+          name: item.productNameSnapshot,
+          quantity: item.quantity,
+        });
+      }
+    }
+    if (changes.length === 0) {
+      throw new ConflictException('El pedido ya tiene esas líneas');
+    }
+
+    const phase = stockPhase(order.status);
+    const allowedLocationIds =
+      phase === 'released' ? undefined : await this.allowedLocationsFor(order);
+
+    const previousTotal = Number(order.total);
+    const subtotal = incoming.reduce(
+      (sum, line) => sum + Math.round(line.unitPrice * line.quantity * 100),
+      0,
+    );
+    const nextSubtotal = (subtotal / 100).toFixed(2);
+    const nextTotal = (subtotal / 100 + Number(order.deliveryFee)).toFixed(2);
+
+    await this.dataSource.transaction(async (manager) => {
+      if (phase !== 'released') {
+        // Primero lo que libera stock (quitadas y bajadas), después lo que lo
+        // pide: cambiar un producto por otro no debe fallar por un hueco que la
+        // propia corrección acaba de abrir.
+        for (const item of current.values()) {
+          const line = incoming.find((l) => l.productId === item.productId);
+          const drop = line ? item.quantity - line.quantity : item.quantity;
+          if (drop > 0) {
+            await this.inventoryService.releaseProductUnits(
+              manager,
+              order.id,
+              item.productId,
+              drop,
+              user.id,
+            );
+          }
+        }
+        for (const line of incoming) {
+          const existing = current.get(line.productId);
+          const rise = line.quantity - (existing?.quantity ?? 0);
+          if (rise <= 0) continue;
+          try {
+            await this.inventoryService.reserve(
+              manager,
+              order.id,
+              line.productId,
+              rise,
+              {
+                allowedLocationIds,
+                preferredLocationId: order.pickupLocationId ?? undefined,
+              },
+            );
+          } catch (err) {
+            if (err instanceof ConflictException) {
+              throw new ConflictException(
+                `No hay stock suficiente de "${line.name}" (faltan ${rise}) para corregir el pedido`,
+              );
+            }
+            throw err;
+          }
+          if (phase === 'committed') {
+            // El resto del pedido ya salió del almacén; esta parte se iguala.
+            await this.inventoryService.confirmProductReservations(
+              manager,
+              order.id,
+              line.productId,
+              user.id,
+            );
+          }
+        }
+      }
+
+      const itemRepo = manager.getRepository(OrderItem);
+      for (const item of current.values()) {
+        if (!incomingIds.has(item.productId)) await itemRepo.remove(item);
+      }
+      for (const line of incoming) {
+        const existing = current.get(line.productId);
+        const lineTotal = (
+          Math.round(line.unitPrice * line.quantity * 100) / 100
+        ).toFixed(2);
+        if (existing) {
+          existing.quantity = line.quantity;
+          existing.unitPrice = line.unitPrice.toFixed(2);
+          existing.lineTotal = lineTotal;
+          await itemRepo.save(existing);
+        } else {
+          await itemRepo.save(
+            itemRepo.create({
+              orderId: order.id,
+              productId: line.productId,
+              productNameSnapshot: line.name,
+              unitPrice: line.unitPrice.toFixed(2),
+              quantity: line.quantity,
+              lineTotal,
+            }),
+          );
+        }
+      }
+
+      order.subtotal = nextSubtotal;
+      order.total = nextTotal;
+      // Por campos, no por entidad: ver el comentario de arriba. `save` de un
+      // pedido cuya relación `items` pueda estar cargada se lleva por delante
+      // las líneas recién insertadas.
+      await manager
+        .getRepository(Order)
+        .update(order.id, { subtotal: nextSubtotal, total: nextTotal });
+
+      await this.orderEvents.record(manager, {
+        orderId: order.id,
+        kind: OrderEventKind.ITEMS_CHANGED,
+        actor: { userId: user.id },
+        field: 'items',
+        reason: dto.reason,
+        meta: { correction: true, changes },
+      });
+      if (previousTotal !== Number(nextTotal)) {
+        await this.orderEvents.record(manager, {
+          orderId: order.id,
+          kind: OrderEventKind.TOTAL_CHANGED,
+          actor: { userId: user.id },
+          field: 'total',
+          previousValue: previousTotal.toFixed(2),
+          nextValue: nextTotal,
+          reason: dto.reason,
+          meta: {
+            correction: true,
+            subtotal: nextSubtotal,
+            deliveryFee: order.deliveryFee,
+            // Con el pedido ya cobrado, la diferencia es dinero que hay que
+            // cobrar (positiva) o devolver (negativa) fuera del sistema.
+            paidDifference:
+              order.paymentStatus === PaymentStatus.PAID
+                ? (Number(nextTotal) - previousTotal).toFixed(2)
+                : undefined,
+          },
+        });
+      }
+    });
+
+    this.logger.warn(
+      `Order ${order.orderNumber ?? order.id} lines corrected by super admin ${user.id}: ` +
+        `${changes.length} change(s), total ${previousTotal.toFixed(2)} -> ${nextTotal} (${dto.reason})`,
+    );
+    return this.findOneAdmin(id);
+  }
+
+  /**
+   * Cada línea pedida, con el nombre y el precio que le tocan: las que ya
+   * estaban conservan los suyos (salvo que se mande otro precio), y las nuevas
+   * los toman del catálogo. Un producto nuevo tiene que existir y estar a la
+   * venta; uno retirado del catálogo puede seguir en el pedido que lo compró,
+   * pero no se añade a otro.
+   */
+  private async resolveLines(
+    lines: UpdateOrderItemsDto['items'],
+    current: Map<string, OrderItem>,
+  ): Promise<
+    { productId: string; name: string; quantity: number; unitPrice: number }[]
+  > {
+    const resolved: {
+      productId: string;
+      name: string;
+      quantity: number;
+      unitPrice: number;
+    }[] = [];
+    for (const line of lines) {
+      const existing = current.get(line.productId);
+      if (existing) {
+        resolved.push({
+          productId: line.productId,
+          name: existing.productNameSnapshot,
+          quantity: line.quantity,
+          unitPrice: line.unitPrice ?? Number(existing.unitPrice),
+        });
+        continue;
+      }
+      const product = await this.productsService.findOne(line.productId);
+      if (!product.isActive || product.deletedAt) {
+        throw new ConflictException(
+          `"${product.name}" no está a la venta; no se puede añadir al pedido`,
+        );
+      }
+      resolved.push({
+        productId: line.productId,
+        name: product.name,
+        quantity: line.quantity,
+        // Misma fórmula que el carrito y la ficha de producto.
+        unitPrice:
+          line.unitPrice ??
+          Math.round(
+            Number(product.basePrice) *
+              (1 - Number(product.discount) / 100) *
+              100,
+          ) / 100,
+      });
+    }
+    return resolved;
+  }
+
+  /** Todos los intentos de pago del pedido, del más reciente al más antiguo. */
+  async listPaymentAttempts(id: string) {
+    const exists = await this.orderRepository.findOne({
+      where: { id },
+      select: { id: true },
+    });
+    if (!exists) {
+      throw new NotFoundException(`Order with id "${id}" not found`);
+    }
+    const charges = await this.paymentsService.listChargesFor(id);
+    return charges.map((charge) => this.paymentsService.toDto(charge));
+  }
+
+  /** Quita un intento de pago que nunca se completó. Solo superadministradores. */
+  async removePaymentAttempt(
+    user: User,
+    id: string,
+    chargeId: string,
+    reason: string,
+  ): Promise<OrderResponseDto> {
+    if (user.role !== Role.SUPER_ADMIN) {
+      throw new ForbiddenException(
+        'Only a super admin can remove a payment attempt',
+      );
+    }
+    const order = await this.orderRepository.findOne({ where: { id } });
+    if (!order) {
+      throw new NotFoundException(`Order with id "${id}" not found`);
+    }
+    const removed = await this.paymentsService.removeAttempt(id, chargeId);
+    if (order.paymentRef === removed.reference) {
+      order.paymentRef = null;
+      await this.orderRepository.save(order);
+    }
+    await this.orderEvents.record(null, {
+      orderId: order.id,
+      kind: OrderEventKind.PAYMENT_ATTEMPT_REMOVED,
+      actor: { userId: user.id },
+      reason,
+      meta: {
+        correction: true,
+        provider: removed.provider,
+        reference: removed.reference,
+        chargeStatus: removed.status,
+      },
+    });
+    return this.findOneAdmin(id);
+  }
+
+  /**
+   * Seguimiento público: el estado de un pedido a partir del identificador que
+   * viaja en el enlace, **sin sesión**.
+   *
+   * Un identificador que no existe y uno mal formado responden exactamente
+   * igual —404, sin cuerpo que los distinga—: si el error dijera «formato
+   * inválido» frente a «no encontrado», estaría confirmando cuáles tienen la
+   * forma buena, que es media pista para quien prueba a ciegas.
+   *
+   * Lo que se devuelve lo acota `OrderTrackingResponseDto`, que se construye
+   * campo a campo. El historial sale de `order_events`, filtrado a los cambios
+   * de estado: los intentos de pago y los comprobantes no son asunto de quien
+   * recibe el enlace.
+   */
+  async trackByPublicId(trackingId: string): Promise<OrderTrackingResponseDto> {
+    const noExiste = new NotFoundException('Pedido no encontrado');
+    // 64 caracteres hexadecimales; cualquier otra cosa ni se consulta.
+    if (!/^[0-9a-f]{64}$/.test(trackingId)) throw noExiste;
+
+    const order = await this.orderRepository.findOne({
+      where: { trackingId },
+    });
+    if (!order || order.deletedAt) throw noExiste;
+
+    const eventos = await this.orderEvents.listForOrder(order.id);
+    const history = eventos
+      // Por el campo que tocan, no por el tipo de evento: un pedido llega a
+      // «cancelado» tanto por una cancelación como por caducar sin pagarse
+      // (`expired`), y por el tipo se quedaba fuera justo ese caso, que es el
+      // más frecuente. Así entra cualquier evento que mueva el estado, incluidos
+      // los que se añadan después.
+      .filter(
+        (e) =>
+          e.field === 'status' &&
+          typeof e.nextValue === 'string' &&
+          e.nextValue in ESTADO_PARA_EL_CLIENTE,
+      )
+      .map((e) => ({
+        status: ESTADO_PARA_EL_CLIENTE[e.nextValue as OrderStatus],
+        at: e.createdAt,
+      }));
+
+    const dto = new OrderTrackingResponseDto();
+    dto.orderNumber = order.orderNumber;
+    dto.status = ESTADO_PARA_EL_CLIENTE[order.status];
+    dto.paid = estaPagado(order.paymentStatus);
+    dto.placedAt = order.createdAt;
+    dto.promiseDays = order.promiseDays ?? null;
+    dto.promisedAt = order.promisedAt ?? null;
+    dto.deliveredAt = order.deliveredAt ?? null;
+    dto.fulfillmentType = order.fulfillmentType;
+    dto.history = history;
+    return dto;
+  }
+
+  /** Historial del pedido, del más antiguo al más reciente. */
+  async listEvents(id: string) {
+    const exists = await this.orderRepository.findOne({
+      where: { id },
+      select: { id: true },
+    });
+    if (!exists) {
+      throw new NotFoundException(`Order with id "${id}" not found`);
+    }
+    return this.orderEvents.listForOrder(id);
   }
 }

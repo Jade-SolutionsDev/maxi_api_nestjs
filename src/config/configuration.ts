@@ -104,8 +104,35 @@ export interface ResendConfig {
   apiKey: string | undefined;
   /** Sender address for platform replies, e.g. "Maxi <soporte@maxihabana.com>". */
   fromAddress: string | undefined;
+  /**
+   * Dónde caen las respuestas del cliente. El remitente es una dirección del
+   * dominio, y el dominio **no recibe correo**: una respuesta a
+   * `pedidos@maxihabana.com` rebota con «User does not exist» (comprobado el
+   * 23-sep-2026). Sin esto, cada cliente que contesta a su correo de pedido
+   * escribe al vacío. Apunta al buzón que el equipo sí lee.
+   */
+  replyTo: string | undefined;
   /** Credentials present. Platform email replies stay disabled without this. */
   configured: boolean;
+  /**
+   * Plantillas que no se mandan en este entorno, por clave (`order_received`,
+   * `order_cancelled_payment_not_received`, …).
+   *
+   * Existe porque el volumen y el destinatario de un correo no son la misma
+   * decisión que su código. En producción el 92% de los pedidos nacen y
+   * caducan sin pagarse (3.173 de 3.441 en el mes previo al 25-sep-2026): los
+   * avisos de «pedido recibido» y de caducidad irían a gente que abandonó el
+   * carrito, unos 220 correos diarios que nadie pidió. Quemarían la
+   * reputación del dominio, que es nuevo, y con ella los avisos que sí
+   * importan. Se apagan por entorno para poder seguir probándolos en staging.
+   */
+  plantillasApagadas: string[];
+}
+
+/** Datos de contacto que aparecen en los correos al cliente. */
+export interface SupportConfig {
+  /** WhatsApp de atención, tal como se muestra: "+53 5251 9414". */
+  whatsapp: string;
 }
 
 export interface AppConfig {
@@ -119,6 +146,7 @@ export interface AppConfig {
   payments: PaymentsConfig;
   storefront: StorefrontConfig;
   resend: ResendConfig;
+  support: SupportConfig;
   nodeEnv: string;
   /** Number of reverse proxies in front of the API (Express `trust proxy`).
    *  Makes req.ip resolve to the real client from X-Forwarded-For, so rate
@@ -276,9 +304,18 @@ export const resendConfig = (): ResendConfig => {
   return {
     apiKey,
     fromAddress,
+    replyTo: process.env.RESEND_REPLY_TO,
     configured: isConfigured(apiKey, fromAddress),
+    plantillasApagadas: (process.env.MAIL_TEMPLATES_OFF ?? '')
+      .split(',')
+      .map((clave) => clave.trim())
+      .filter(Boolean),
   };
 };
+
+export const supportConfig = (): SupportConfig => ({
+  whatsapp: process.env.SUPPORT_WHATSAPP ?? '+53 5251 9414',
+});
 
 export default (): AppConfig => ({
   port: parseInt(process.env.PORT ?? '3000', 10),
@@ -291,6 +328,7 @@ export default (): AppConfig => ({
   payments: paymentsConfig(),
   storefront: storefrontConfig(),
   resend: resendConfig(),
+  support: supportConfig(),
   nodeEnv: process.env.NODE_ENV ?? 'development',
   trustProxyHops: parseInt(process.env.TRUST_PROXY_HOPS ?? '1', 10),
 });

@@ -54,7 +54,7 @@ export interface StorefrontArea {
 }
 
 // Global catalog: no provider scoping. Every authenticated backoffice user can
-// read; writes are gated to SUPER_ADMIN/ADMIN/KARDIST at the controller.
+// read; writes are permission-gated at the controller.
 @Injectable()
 export class ProductsService {
   constructor(

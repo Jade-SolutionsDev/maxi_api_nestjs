@@ -225,6 +225,57 @@ describe('FulfillmentService', () => {
     });
   });
 
+  describe('ajustes', () => {
+    it('guardar un ajuste no borra los demás', async () => {
+      // Guardar solo el mensaje llegó a borrar la clave de recogida del
+      // jsonb: el campo del DTO no enviado pisaba el valor guardado.
+      settingsRepo.findOne.mockResolvedValue({
+        id: 's1',
+        data: { pickupEnabled: false, supportMessage: 'antiguo' },
+      });
+
+      await service.updateSettings({ supportMessage: 'nuevo' });
+
+      const guardado = settingsRepo.save.mock.calls[0][0] as {
+        data: Record<string, unknown>;
+      };
+      expect(guardado.data).toMatchObject({
+        pickupEnabled: false,
+        supportMessage: 'nuevo',
+      });
+    });
+
+    it('guarda el plazo de recogida', async () => {
+      settingsRepo.findOne.mockResolvedValue({
+        id: 's1',
+        data: { pickupEnabled: true, supportMessage: 'hola' },
+      });
+
+      await service.updateSettings({ pickupPromiseDays: 3 });
+
+      const guardado = settingsRepo.save.mock.calls[0][0] as {
+        data: Record<string, unknown>;
+      };
+      expect(guardado.data.pickupPromiseDays).toBe(3);
+      expect(guardado.data.supportMessage).toBe('hola');
+    });
+
+    it('la oferta pública lleva el plazo de recogida', async () => {
+      settingsRepo.findOne.mockResolvedValue({
+        id: 's1',
+        data: {
+          pickupEnabled: true,
+          supportMessage: 'hola',
+          pickupPromiseDays: 2,
+        },
+      });
+
+      const oferta = await service.availableForClient({});
+
+      expect(oferta.pickupPromiseDays).toBe(2);
+    });
+  });
+
   describe('resolveChoice', () => {
     it('returns the pickup point and its storage', async () => {
       const choice = await service.resolveChoice({

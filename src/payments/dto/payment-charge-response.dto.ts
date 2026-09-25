@@ -12,6 +12,8 @@ import { PaymentInstructions } from '../entities/payment-method.entity';
  */
 export class PaymentChargeResponseDto {
   /** Gateway code, e.g. "tropipay" | "mibilletera" | "manual". */
+  /** Identificador del intento; lo usa la administración para quitarlo. */
+  id: string;
   provider: string;
 
   @ApiProperty({ enum: ['redirect', 'instructions', 'manual'] })
@@ -83,6 +85,7 @@ export class PaymentChargeResponseDto {
   ): PaymentChargeResponseDto {
     const dto = new PaymentChargeResponseDto();
     const action = charge.actionPayload ?? {};
+    dto.id = charge.id;
     dto.provider = charge.provider;
     dto.kind = kind;
     dto.reference = charge.reference;

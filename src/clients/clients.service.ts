@@ -44,7 +44,9 @@ export class ClientsService {
 
     if (filtro.q) {
       qb.andWhere(
-        `(${sinTildes('client.firstName')} OR ${sinTildes('client.lastName')} OR ${sinTildes('client.email')} OR ${sinTildes('client.phone')})`,
+        `(${sinTildes('client.firstName')} OR ${sinTildes('client.lastName')}
+          OR ${sinTildes("concat_ws(' ', client.firstName, client.lastName)")}
+          OR ${sinTildes('client.email')} OR ${sinTildes('client.phone')})`,
         { q: `%${filtro.q}%` },
       );
     }

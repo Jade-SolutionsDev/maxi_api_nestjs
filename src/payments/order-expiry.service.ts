@@ -5,6 +5,9 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { DataSource, In, IsNull, LessThan, Repository } from 'typeorm';
 import { ExpiryConfig, PaymentsConfig } from '../config/configuration';
 import { InventoryService } from '../inventory/inventory.service';
+import { OrderMailerService } from '../mail/order-mailer.service';
+import { OrderEventKind } from '../order-events/entities/order-event.entity';
+import { OrderEventsService } from '../order-events/order-events.service';
 import {
   CancellationReason,
   Order,
@@ -45,6 +48,8 @@ export class OrderExpiryService {
     private readonly methodsService: PaymentMethodsService,
     private readonly inventoryService: InventoryService,
     private readonly configService: ConfigService,
+    private readonly orderEvents: OrderEventsService,
+    private readonly orderMailer: OrderMailerService,
     private readonly dataSource: DataSource,
   ) {}
 
@@ -143,7 +148,7 @@ export class OrderExpiryService {
   // have paid between the scan and now.
   private async expire(order: Order): Promise<boolean> {
     try {
-      return await this.dataSource.transaction(async (manager) => {
+      const caducado = await this.dataSource.transaction(async (manager) => {
         const repo = manager.getRepository(Order);
         const fresh = await repo.findOne({ where: { id: order.id } });
         if (
@@ -163,8 +168,31 @@ export class OrderExpiryService {
         fresh.status = OrderStatus.CANCELLED;
         fresh.cancellationReason = CancellationReason.PAYMENT_NOT_RECEIVED;
         await repo.save(fresh);
+        await this.orderEvents.record(manager, {
+          orderId: fresh.id,
+          kind: OrderEventKind.EXPIRED,
+          actor: { system: true },
+          field: 'status',
+          previousValue: OrderStatus.PENDING,
+          nextValue: OrderStatus.CANCELLED,
+          reason: 'No se recibió el pago a tiempo; el stock se liberó',
+        });
         return true;
       });
+      if (caducado) {
+        // Fuera de la transacción: el cliente apartó algo, no pagó a tiempo y
+        // lo perdió sin enterarse. Este correo es la diferencia entre eso y
+        // saber que puede volver a pedirlo.
+        // El .catch() no es adorno: `void` deja la promesa sin dueño, y en
+        // Node una promesa rechazada sin atender tumba el proceso entero.
+        // Hoy `dispatch` se traga sus errores, así que nunca rechaza — pero
+        // eso es una garantía de otro fichero, y el día que alguien toque su
+        // try/catch, esto se cae DESPUÉS de haber cobrado o cancelado.
+        void this.orderMailer
+          .cancelled(order.id, CancellationReason.PAYMENT_NOT_RECEIVED)
+          .catch(() => undefined);
+      }
+      return caducado;
     } catch (err) {
       this.logger.error(
         `Could not expire order ${order.orderNumber ?? order.id}`,

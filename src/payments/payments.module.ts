@@ -2,6 +2,9 @@ import { Module, forwardRef } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { AuthModule } from '../auth/auth.module';
 import { InventoryModule } from '../inventory/inventory.module';
+import { MailModule } from '../mail/mail.module';
+import { OrderEventsModule } from '../order-events/order-events.module';
+import { RefundsModule } from '../refunds/refunds.module';
 import { ProductsModule } from '../products/products.module';
 import { OrderItem } from '../orders/entities/order-item.entity';
 import { Order } from '../orders/entities/order.entity';
@@ -37,6 +40,9 @@ import { StorefrontPaymentMethodsController } from './storefront-payment-methods
     forwardRef(() => AuthModule),
     InventoryModule,
     ProductsModule,
+    RefundsModule,
+    MailModule,
+    OrderEventsModule,
   ],
   controllers: [
     PaymentMethodsController,

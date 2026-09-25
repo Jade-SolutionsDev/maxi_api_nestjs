@@ -1,8 +1,8 @@
 import { Transform } from 'class-transformer';
-import { IsBoolean, IsEnum, IsIn, IsOptional, IsString } from 'class-validator';
+import { IsBoolean, IsIn, IsOptional, IsString } from 'class-validator';
 import { PaginationQueryDto } from '../../common/dto/pagination.dto';
 import { toOptionalBoolean } from '../../common/dto/query-transforms';
-import { Role } from '../entities/user.entity';
+import { legacyRoleToStaff } from './invite-user.dto';
 
 export const USER_STATUS_FILTERS = [
   'active',
@@ -17,9 +17,14 @@ export class ListUsersQueryDto extends PaginationQueryDto {
   @IsString()
   q?: string;
 
+  /**
+   * Overloaded filter: an access tier (`Role` value) or a managed-role uuid.
+   * One param because the list UI exposes a single "Rol" dropdown mixing both.
+   */
   @IsOptional()
-  @IsEnum(Role)
-  role?: Role;
+  @Transform(legacyRoleToStaff)
+  @IsString()
+  role?: string;
 
   /** Status facet: active/inactive real users, or pending invitations only. */
   @IsOptional()

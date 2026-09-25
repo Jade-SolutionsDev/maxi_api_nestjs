@@ -17,6 +17,21 @@ export const sinTildes = (columna: string): string =>
 export const sinTildesSql = (columna: string, parametro: string): string =>
   `f_unaccent(${columna}) ILIKE f_unaccent(${parametro})`;
 
+/**
+ * Para filtrar en memoria lo que no pasó por SQL (invitaciones pendientes,
+ * listas ya cargadas): mismo criterio que `f_unaccent … ILIKE`.
+ */
+export const normalizarSinTildes = (texto: string | null | undefined): string =>
+  (texto ?? '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase();
+
+export const contieneTexto = (
+  termino: string,
+  ...campos: (string | null | undefined)[]
+): boolean => {
+  const buscado = normalizarSinTildes(termino);
+  return campos.some((campo) => normalizarSinTildes(campo).includes(buscado));
+};
+
 /** Para las condiciones declarativas de TypeORM (`where: { name: … }`). */
 export const contieneSinTildes = (termino: string) =>
   Raw((alias) => `f_unaccent(${alias}) ILIKE f_unaccent(:termino)`, {

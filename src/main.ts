@@ -128,6 +128,10 @@ async function bootstrap() {
     credentials: cors.credentials,
     methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
     allowedHeaders: ['Content-Type', 'Authorization'],
+    // Sin esto el navegador oculta la cabecera al JavaScript que hizo la
+    // petición, y una descarga acaba llamándose como el identificador interno
+    // en vez de como el pedido.
+    exposedHeaders: ['Content-Disposition'],
   });
 
   const port = configService.get<number>('port') || 3000;

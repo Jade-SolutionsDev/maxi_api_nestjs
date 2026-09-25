@@ -88,6 +88,19 @@ export function comprobarConfiguracion(): void {
     logger.warn(`${v.nombre} no está definida: ${v.porque}.`);
   }
 
+  // Un correo apagado no se nota: no hay error, simplemente nadie recibe nada.
+  // Decirlo al arrancar es lo que evita que un apagado temporal se quede
+  // encendido seis meses porque nadie se acordaba de que estaba puesto.
+  const apagadas = (process.env.MAIL_TEMPLATES_OFF ?? '')
+    .split(',')
+    .map((c) => c.trim())
+    .filter(Boolean);
+  if (apagadas.length > 0) {
+    logger.warn(
+      `Correos apagados en este entorno (MAIL_TEMPLATES_OFF): ${apagadas.join(', ')}. No se enviará ninguno de ellos.`,
+    );
+  }
+
   const sinPasarela = falta('TROPIPAY_CLIENT_ID') && falta('MIBI_KEY_ID');
   if (sinPasarela) {
     logger.warn(

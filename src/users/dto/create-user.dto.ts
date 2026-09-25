@@ -7,7 +7,9 @@ import {
   IsUUID,
   Length,
 } from 'class-validator';
+import { Transform } from 'class-transformer';
 import { Role } from '../entities/user.entity';
+import { legacyRoleToStaff } from './invite-user.dto';
 
 export class CreateUserDto {
   @IsOptional()
@@ -15,6 +17,7 @@ export class CreateUserDto {
   @Length(1, 255)
   clerkId?: string;
 
+  @Transform(legacyRoleToStaff)
   @IsEnum(Role)
   role: Role;
 

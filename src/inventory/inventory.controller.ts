@@ -10,8 +10,7 @@ import {
 } from '@nestjs/common';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import type { AuthenticatedUserRequest } from '../auth/types/authenticated-request';
-import { Roles } from '../common/decorators/roles.decorator';
-import { Role } from '../users/entities/user.entity';
+import { RequirePermission } from '../permissions/decorators/require-permission.decorator';
 import { CreateOperationDto } from './dto/create-operation.dto';
 import {
   AggregatedInventoryDto,
@@ -29,18 +28,20 @@ const toNumber = (value?: string): number | undefined => {
   return Number.isNaN(n) ? undefined : n;
 };
 
+// Gated per-action by managed permissions (admins bypass). Storage scoping for
+// non-admins (assigned storages only) lives in the service, orthogonal to the
+// permission checks.
 @ApiTags('inventory')
 @ApiBearerAuth()
 @Controller('inventory')
-@Roles(Role.SUPER_ADMIN, Role.ADMIN, Role.GROCER)
 export class InventoryController {
   constructor(private readonly inventoryService: InventoryService) {}
 
-  // Admin cross-storage list, aggregated by product. Managers + kardist; not
-  // grocer-scoped (grocers use the per-storage Productos tab). Individual @Query
-  // params (no DTO) so the frontend's page/limit/sortBy don't trip whitelisting.
+  // Admin cross-storage list, aggregated by product; not grocer-scoped
+  // (grocers use the per-storage Productos tab). Individual @Query params (no
+  // DTO) so the frontend's page/limit/sortBy don't trip whitelisting.
   @Get('aggregate')
-  @Roles(Role.SUPER_ADMIN, Role.ADMIN, Role.KARDIST)
+  @RequirePermission({ module: 'inventory', action: 'aggregate' })
   async aggregate(
     @Query('q') q?: string,
     @Query('departmentId') departmentId?: string,
@@ -60,9 +61,9 @@ export class InventoryController {
   }
 
   // Change timeline for one product across all storages (manual ops + order
-  // movements). Managers + kardist.
+  // movements).
   @Get('product/:productId/history')
-  @Roles(Role.SUPER_ADMIN, Role.ADMIN, Role.KARDIST)
+  @RequirePermission({ module: 'inventory', action: 'history' })
   async productHistory(
     @Param('productId') productId: string,
   ): Promise<InventoryHistoryEventDto[]> {
@@ -71,6 +72,7 @@ export class InventoryController {
 
   // Change timeline for one storage (grocer-scoped via assertCanManage).
   @Get('location/:locationId/history')
+  @RequirePermission({ module: 'inventory', action: 'history' })
   async locationHistory(
     @Param('locationId') locationId: string,
     @Req() request: AuthenticatedUserRequest,
@@ -80,6 +82,7 @@ export class InventoryController {
 
   // Current stock at a storage (one row per product). Used by the Productos tab.
   @Get()
+  @RequirePermission({ module: 'inventory', action: 'list' })
   async list(
     @Query('locationId') locationId: string | undefined,
     @Req() request: AuthenticatedUserRequest,
@@ -92,6 +95,7 @@ export class InventoryController {
 
   // Operation history (audit) for a storage.
   @Get('operations')
+  @RequirePermission({ module: 'inventory', action: 'list' })
   async listOperations(
     @Query('locationId') locationId: string | undefined,
     @Req() request: AuthenticatedUserRequest,
@@ -103,10 +107,9 @@ export class InventoryController {
   }
 
   // Per-storage stock of one product across all storages (product detail
-  // breakdown). Read-only catalog info, so KARDIST is allowed too and it is not
-  // grocer-scoped.
+  // breakdown). Read-only catalog info; not grocer-scoped.
   @Get('product/:productId')
-  @Roles(Role.SUPER_ADMIN, Role.ADMIN, Role.GROCER, Role.KARDIST)
+  @RequirePermission({ module: 'inventory', action: 'read' })
   async stockByProduct(
     @Param('productId') productId: string,
   ): Promise<ProductStockLocationDto[]> {
@@ -115,6 +118,7 @@ export class InventoryController {
 
   // Create an In / Out / Transfer operation (atomic, multi-product).
   @Post('operations')
+  @RequirePermission({ module: 'inventory', action: 'create-operation' })
   async createOperation(
     @Body() dto: CreateOperationDto,
     @Req() request: AuthenticatedUserRequest,

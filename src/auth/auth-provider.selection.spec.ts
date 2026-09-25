@@ -1,9 +1,6 @@
 import { ConfigService } from '@nestjs/config';
 import { Test } from '@nestjs/testing';
-import {
-  AUTH_PROVIDER,
-  type AuthProvider,
-} from './interfaces/auth-provider.interface';
+import { AUTH_PROVIDER } from './interfaces/auth-provider.interface';
 import { ClerkAuthProvider } from './providers/clerk-auth.provider';
 import { MockAuthProvider } from './providers/mock-auth.provider';
 
@@ -41,7 +38,7 @@ describe('selección del proveedor de autenticación', () => {
       ],
     }).compile();
 
-    return moduleRef.get<AuthProvider>(AUTH_PROVIDER);
+    return moduleRef.get<{ nombre: string }>(AUTH_PROVIDER);
   };
 
   it('monta el proveedor real cuando la simulación está apagada', async () => {

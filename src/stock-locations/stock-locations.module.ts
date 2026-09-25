@@ -2,6 +2,7 @@ import { forwardRef, Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { AuthModule } from '../auth/auth.module';
 import { GeographyModule } from '../geography/geography.module';
+import { PermissionsModule } from '../permissions/permissions.module';
 import { User } from '../users/entities/user.entity';
 import { StockLocation } from './entities/stock-location.entity';
 import { StockLocationCoverage } from './entities/stock-location-coverage.entity';
@@ -21,6 +22,7 @@ import { StockLocationsService } from './stock-locations.service';
     ]),
     forwardRef(() => AuthModule),
     GeographyModule,
+    PermissionsModule,
   ],
   controllers: [StockLocationsController],
   providers: [StockLocationsService],

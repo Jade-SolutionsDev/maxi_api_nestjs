@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   ConflictException,
   Injectable,
   Logger,
@@ -8,6 +9,10 @@ import { ConfigService } from '@nestjs/config';
 import { InjectRepository } from '@nestjs/typeorm';
 import { createClerkClient } from '@clerk/backend';
 import { Repository } from 'typeorm';
+import {
+  isSystemAdmin,
+  PermissionsService,
+} from '../permissions/permissions.service';
 import { InviteUserDto } from './dto/invite-user.dto';
 import { Invitation, InvitationStatus } from './entities/invitation.entity';
 import { Role, User } from './entities/user.entity';
@@ -22,6 +27,7 @@ export class InvitationsService {
     @InjectRepository(User)
     private readonly userRepository: Repository<User>,
     private readonly configService: ConfigService,
+    private readonly permissionsService: PermissionsService,
   ) {}
 
   async createAndSendInvitation(
@@ -30,12 +36,26 @@ export class InvitationsService {
   ): Promise<Invitation> {
     const normalizedEmail = dto.email.toLowerCase().trim();
 
+    // Admin tiers bypass permissions — roles on their invitation would be a
+    // client bug, so reject loudly instead of silently dropping them. STAFF
+    // role ids must exist and be active NOW; the webhook assigns leniently
+    // later (a role deleted in between is simply skipped).
+    const roleIds = [...new Set(dto.roleIds ?? [])];
+    if (isSystemAdmin(dto.role) && roleIds.length > 0) {
+      throw new BadRequestException(
+        'Admin tiers do not take managed roles on an invitation',
+      );
+    }
+    if (dto.role === Role.STAFF) {
+      await this.permissionsService.assertActiveRoles(roleIds);
+    }
+
     const existingUser = await this.userRepository.findOne({
       where: { email: normalizedEmail, isActive: true },
     });
     if (existingUser) {
       throw new ConflictException(
-        `An active user with email ${normalizedEmail} already exists.`,
+        `Ya hay un usuario activo con el correo ${normalizedEmail}. Si lo borraste, revisa la lista de usuarios: puede seguir ahí desactivado.`,
       );
     }
 
@@ -44,7 +64,7 @@ export class InvitationsService {
     });
     if (existingPending) {
       throw new ConflictException(
-        `A pending invitation for ${normalizedEmail} already exists.`,
+        `Ya hay una invitación pendiente para ${normalizedEmail}. Reenvíala o anúlala desde la lista de invitaciones antes de crear otra.`,
       );
     }
 
@@ -58,6 +78,7 @@ export class InvitationsService {
     const invitation = this.invitationRepository.create({
       email: normalizedEmail,
       role: dto.role,
+      roleIds,
       firstName: dto.firstName ?? null,
       lastName: dto.lastName ?? null,
       invitedById: inviter.id,
@@ -209,6 +230,36 @@ export class InvitationsService {
 
     invitation.status = InvitationStatus.REVOKED;
     return this.invitationRepository.save(invitation);
+  }
+
+  /**
+   * Anula las invitaciones pendientes de un correo. Se llama al borrar un
+   * usuario: si se le invitó y se le borró antes de que aceptara, la
+   * invitación seguía viva y bloqueaba volver a invitarlo.
+   *
+   * Es a prueba de fallos a propósito: que Clerk no responda no puede impedir
+   * que el usuario se borre.
+   */
+  async revokePendingForEmail(email: string | null): Promise<number> {
+    const normalizedEmail = email?.toLowerCase().trim();
+    if (!normalizedEmail) {
+      return 0;
+    }
+    const pendientes = await this.invitationRepository.find({
+      where: { email: normalizedEmail, status: InvitationStatus.PENDING },
+    });
+    for (const invitation of pendientes) {
+      try {
+        await this.revoke(invitation.id);
+      } catch (err) {
+        this.logger.warn(
+          `No se pudo anular la invitación ${invitation.id} de ${normalizedEmail}: ${
+            err instanceof Error ? err.message : String(err)
+          }`,
+        );
+      }
+    }
+    return pendientes.length;
   }
 
   /**

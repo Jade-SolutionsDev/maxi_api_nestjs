@@ -1,11 +1,14 @@
 import {
+  BadRequestException,
   ConflictException,
   Injectable,
+  Logger,
   NotFoundException,
   OnModuleInit,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { In, Repository } from 'typeorm';
+import { contieneSinTildes } from '../common/search/accent-insensitive';
 import { Role, User } from '../users/entities/user.entity';
 import { UpdateRoleDto } from './dto/update-role.dto';
 import { Permission } from './entities/permission.entity';
@@ -27,47 +30,141 @@ export interface UserPermissionsPayload {
   permissions: Record<string, string[]>;
 }
 
-/** Modules whose actions are governed by managed permissions this stage. */
-export const MODULES = [
-  'products',
-  'categories',
-  'departments',
-  'stock-locations',
-  // Support inbox + reply templates; grantable to non-admin staff.
-  'contact',
-] as const;
-export const ACTIONS = ['list', 'read', 'create', 'update', 'delete'] as const;
-
-const READ: readonly string[] = ['list', 'read'];
+const CRUD = ['list', 'read', 'create', 'update', 'delete'] as const;
 
 /**
- * Baseline access the enum roles keep even with no managed role assigned —
- * mirrors the `@Roles(...)` gating the catalog controllers had before. Managed
- * roles only ever ADD on top of this, so switching to permission checks never
- * removes access an existing GROCER/KARDIST already had. Admins bypass entirely.
+ * Las dos acciones que solo miran. Todas las demás son trabajar sobre el
+ * módulo, y trabajar sobre algo que no puedes ver no significa nada: el menú
+ * lateral enseña un módulo cuando el rol tiene `list`, así que un rol con solo
+ * `create` deja a la persona en un panel vacío.
+ *
+ * Por eso conceder cualquier acción de trabajo arrastra `list` y `read` — las
+ * que el módulo tenga. `uploads`, que solo ofrece `create`, no gana nada.
  */
-const DEFAULT_ROLE_PERMISSIONS: Record<
-  string,
-  Record<string, readonly string[]>
-> = {
-  // GROCER: full control of products + read-only taxonomy, and manage their
-  // assigned storages — list/read/update but not create/delete (today's @Roles).
-  [Role.GROCER]: {
-    products: ACTIONS,
-    categories: READ,
-    departments: READ,
-    'stock-locations': ['list', 'read', 'update'],
-  },
-  // KARDIST: read-only taxonomy, no product/storage access (today's @Roles).
-  [Role.KARDIST]: { categories: READ, departments: READ },
+const ACCIONES_DE_LECTURA = ['list', 'read'] as const;
+
+/**
+ * Módulos que hacen falta para que otro se pueda usar de verdad.
+ *
+ * No es una jerarquía inventada: son las listas que el propio panel consulta
+ * para pintar sus filtros y formularios. Los productos se filtran por
+ * departamento y categoría, así que un rol con todos los permisos de
+ * `products` y ninguno de `categories` abre la pantalla y no puede filtrar —
+ * el desplegable pide la lista de categorías y recibe un 403. Le pasó a QA.
+ *
+ * Solo se conceden las lecturas del módulo del que se depende, nunca escritura.
+ */
+const MODULOS_DE_APOYO: Record<string, readonly string[]> = {
+  products: ['categories', 'departments'],
+  categories: ['departments'],
+  inventory: ['categories', 'departments', 'stock-locations'],
+};
+
+/**
+ * THE permission catalog: every grantable backoffice module and its actions.
+ * Keys match the frontend resource names 1:1 (see authProvider RESOURCE_RULES).
+ *
+ * RULE (see workspace CLAUDE.md): a new backoffice module MUST be registered
+ * here and its routes decorated with @RequirePermission, or it will be a 403
+ * for every non-admin — the PermissionGuard denies undecorated routes by
+ * design. `users` and `permissions` are deliberately absent: they stay
+ * @Roles(SUPER_ADMIN, ADMIN) and are never grantable.
+ */
+export const MODULE_ACTIONS: Record<string, readonly string[]> = {
+  products: CRUD,
+  categories: CRUD,
+  departments: CRUD,
+  // `view-all` lifts the assignment scoping: see every storage (and its
+  // inventory) without being assigned to it. Writes still require assignment.
+  'stock-locations': [...CRUD, 'view-all'],
+  nomenclators: CRUD,
+  'delivery-options': CRUD,
+  clients: CRUD,
+  'cms-pages': CRUD,
+  'cms-banners': CRUD,
+  'cms-services': CRUD,
+  'cms-staff': CRUD,
+  // Support inbox + reply templates share one module; `reply` is split from
+  // `update` so triage and customer-facing replies are separately grantable.
+  contact: [...CRUD, 'reply'],
+  // `update-status-direct` allows jumping straight to any status (manual
+  // warehouse sales); `update-status` alone only advances fulfillment.
+  orders: [
+    'list',
+    'read',
+    'update-status',
+    'update-status-direct',
+    'update-payment-status',
+  ],
+  // Devoluciones de dinero. `request` deja el compromiso en la cola;
+  // `complete` confirma que el dinero salió y es el que mueve el pedido a
+  // «reembolsado», así que se conceden por separado.
+  refunds: ['list', 'read', 'request', 'complete', 'reject'],
+  inventory: ['list', 'read', 'aggregate', 'history', 'create-operation'],
+  'cms-settings': ['read', 'update'],
+  'fulfillment-settings': ['read', 'update'],
+  dashboard: ['view'],
+  uploads: ['create'],
 };
 
 /** System-admin tiers bypass all permission checks. */
-const isSystemAdmin = (role: string | null): boolean =>
+export const isSystemAdmin = (role: string | null): boolean =>
   (role as Role) === Role.SUPER_ADMIN || (role as Role) === Role.ADMIN;
+
+/**
+ * Seeded, EDITABLE starter roles — templates an admin can assign, rename,
+ * regrant or delete. Created exactly once: the first boot where no role with
+ * that `systemKey` has ever existed; the seeder never reasserts anything.
+ *
+ * The systemKeys are historical (they were the pre-collapse GROCER/KARDIST
+ * enum values) and only serve as the one-time-creation marker — nothing maps
+ * users to them automatically anymore; invitations carry explicit role ids.
+ */
+const BASE_ROLES: ReadonlyArray<{
+  systemKey: string;
+  name: string;
+  description: string;
+  grants: Record<string, readonly string[]>;
+}> = [
+  {
+    systemKey: 'GROCER',
+    name: 'Almacenero — base',
+    description:
+      'Permisos iniciales del rol Almacenero. Ajústalos o retíralos según lo que necesite tu equipo.',
+    // Lo que MxH-0036 define para el Jefe de almacenes: almacenes e inventario
+    // los opera, el catálogo solo lo consulta. En concreto, y porque la tarjeta
+    // lo dice con todas las letras: **el catálogo es de solo lectura** (no crea,
+    // no edita, no borra, no activa productos) y **los almacenes no se
+    // modifican** (tampoco se crean ni se eliminan, eso ya lo impedía el
+    // catálogo de acciones). Los pedidos quedan fuera: son de otro rol.
+    // Es una plantilla editable, así que quien necesite más se lo concede desde
+    // la pantalla de roles — pero nace por lo mínimo, no por lo máximo.
+    grants: {
+      products: ['list', 'read'],
+      categories: ['list', 'read'],
+      departments: ['list', 'read'],
+      'stock-locations': ['list', 'read'],
+      inventory: ['list', 'read', 'history', 'create-operation'],
+    },
+  },
+  {
+    systemKey: 'KARDIST',
+    name: 'Kardista — base',
+    description:
+      'Permisos iniciales del rol Kardista. Ajústalos o retíralos según lo que necesite tu equipo.',
+    grants: {
+      categories: ['list', 'read'],
+      departments: ['list', 'read'],
+      inventory: ['read', 'aggregate', 'history'],
+      uploads: ['create'],
+    },
+  },
+];
 
 @Injectable()
 export class PermissionsService implements OnModuleInit {
+  private readonly logger = new Logger(PermissionsService.name);
+
   constructor(
     @InjectRepository(Permission)
     private readonly permissionRepository: Repository<Permission>,
@@ -83,17 +180,19 @@ export class PermissionsService implements OnModuleInit {
 
   async onModuleInit(): Promise<void> {
     await this.seedPermissions();
+    await this.seedBaseRoles();
   }
 
-  /** Seed the permission catalog (modules × actions) for enforced modules. */
+  /** Diff-seed the catalog: one read, one write of whatever rows are missing. */
   private async seedPermissions(): Promise<void> {
-    for (const module of MODULES) {
-      for (const action of ACTIONS) {
-        const existing = await this.permissionRepository.findOne({
-          where: { module, action },
-        });
-        if (!existing) {
-          await this.permissionRepository.save({
+    const existing = await this.permissionRepository.find();
+    const have = new Set(existing.map((p) => `${p.module}:${p.action}`));
+
+    const missing: Array<Partial<Permission>> = [];
+    for (const [module, actions] of Object.entries(MODULE_ACTIONS)) {
+      for (const action of actions) {
+        if (!have.has(`${module}:${action}`)) {
+          missing.push({
             module,
             action,
             description: `${action} ${module}`,
@@ -102,19 +201,127 @@ export class PermissionsService implements OnModuleInit {
         }
       }
     }
-  }
-
-  private baselineGrants(
-    role: string,
-    module: string,
-    action: string,
-  ): boolean {
-    return DEFAULT_ROLE_PERMISSIONS[role]?.[module]?.includes(action) ?? false;
+    if (missing.length > 0) {
+      await this.permissionRepository.save(missing);
+      this.logger.log(`Seeded ${missing.length} permission(s).`);
+    }
   }
 
   /**
-   * Effective check: system admins bypass, then the enum baseline, then any
-   * assigned managed role.
+   * One-time creation of the editable base roles (+ grants). `withDeleted`
+   * makes deletion by an admin final — the seeder never resurrects a base
+   * role. Nobody is auto-assigned: invitations carry explicit role ids.
+   */
+  private async seedBaseRoles(): Promise<void> {
+    for (const base of BASE_ROLES) {
+      const existing = await this.roleRepository.findOne({
+        where: { systemKey: base.systemKey },
+        withDeleted: true,
+      });
+      if (existing) continue;
+
+      let role: ManagedRole;
+      try {
+        role = await this.roleRepository.save({
+          name: base.name,
+          description: base.description,
+          systemKey: base.systemKey,
+          isSystem: false, // editable — that is the whole point
+          isActive: true,
+          createdBy: null,
+        });
+      } catch {
+        // Unique(system_key) collision: another instance seeded first.
+        continue;
+      }
+
+      const wanted = new Set(
+        Object.entries(base.grants).flatMap(([module, actions]) =>
+          actions.map((action) => `${module}:${action}`),
+        ),
+      );
+      const catalog = await this.permissionRepository.find();
+      const grants = catalog.filter((p) =>
+        wanted.has(`${p.module}:${p.action}`),
+      );
+      if (grants.length > 0) {
+        await this.rolePermissionRepository.save(
+          grants.map((p) => ({ roleId: role.id, permissionId: p.id })),
+        );
+      }
+      this.logger.log(`Seeded base role "${base.name}".`);
+    }
+  }
+
+  /** Batch for list displays: active managed roles per user id. One query. */
+  async getRolesByUserIds(
+    userIds: string[],
+  ): Promise<Record<string, Array<{ id: string; name: string }>>> {
+    const result: Record<string, Array<{ id: string; name: string }>> = {};
+    if (userIds.length === 0) return result;
+    const rows = await this.userRoleRepository.find({
+      where: { userId: In(userIds) },
+      relations: { role: true },
+    });
+    for (const row of rows) {
+      if (!row.role?.isActive) continue;
+      (result[row.userId] ??= []).push({
+        id: row.role.id,
+        name: row.role.name,
+      });
+    }
+    return result;
+  }
+
+  /** Resolve role ids to {id, name}, dropping unknown/inactive ones. */
+  async getRoleSummariesByIds(
+    roleIds: string[],
+  ): Promise<Array<{ id: string; name: string }>> {
+    const unique = [...new Set(roleIds)];
+    if (unique.length === 0) return [];
+    const roles = await this.roleRepository.find({
+      where: { id: In(unique), isActive: true },
+    });
+    return roles.map((role) => ({ id: role.id, name: role.name }));
+  }
+
+  /** Throws unless every id is an existing ACTIVE role (invite validation). */
+  async assertActiveRoles(roleIds: string[]): Promise<void> {
+    const unique = [...new Set(roleIds)];
+    if (unique.length === 0) return;
+    const found = await this.roleRepository.count({
+      where: { id: In(unique), isActive: true },
+    });
+    if (found !== unique.length) {
+      throw new NotFoundException('One or more roles were not found');
+    }
+  }
+
+  /**
+   * Assign managed roles to a user, skipping anything that no longer exists
+   * or is inactive — a role can be deleted between an invitation and the
+   * registration webhook, and user creation must never fail over it.
+   * Composite-PK save makes it idempotent.
+   */
+  async assignRolesLenient(userId: string, roleIds: string[]): Promise<void> {
+    const unique = [...new Set(roleIds)];
+    if (unique.length === 0) return;
+    const roles = await this.roleRepository.find({
+      where: { id: In(unique), isActive: true },
+    });
+    if (roles.length === 0) return;
+    await this.userRoleRepository.save(
+      roles.map((role) => ({
+        userId,
+        roleId: role.id,
+        assignedBy: null,
+      })),
+    );
+  }
+
+  /**
+   * Effective check: system admins bypass; everyone else needs the permission
+   * through an assigned active role. There is NO hard-coded baseline anymore.
    */
   async hasPermission(
     userId: string,
@@ -123,7 +330,6 @@ export class PermissionsService implements OnModuleInit {
     action: string,
   ): Promise<boolean> {
     if (isSystemAdmin(role)) return true;
-    if (this.baselineGrants(role, module, action)) return true;
 
     const perm = await this.permissionRepository.findOne({
       where: { module, action, isActive: true },
@@ -144,9 +350,36 @@ export class PermissionsService implements OnModuleInit {
       where: { userId },
       relations: { role: true },
     });
-    return userRoles
-      .filter((ur) => ur.role.isActive && ur.role.deletedAt === null)
-      .map((ur) => ur.roleId);
+    // A soft-deleted role loads as a NULL relation — filter it, don't crash.
+    return userRoles.filter((ur) => ur.role?.isActive).map((ur) => ur.roleId);
+  }
+
+  /**
+   * Distinct ids of users whose assigned ACTIVE roles grant any active
+   * permission of the module — "who can work with this module". Used to decide
+   * who is assignable to a stock location. Admins are not included (they
+   * bypass permissions and are never assignment-scoped).
+   */
+  async getUserIdsWithModuleGrant(module: string): Promise<string[]> {
+    const perms = await this.permissionRepository.find({
+      where: { module, isActive: true },
+    });
+    if (perms.length === 0) return [];
+
+    const grants = await this.rolePermissionRepository.find({
+      where: { permissionId: In(perms.map((p) => p.id)) },
+    });
+    if (grants.length === 0) return [];
+
+    const assignments = await this.userRoleRepository.find({
+      where: { roleId: In([...new Set(grants.map((g) => g.roleId))]) },
+      relations: { role: true },
+    });
+    return [
+      ...new Set(
+        assignments.filter((a) => a.role?.isActive).map((a) => a.userId),
+      ),
+    ];
   }
 
   async getUserRoles(userId: string): Promise<ManagedRole[]> {
@@ -156,36 +389,27 @@ export class PermissionsService implements OnModuleInit {
     });
     return userRoles
       .map((ur) => ur.role)
-      .filter((role) => role.isActive && role.deletedAt === null);
+      .filter((role): role is ManagedRole => Boolean(role?.isActive));
   }
 
   /**
-   * The effective permission map for a user (baseline ∪ managed, or everything
-   * for admins) — consumed by the frontend to gate UI actions.
+   * The effective permission map for a user (full catalog for admins, the
+   * union of assigned active roles for everyone else) — consumed by the
+   * frontend to gate UI actions.
    */
   async getUserPermissions(userId: string): Promise<UserPermissionsPayload> {
     const permissions: Record<string, string[]> = {};
-    const add = (module: string, action: string) => {
-      (permissions[module] ??= []).push(action);
-    };
 
     const user = await this.userRepository.findOne({ where: { id: userId } });
     const role: string | null = user?.role ?? null;
 
     if (isSystemAdmin(role)) {
-      for (const module of MODULES) permissions[module] = [...ACTIONS];
+      for (const [module, actions] of Object.entries(MODULE_ACTIONS)) {
+        permissions[module] = [...actions];
+      }
       return { user: { id: userId, role, roles: [] }, permissions };
     }
 
-    // Baseline from the enum role.
-    const baseline = role ? DEFAULT_ROLE_PERMISSIONS[role] : undefined;
-    if (baseline) {
-      for (const [module, actions] of Object.entries(baseline)) {
-        for (const action of actions) add(module, action);
-      }
-    }
-
-    // Managed roles add on top.
     const roles = await this.getUserRoles(userId);
     if (roles.length > 0) {
       const rolePermissions = await this.rolePermissionRepository.find({
@@ -194,9 +418,9 @@ export class PermissionsService implements OnModuleInit {
       });
       for (const rp of rolePermissions) {
         const perm = rp.permission;
-        if (!perm.isActive) continue;
+        if (!perm?.isActive) continue;
         if (!permissions[perm.module]?.includes(perm.action)) {
-          add(perm.module, perm.action);
+          (permissions[perm.module] ??= []).push(perm.action);
         }
       }
     }
@@ -207,8 +431,14 @@ export class PermissionsService implements OnModuleInit {
     };
   }
 
+  /**
+   * Crea el rol y, si vienen, le asigna sus permisos de una vez.
+   *
+   * Si los permisos fallan, el rol recién creado se deshace: quedaría un rol
+   * huérfano y sin acceso a nada, que es justo lo que ya no queremos.
+   */
   async createRole(
-    data: { name: string; description?: string },
+    data: { name: string; description?: string; permissionIds?: string[] },
     createdBy: string | null = null,
   ): Promise<ManagedRole> {
     const existing = await this.roleRepository.findOne({
@@ -219,17 +449,35 @@ export class PermissionsService implements OnModuleInit {
       throw new ConflictException(`Role "${data.name}" already exists`);
     }
 
-    return this.roleRepository.save({
+    const role = await this.roleRepository.save({
       name: data.name,
       description: data.description ?? null,
       isSystem: false,
       isActive: true,
       createdBy,
     });
+
+    if (data.permissionIds?.length) {
+      try {
+        await this.setRolePermissions(role.id, data.permissionIds);
+      } catch (err) {
+        await this.roleRepository.delete(role.id);
+        throw err;
+      }
+    }
+
+    return role;
   }
 
-  async listRoles(): Promise<ManagedRole[]> {
-    return this.roleRepository.find();
+  async listRoles(q?: string): Promise<ManagedRole[]> {
+    const termino = q?.trim();
+    if (!termino) return this.roleRepository.find({});
+    return this.roleRepository.find({
+      where: [
+        { name: contieneSinTildes(termino) },
+        { description: contieneSinTildes(termino) },
+      ],
+    });
   }
 
   async getRole(roleId: string): Promise<ManagedRole> {
@@ -252,6 +500,10 @@ export class PermissionsService implements OnModuleInit {
     if (role.isSystem) {
       throw new ConflictException('System roles cannot be deleted');
     }
+    // Soft delete keeps the row, but assignments must go: the FK CASCADE only
+    // fires on hard deletes, and ghost assignments used to crash every
+    // permission check for the affected users.
+    await this.userRoleRepository.delete({ roleId });
     await this.roleRepository.softDelete(roleId);
   }
 
@@ -263,14 +515,82 @@ export class PermissionsService implements OnModuleInit {
     if (role.isSystem) {
       throw new ConflictException('System roles cannot be modified');
     }
-    await this.rolePermissionRepository.delete({ roleId });
-    if (permissionIds.length > 0) {
-      const entities = permissionIds.map((permissionId) => ({
-        roleId,
-        permissionId,
-      }));
-      await this.rolePermissionRepository.save(entities);
+
+    const uniqueIds = [...new Set(permissionIds)];
+    if (uniqueIds.length === 0) {
+      // Un rol sin un solo permiso no sirve para nada: quien lo tenga entra y
+      // no ve más que el panel. Se rechaza aquí y no solo en la pantalla.
+      throw new BadRequestException(
+        'Un rol tiene que dar acceso al menos a un módulo',
+      );
     }
+
+    const pedidos = await this.permissionRepository.find({
+      where: { id: In(uniqueIds) },
+    });
+    if (pedidos.length !== uniqueIds.length) {
+      throw new NotFoundException('One or more permissions were not found');
+    }
+
+    const conLecturas = await this.conLecturasImplicadas(pedidos);
+
+    await this.rolePermissionRepository.delete({ roleId });
+    await this.rolePermissionRepository.save(
+      conLecturas.map((permissionId) => ({ roleId, permissionId })),
+    );
+  }
+
+  /**
+   * Añade `list` y `read` de cada módulo donde se conceda alguna acción de
+   * trabajo. Devuelve los ids finales, sin repetir.
+   *
+   * Se hace en el servidor y no solo en la pantalla porque la regla vale para
+   * cualquier vía: la API, una importación o el día que alguien escriba en la
+   * base a mano.
+   */
+  private async conLecturasImplicadas(
+    pedidos: Permission[],
+  ): Promise<string[]> {
+    const modulosQueTrabajan = new Set(
+      pedidos
+        .filter(
+          (permiso) =>
+            !ACCIONES_DE_LECTURA.includes(
+              permiso.action as (typeof ACCIONES_DE_LECTURA)[number],
+            ),
+        )
+        .map((permiso) => permiso.module),
+    );
+
+    // Cualquier módulo tocado —se trabaje en él o solo se mire— arrastra las
+    // lecturas de aquellos de los que depende para pintarse.
+    const modulosDeApoyo = new Set(
+      [...new Set(pedidos.map((permiso) => permiso.module))].flatMap(
+        (module) => MODULOS_DE_APOYO[module] ?? [],
+      ),
+    );
+
+    const necesitanLectura = new Set([
+      ...modulosQueTrabajan,
+      ...modulosDeApoyo,
+    ]);
+    if (necesitanLectura.size === 0) {
+      return pedidos.map((permiso) => permiso.id);
+    }
+
+    const faltantes = await this.permissionRepository.find({
+      where: {
+        module: In([...necesitanLectura]),
+        action: In([...ACCIONES_DE_LECTURA]),
+        isActive: true,
+      },
+    });
+    return [
+      ...new Set([
+        ...pedidos.map((permiso) => permiso.id),
+        ...faltantes.map((permiso) => permiso.id),
+      ]),
+    ];
   }
 
   async listPermissions(): Promise<Permission[]> {

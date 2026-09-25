@@ -1,4 +1,4 @@
-import { sinTildes } from '../common/search/accent-insensitive';
+import { contieneTexto, sinTildes } from '../common/search/accent-insensitive';
 import {
   BadRequestException,
   ConflictException,
@@ -12,6 +12,7 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { createClerkClient } from '@clerk/backend';
 import { IsNull, Repository } from 'typeorm';
 import { CustomerProvisioningService } from '../clients/customer-provisioning.service';
+import { PermissionsService } from '../permissions/permissions.service';
 import {
   buildPaginatedResponse,
   getPaginationParams,
@@ -23,14 +24,19 @@ import type { UserStatusFilter } from './dto/list-users-query.dto';
 import { UpdateUserDto } from './dto/update-user.dto';
 import { Role, User } from './entities/user.entity';
 import { Invitation, InvitationStatus } from './entities/invitation.entity';
+import { InvitationsService } from './invitations.service';
 
 export interface FindUsersFilter {
   q?: string;
-  role?: Role;
+  /** Access tier (Role value) OR a managed-role uuid — one overloaded param. */
+  role?: string;
   status?: UserStatusFilter;
   includeInvitations?: boolean;
   includeDeleted?: boolean;
 }
+
+const UUID_RE =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 @Injectable()
 export class UsersService {
@@ -43,9 +49,12 @@ export class UsersService {
     private readonly invitationRepository: Repository<Invitation>,
     private readonly configService: ConfigService,
     private readonly customerProvisioning: CustomerProvisioningService,
+    private readonly permissionsService: PermissionsService,
+    private readonly invitationsService: InvitationsService,
   ) {}
 
-  /** Run a storefront-mirror side effect without ever failing the admin action. */
+  /** Run a side effect (storefront mirror, base-role assignment) without ever
+   *  failing the admin action it rides on. */
   private async safeMirror(
     fn: () => Promise<void>,
     context: string,
@@ -53,7 +62,7 @@ export class UsersService {
     try {
       await fn();
     } catch (err) {
-      this.logger.warn(`Storefront mirror (${context}) failed: ${String(err)}`);
+      this.logger.warn(`Side effect (${context}) failed: ${String(err)}`);
     }
   }
 
@@ -62,6 +71,19 @@ export class UsersService {
     pagination: PaginationQueryDto = {},
   ): Promise<PaginatedResponse<User>> {
     const { page, limit, skip } = getPaginationParams(pagination);
+
+    // The "Rol" filter is one param carrying either an access tier or a
+    // managed-role uuid (the list UI mixes both in one dropdown).
+    const tierFilter = Object.values(Role).includes(filter.role as Role)
+      ? (filter.role as Role)
+      : undefined;
+    const managedRoleFilter =
+      !tierFilter && filter.role && UUID_RE.test(filter.role)
+        ? filter.role
+        : undefined;
+    if (filter.role && !tierFilter && !managedRoleFilter) {
+      throw new BadRequestException(`Unknown role filter "${filter.role}"`);
+    }
 
     // "Pending" (the "Awaiting approval" tab) combines two not-yet-usable
     // states: pending invitations (not registered) and registered users that
@@ -77,12 +99,11 @@ export class UsersService {
       const combined = [...invitations, ...awaiting].sort(
         (a, b) => b.createdAt.getTime() - a.createdAt.getTime(),
       );
-      return buildPaginatedResponse(
-        combined.slice(skip, skip + limit),
-        combined.length,
-        page,
-        limit,
+      const pageItems = combined.slice(skip, skip + limit);
+      await this.attachManagedRoles(
+        pageItems.filter((u) => u.managedRoles === undefined),
       );
+      return buildPaginatedResponse(pageItems, combined.length, page, limit);
     }
 
     const qb = this.usersRepository.createQueryBuilder('user');
@@ -96,8 +117,16 @@ export class UsersService {
         { q: `%${filter.q}%` },
       );
     }
-    if (filter.role) {
-      qb.andWhere('user.role = :role', { role: filter.role });
+    if (tierFilter) {
+      qb.andWhere('user.role = :role', { role: tierFilter });
+    }
+    if (managedRoleFilter) {
+      qb.innerJoin(
+        'user_roles',
+        'ur',
+        'ur.user_id = user.id AND ur.role_id = :managedRoleId',
+        { managedRoleId: managedRoleFilter },
+      );
     }
     if (filter.status === 'active') {
       qb.andWhere('user.isActive = true');
@@ -129,16 +158,47 @@ export class UsersService {
     let total = usersTotal;
 
     // Only the unfiltered ("all") view mixes in pending invitations, pinned to
-    // the first page. Status facets are exclusive.
+    // the first page. Status facets are exclusive. The role filter applies to
+    // invitations too — by tier, or by invited managed role.
     if (!filter.status && filter.includeInvitations) {
-      const pendingUsers = await this.loadPendingInvitationUsers();
+      let pendingUsers = await this.loadPendingInvitationUsers();
+      // Invitations never went through the SQL search above, so they stuck to
+      // page 1 no matter what was typed. Same columns, same accent rule.
+      if (filter.q) {
+        const q = filter.q;
+        pendingUsers = pendingUsers.filter((u) =>
+          contieneTexto(q, u.firstName, u.lastName, u.email),
+        );
+      }
+      if (tierFilter) {
+        pendingUsers = pendingUsers.filter((u) => u.role === tierFilter);
+      }
+      if (managedRoleFilter) {
+        pendingUsers = pendingUsers.filter((u) =>
+          u.managedRoles?.some((r) => r.id === managedRoleFilter),
+        );
+      }
       total += pendingUsers.length;
       if (page === 1) {
         items = [...pendingUsers, ...users];
       }
     }
 
+    await this.attachManagedRoles(
+      items.filter((u) => u.managedRoles === undefined),
+    );
     return buildPaginatedResponse(items, total, page, limit);
+  }
+
+  /** One batched query: attach active managed roles to the given users. */
+  private async attachManagedRoles(users: User[]): Promise<void> {
+    if (users.length === 0) return;
+    const byUser = await this.permissionsService.getRolesByUserIds(
+      users.map((u) => u.id),
+    );
+    for (const user of users) {
+      user.managedRoles = byUser[user.id] ?? [];
+    }
   }
 
   private async loadPendingInvitationUsers(): Promise<User[]> {
@@ -146,6 +206,13 @@ export class UsersService {
       where: { status: InvitationStatus.PENDING },
       order: { createdAt: 'DESC', id: 'DESC' },
     });
+
+    // Resolve the invited managed roles in one batch so the list can show
+    // what the person was invited AS (their fake ids have no user_roles).
+    const summaries = await this.permissionsService.getRoleSummariesByIds(
+      invitations.flatMap((i) => i.roleIds ?? []),
+    );
+    const roleById = new Map(summaries.map((r) => [r.id, r]));
 
     return invitations.map((invitation) => {
       const user = new User();
@@ -166,6 +233,9 @@ export class UsersService {
       user.createdBy = invitation.invitedById;
       user.createdAt = invitation.createdAt;
       user.updatedAt = invitation.updatedAt;
+      user.managedRoles = (invitation.roleIds ?? [])
+        .map((id) => roleById.get(id))
+        .filter((r): r is { id: string; name: string } => Boolean(r));
       return user;
     });
   }
@@ -175,6 +245,7 @@ export class UsersService {
     if (!user) {
       throw new NotFoundException(`User with id "${id}" not found`);
     }
+    await this.attachManagedRoles([user]);
     return user;
   }
 
@@ -202,6 +273,8 @@ export class UsersService {
       email: createUserDto.email?.toLowerCase() ?? null,
     });
 
+    // Roles are assigned explicitly (invitation roleIds via the webhook, or
+    // an admin through PUT /permissions/users/:id/roles) — nothing automatic.
     return this.usersRepository.save(user);
   }
 
@@ -306,6 +379,11 @@ export class UsersService {
     await this.usersRepository.update(id, { isActive: false });
     await this.usersRepository.softDelete(id);
 
+    // Sin esto, borrar a alguien a quien se invitó y nunca aceptó dejaba su
+    // invitación viva, y volver a invitarlo respondía «ya hay una invitación
+    // pendiente» sobre un usuario que ya no existe.
+    await this.invitationsService.revokePendingForEmail(user.email);
+
     // Deleting a never-approved user is a rejection — tear down the gated
     // storefront customer we provisioned at sign-up. Approved users keep theirs.
     if (!user.approvedAt) {
@@ -378,6 +456,8 @@ export class UsersService {
       firstName?: string;
       lastName?: string;
       role?: Role;
+      /** Managed roles from the invitation, assigned on first creation. */
+      roleIds?: string[];
       phone?: string;
       businessName?: string;
     },
@@ -386,6 +466,7 @@ export class UsersService {
       where: { clerkId },
       withDeleted: true,
     });
+    const isNew = !user;
 
     if (!user) {
       if (data.email) {
@@ -401,7 +482,7 @@ export class UsersService {
         lastName: data.lastName ?? null,
         phone: data.phone ?? null,
         businessName: data.businessName ?? null,
-        role: data.role ?? Role.KARDIST,
+        role: data.role ?? Role.STAFF,
         isActive: false,
       });
     } else {
@@ -418,7 +499,20 @@ export class UsersService {
       // explicit admin action, and a disabled account stays disabled.
     }
 
-    return this.usersRepository.save(user);
+    const saved = await this.usersRepository.save(user);
+    if (isNew) {
+      // The invitation chose the managed roles; assign them leniently (a role
+      // deleted since the invite is skipped, and this never fails creation).
+      await this.safeMirror(
+        () =>
+          this.permissionsService.assignRolesLenient(
+            saved.id,
+            data.roleIds ?? [],
+          ),
+        `assign invited roles`,
+      );
+    }
+    return saved;
   }
 
   async deactivateByClerkId(clerkId: string): Promise<void> {

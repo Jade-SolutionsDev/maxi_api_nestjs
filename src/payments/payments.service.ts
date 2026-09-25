@@ -10,6 +10,10 @@ import {
 import { InjectRepository } from '@nestjs/typeorm';
 import { DataSource, In, Repository } from 'typeorm';
 import { InventoryService } from '../inventory/inventory.service';
+import { OrderEventKind } from '../order-events/entities/order-event.entity';
+import { OrderEventsService } from '../order-events/order-events.service';
+import { OrderMailerService } from '../mail/order-mailer.service';
+import { RefundsService } from '../refunds/refunds.service';
 import { ProductsService } from '../products/products.service';
 import { OrderItem } from '../orders/entities/order-item.entity';
 import {
@@ -30,6 +34,7 @@ import {
   ResolvedPaymentMethod,
 } from './payment-methods.service';
 import { GatewayCharge } from './payment-gateway.interface';
+import { sellarCobro } from '../orders/payment-sealing';
 
 /** Postgres reports a broken unique constraint as 23505. */
 const isUniqueViolation = (err: unknown): boolean =>
@@ -62,8 +67,42 @@ export class PaymentsService {
     private readonly methodsService: PaymentMethodsService,
     private readonly inventoryService: InventoryService,
     private readonly productsService: ProductsService,
+    private readonly orderEvents: OrderEventsService,
     private readonly dataSource: DataSource,
+    private readonly refunds: RefundsService,
+    private readonly orderMailer: OrderMailerService,
   ) {}
+
+  /** Todos los intentos de un pedido, del más reciente al más antiguo. */
+  listChargesFor(orderId: string): Promise<PaymentCharge[]> {
+    return this.chargeRepository.find({
+      where: { orderId },
+      order: { createdAt: 'DESC' },
+    });
+  }
+
+  /**
+   * Quita un intento que nunca se completó. Un cobro con éxito no se toca
+   * nunca desde aquí: eso es dinero, y se resuelve con un reembolso.
+   */
+  async removeAttempt(
+    orderId: string,
+    chargeId: string,
+  ): Promise<PaymentCharge> {
+    const charge = await this.chargeRepository.findOne({
+      where: { id: chargeId, orderId },
+    });
+    if (!charge) {
+      throw new NotFoundException(`Payment attempt "${chargeId}" not found`);
+    }
+    if (charge.status === ChargeStatus.SUCCEEDED) {
+      throw new ConflictException(
+        'Este intento se cobró con éxito: no se puede quitar, hay que reembolsar',
+      );
+    }
+    await this.chargeRepository.delete({ id: charge.id });
+    return charge;
+  }
 
   /** Latest attempt of an order, if any (newest wins, whatever its provider). */
   latestChargeFor(orderId: string): Promise<PaymentCharge | null> {
@@ -180,6 +219,18 @@ export class PaymentsService {
 
     order.paymentRef = data.reference;
     await this.orderRepository.save(order);
+    await this.orderEvents.record(null, {
+      orderId: order.id,
+      kind: OrderEventKind.PAYMENT_ATTEMPT,
+      actor: { clientId: order.clientId },
+      meta: {
+        provider: code,
+        methodLabel: method.label,
+        reference: data.reference,
+        chargeStatus: data.status,
+        attempt,
+      },
+    });
     return charge;
   }
 
@@ -343,6 +394,16 @@ export class PaymentsService {
     charge.customerReference = reference;
     if (receiptUrl) charge.receiptUrl = receiptUrl;
     await this.chargeRepository.save(charge);
+    await this.orderEvents.record(null, {
+      orderId: order.id,
+      kind: OrderEventKind.PROOF_SUBMITTED,
+      actor: { clientId },
+      meta: {
+        provider: charge.provider,
+        reference,
+        hasReceipt: !!receiptUrl,
+      },
+    });
 
     this.logger.log(
       `Comprobante recibido para ${order.orderNumber ?? order.id} ` +
@@ -425,17 +486,36 @@ export class PaymentsService {
     });
     if (!order || order.paymentStatus === PaymentStatus.PAID) return;
 
+    const previous = order.paymentStatus;
     if (charge.status === ChargeStatus.SUCCEEDED) {
       order.paymentStatus = PaymentStatus.PAID;
+      // Desde aquí cuentan la custodia, sus recordatorios y el plazo de
+      // entrega: la hora del cobro, no la de este barrido.
+      sellarCobro(order, charge.completedAt ?? new Date());
     } else if (charge.status === ChargeStatus.FAILED) {
       order.paymentStatus = PaymentStatus.FAILED;
     } else {
       return;
     }
     await this.orderRepository.save(order);
+    await this.orderEvents.record(null, {
+      orderId: order.id,
+      kind: OrderEventKind.PAYMENT_STATUS_CHANGED,
+      actor: { system: true },
+      field: 'paymentStatus',
+      previousValue: previous,
+      nextValue: order.paymentStatus,
+      reason: `Notificado por la pasarela ${charge.provider}`,
+      meta: { provider: charge.provider, reference: charge.reference },
+    });
 
     if (order.paymentStatus === PaymentStatus.PAID) {
       await this.reinstateIfExpired(order);
+      // Un pedido que quedó cancelado por falta de mercancía no está listo
+      // para recoger: ese cliente recibe el aviso de su devolución, no este.
+      if (order.status !== OrderStatus.CANCELLED) {
+        void this.orderMailer.paymentReceived(order.id).catch(() => undefined);
+      }
     }
   }
 
@@ -491,9 +571,20 @@ export class PaymentsService {
         // The one sanctioned cancelled -> pending move: TRANSITIONS forbids it
         // everywhere else, but here the order was only cancelled because we
         // had not been paid, and now we have been.
+        const previous = order.status;
         order.status = OrderStatus.PENDING;
         order.cancellationReason = null;
         await manager.getRepository(Order).save(order);
+        await this.orderEvents.record(manager, {
+          orderId: order.id,
+          kind: OrderEventKind.REINSTATED,
+          actor: { system: true },
+          field: 'status',
+          previousValue: previous,
+          nextValue: OrderStatus.PENDING,
+          reason:
+            'El pago llegó después de caducar y el stock seguía disponible',
+        });
       });
       this.logger.log(
         `Order ${order.orderNumber ?? order.id} reinstated: payment arrived after expiry and the stock was still there`,
@@ -512,13 +603,35 @@ export class PaymentsService {
       }
     }
 
+    const previousReason = order.cancellationReason;
     order.status = OrderStatus.CANCELLED;
     order.cancellationReason =
       CancellationReason.PAID_AFTER_EXPIRY_OUT_OF_STOCK;
     await this.orderRepository.save(order);
+    // El peor caso para el cliente: pagó y no hay mercancía. Se le cuenta en
+    // cuanto pasa, con el importe que se le va a devolver, en vez de que lo
+    // descubra esperando un pedido que no va a llegar.
+    // Ver la nota del mismo patrón en order-expiry.service.ts: `void` sin
+    // `.catch()` deja una promesa sin dueño, y eso tumba el proceso de Node.
+    void this.orderMailer
+      .cancelled(order.id, CancellationReason.PAID_AFTER_EXPIRY_OUT_OF_STOCK)
+      .catch(() => undefined);
+    await this.orderEvents.record(null, {
+      orderId: order.id,
+      kind: OrderEventKind.STATUS_CHANGED,
+      actor: { system: true },
+      field: 'cancellationReason',
+      previousValue: previousReason,
+      nextValue: CancellationReason.PAID_AFTER_EXPIRY_OUT_OF_STOCK,
+      reason:
+        'El pago llegó después de caducar y ya no había stock: hay que reembolsar',
+    });
     this.logger.warn(
       `Order ${order.orderNumber ?? order.id} was paid after expiring but the stock is gone — refund required`,
     );
+    // El dinero entró y no hay nada que entregar: la devolución se abre sola,
+    // sin esperar a que alguien repase la lista de cancelados.
+    await this.refunds.requestForLatePaymentWithoutStock(order);
   }
 
   /**

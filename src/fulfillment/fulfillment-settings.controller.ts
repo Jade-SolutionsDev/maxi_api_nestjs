@@ -1,7 +1,6 @@
 import { Body, Controller, Get, Patch } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
-import { Roles } from '../common/decorators/roles.decorator';
-import { Role } from '../users/entities/user.entity';
+import { RequirePermission } from '../permissions/decorators/require-permission.decorator';
 import {
   FulfillmentSettingsResponseDto,
   UpdateFulfillmentSettingsDto,
@@ -12,11 +11,11 @@ import { FulfillmentService } from './fulfillment.service';
 @ApiTags('fulfillment')
 @ApiBearerAuth()
 @Controller('fulfillment-settings')
-@Roles(Role.SUPER_ADMIN, Role.ADMIN)
 export class FulfillmentSettingsController {
   constructor(private readonly fulfillmentService: FulfillmentService) {}
 
   @Get()
+  @RequirePermission({ module: 'fulfillment-settings', action: 'read' })
   @ApiOperation({
     summary: 'Pickup switch and support message',
     description:
@@ -28,6 +27,7 @@ export class FulfillmentSettingsController {
   }
 
   @Patch()
+  @RequirePermission({ module: 'fulfillment-settings', action: 'update' })
   update(
     @Body() dto: UpdateFulfillmentSettingsDto,
   ): Promise<FulfillmentSettingsResponseDto> {

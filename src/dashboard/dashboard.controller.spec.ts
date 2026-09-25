@@ -1,6 +1,5 @@
 import { Test, TestingModule } from '@nestjs/testing';
-import { ROLES_KEY } from '../common/constants/auth.constants';
-import { Role } from '../users/entities/user.entity';
+import { PERMISSION_KEY } from '../permissions/decorators/require-permission.decorator';
 import { DashboardController } from './dashboard.controller';
 import { DashboardService } from './dashboard.service';
 
@@ -40,11 +39,16 @@ describe('DashboardController', () => {
     await expect(controller.getStats({})).resolves.toBe(stats);
   });
 
-  it('solo lo ven SUPER_ADMIN y ADMIN', () => {
-    // Un GROCER no puede leer /clients, así que no puede ver estos agregados.
-    expect(Reflect.getMetadata(ROLES_KEY, DashboardController)).toEqual([
-      Role.SUPER_ADMIN,
-      Role.ADMIN,
-    ]);
+  it('ambas rutas exigen el permiso dashboard:view', () => {
+    // Sin la concesión (o rol admin), estos agregados no se ven.
+    for (const handler of [
+      DashboardController.prototype.getStats,
+      DashboardController.prototype.getTopProducts,
+    ]) {
+      expect(Reflect.getMetadata(PERMISSION_KEY, handler)).toEqual({
+        module: 'dashboard',
+        action: 'view',
+      });
+    }
   });
 });
