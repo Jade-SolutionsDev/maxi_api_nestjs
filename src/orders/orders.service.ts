@@ -393,6 +393,24 @@ export class OrdersService {
     user: User,
     dto: CreateOrderForClientDto,
   ): Promise<OrderResponseDto> {
+    // Antes de resolver o escribir nada: un 403 no puede dejar rastro. Se
+    // captura `cobro` aparte porque TypeScript no arrastra el estrechamiento
+    // de `dto.cobro` dentro del closure de `alFinalizar`, más abajo.
+    const cobro = dto.cobro;
+    if (cobro) {
+      const puedeCobrar = await this.permissionsService.hasPermission(
+        user.id,
+        user.role,
+        'orders',
+        'update-payment-status',
+      );
+      if (!puedeCobrar) {
+        throw new ForbiddenException(
+          'No puedes marcar un pedido como cobrado; créalo pendiente',
+        );
+      }
+    }
+
     const client = await this.clientRepository.findOne({
       where: { id: dto.clientId },
     });
@@ -539,9 +557,36 @@ export class OrdersService {
           ? { lineasConPrecioPactado }
           : {}),
       },
+      // Dentro de la MISMA transacción que crea el pedido, a propósito: entre
+      // crear y cobrar habría un hueco con el pedido pendiente, y el barrido
+      // de caducidad puede pasar por ahí y cancelar una venta ya cobrada.
+      alFinalizar: cobro
+        ? async (manager, order) => {
+            order.paymentStatus = PaymentStatus.PAID;
+            order.paymentRef = cobro.reference ?? null;
+            sellarCobro(order);
+            await manager.getRepository(Order).save(order);
+            await this.orderEvents.record(manager, {
+              orderId: order.id,
+              kind: OrderEventKind.PAYMENT_STATUS_CHANGED,
+              actor: { userId: user.id },
+              field: 'paymentStatus',
+              previousValue: PaymentStatus.PENDING,
+              nextValue: PaymentStatus.PAID,
+              meta: {
+                canal: 'back-office',
+                paymentMethod: cobro.paymentMethod,
+                reference: cobro.reference ?? null,
+              },
+            });
+          }
+        : undefined,
     });
 
-    void this.orderMailer.orderReceived(orderId).catch((err) => {
+    const aviso = cobro
+      ? this.orderMailer.paymentReceived(orderId)
+      : this.orderMailer.orderReceived(orderId);
+    void aviso.catch((err) => {
       this.logger.error(
         `No se pudo avisar por correo del pedido ${orderId}`,
         err instanceof Error ? err.stack : String(err),

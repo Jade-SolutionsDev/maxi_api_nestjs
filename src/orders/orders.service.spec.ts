@@ -2409,5 +2409,67 @@ describe('OrdersService', () => {
       );
       anotado.mockRestore();
     });
+
+    describe('cuando ya se cobró por fuera', () => {
+      const conCobro = {
+        ...dtoBase,
+        cobro: { paymentMethod: 'manual', reference: 'TRF-9912' },
+      };
+
+      it('el pedido nace pagado y con su plazo contando', async () => {
+        await service.crearParaCliente(makeUser(Role.ADMIN), conCobro);
+
+        expect(orderRepo.save).toHaveBeenCalledWith(
+          expect.objectContaining({
+            paymentStatus: PaymentStatus.PAID,
+            paidAt: expect.any(Date),
+          }),
+        );
+      });
+
+      it('deja el cobro en el historial, aparte de la creación', async () => {
+        await service.crearParaCliente(makeUser(Role.ADMIN), conCobro);
+
+        expect(orderEvents.record).toHaveBeenCalledWith(
+          expect.anything(),
+          expect.objectContaining({
+            kind: OrderEventKind.PAYMENT_STATUS_CHANGED,
+            actor: { userId: 'user-1' },
+            nextValue: PaymentStatus.PAID,
+          }),
+        );
+      });
+
+      it('manda «hemos recibido tu pago», no «falta el pago»', async () => {
+        await service.crearParaCliente(makeUser(Role.ADMIN), conCobro);
+
+        // orderReceived dice literalmente «Todavía falta el pago» y enseña un
+        // botón de pagar: en un pedido ya cobrado sería mentira.
+        expect(mailer.paymentReceived).toHaveBeenCalledWith('order-1');
+        expect(mailer.orderReceived).not.toHaveBeenCalled();
+      });
+
+      it('403 y NINGUNA escritura si no tiene el permiso de cobros', async () => {
+        permissionsService.hasPermission.mockImplementation(
+          (_u: string, _r: Role, _m: string, action: string) =>
+            Promise.resolve(action !== 'update-payment-status'),
+        );
+
+        await expect(
+          service.crearParaCliente(makeUser(Role.STAFF), conCobro),
+        ).rejects.toBeInstanceOf(ForbiddenException);
+        // La comprobación va ANTES de abrir la transacción.
+        expect(orderRepo.save).not.toHaveBeenCalled();
+        expect(inventoryService.reserve).not.toHaveBeenCalled();
+      });
+
+      it('sin cobro no exige el permiso de cobros', async () => {
+        permissionsService.hasPermission.mockResolvedValue(false);
+
+        await expect(
+          service.crearParaCliente(makeUser(Role.STAFF), dtoBase),
+        ).resolves.toBeDefined();
+      });
+    });
   });
 });
