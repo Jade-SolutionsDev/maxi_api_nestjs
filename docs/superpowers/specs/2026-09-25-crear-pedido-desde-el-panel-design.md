@@ -196,6 +196,54 @@ Además:
 - **Catálogo por almacén distinto del que ve el cliente** — el panel enseña el
   stock del municipio del cliente, igual que la tienda.
 
+## Qué pide el panel que no pide la tienda, y por qué
+
+Esta sección existe porque la regla no es obvia y, sin escribirla, la próxima
+sesión «corregirá» la diferencia por coherencia.
+
+El principio no es *«el panel nunca puede pedir más que la tienda»*. Es:
+
+> **El panel pide lo que hace falta para poder entregar el pedido, y nada más.**
+
+De ahí salen dos decisiones que parecen contradecirse y no lo hacen:
+
+- **El carné NO se pide en entrega a domicilio.** La tienda no lo pide —lo lleva
+  opcional dentro de la dirección— y exigirlo en el panel obligaría a quien
+  atiende el teléfono a pedir un dato que nadie más pide, bloqueando ventas
+  legítimas. En **recogida** sí es obligatorio, porque identifica en el
+  mostrador a quien se lleva la mercancía, y la tienda también lo exige ahí.
+- **El nombre y el teléfono de quien recibe SÍ son obligatorios en entrega**,
+  aunque la tienda los deje opcionales. Un pedido tomado por teléfono sin a
+  quién entregarlo no se puede repartir: en la tienda el propio comprador es el
+  destinatario por defecto, y aquí no hay tal cosa.
+
+Ambos viajan **dentro de `deliveryAddress`**, igual que en la tienda, no en el
+campo `contact`. Mandarlos en `contact` activaría la validación estricta de
+`CheckoutContactDto` —los tres obligatorios, carné cubano válido— y crearía por
+la puerta de atrás la divergencia que este diseño existe para evitar.
+
+## Defectos encontrados que NO arregla este trabajo
+
+Salieron al construir esto, afectan también a los pedidos de la tienda, y cada
+uno necesita su propia tarjeta:
+
+1. **El PDF del pedido sale sin municipio ni destinatario.** Lee claves que nadie
+   escribe (`city`, `fullName`, `phone`) en vez de las del snapshot real
+   (`order-pdf.service.ts:298-317`). Ya pasa hoy con los pedidos de la tienda.
+2. **`recipientName` no se pinta en ninguna pantalla del panel.**
+   `OrderDetailPage` no muestra `contactSnapshot`, así que el destinatario que
+   ahora exigimos al crear no se ve en ningún sitio.
+3. **`GET /payment-methods` es solo de ADMIN**, así que un empleado con
+   `orders:update-payment-status` no puede cobrar desde el panel aunque tenga el
+   permiso.
+4. **Un cobro registrado al crear no deja fila en `payment_charges`.** El dinero
+   queda en el pedido y en su historial, pero el listado por método, el filtro y
+   el PDF del reporte lo ven como «sin método de pago». No es nuevo —
+   `updatePaymentStatus` tiene el mismo hueco— pero esta pantalla lo multiplica.
+   **Decisión pendiente de Jade:** o el alta con cobro crea también un cargo
+   manual, o se asume que las ventas por teléfono no aparecen en los informes
+   por método.
+
 ## Riesgo principal
 
 Que se escriba un `checkout` paralelo «porque es más rápido». El diseño entero
