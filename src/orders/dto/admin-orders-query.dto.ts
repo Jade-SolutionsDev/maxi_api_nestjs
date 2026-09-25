@@ -9,6 +9,17 @@ import {
   IsUUID,
 } from 'class-validator';
 import { toOptionalBoolean } from '../../common/dto/query-transforms';
+
+/**
+ * Una cadena vacía es «sin filtro», no un valor a validar.
+ *
+ * `@IsOptional()` solo perdona lo ausente: un formulario que manda `from: ''`
+ * —porque el campo se dejó en blanco— hacía que `@IsDateString` rechazara el
+ * cuerpo entero y la petición muriera con un 400 que nadie veía. Le pasó al
+ * envío del reporte por correo el 25-sep.
+ */
+const vacioEsNada = ({ value }: { value: unknown }) =>
+  typeof value === 'string' && value.trim() === '' ? undefined : value;
 import { PaginationQueryDto } from '../../common/dto/pagination.dto';
 import {
   FulfillmentType,
@@ -22,6 +33,7 @@ export const SIN_METODO_DE_PAGO = 'none';
 export class AdminOrdersQueryDto extends PaginationQueryDto {
   /** Matches order number or client name, email or phone (accent-insensitive). */
   @IsOptional()
+  @Transform(vacioEsNada)
   @IsString()
   q?: string;
 
@@ -36,24 +48,29 @@ export class AdminOrdersQueryDto extends PaginationQueryDto {
    * 400 sobre un catálogo que puede crecer sin tocar este DTO.
    */
   @IsOptional()
+  @Transform(vacioEsNada)
   @IsString()
   paymentMethod?: string;
 
   @IsOptional()
+  @Transform(vacioEsNada)
   @IsEnum(OrderStatus)
   status?: OrderStatus;
 
   @IsOptional()
+  @Transform(vacioEsNada)
   @IsEnum(PaymentStatus)
   paymentStatus?: PaymentStatus;
 
   /** Comma-separated ids (react-admin getMany). */
   @IsOptional()
+  @Transform(vacioEsNada)
   @IsString()
   id?: string;
 
   /** All orders of one customer (admin client-detail view). */
   @IsOptional()
+  @Transform(vacioEsNada)
   @IsUUID()
   clientId?: string;
 
@@ -73,20 +90,24 @@ export class AdminOrdersQueryDto extends PaginationQueryDto {
    * más frecuente.
    */
   @IsOptional()
+  @Transform(vacioEsNada)
   @IsDateString()
   from?: string;
 
   @IsOptional()
+  @Transform(vacioEsNada)
   @IsDateString()
   to?: string;
 
   /** A domicilio o recogida en mostrador. */
   @IsOptional()
+  @Transform(vacioEsNada)
   @IsEnum(FulfillmentType)
   fulfillmentType?: FulfillmentType;
 
   /** El mostrador donde se recoge: da a cada local su propio listado. */
   @IsOptional()
+  @Transform(vacioEsNada)
   @IsUUID()
   pickupLocationId?: string;
 
@@ -96,10 +117,12 @@ export class AdminOrdersQueryDto extends PaginationQueryDto {
    * grandes: la tienda vende en USD y hay pedidos de cinco cifras.
    */
   @IsOptional()
+  @Transform(vacioEsNada)
   @IsNumberString()
   minTotal?: string;
 
   @IsOptional()
+  @Transform(vacioEsNada)
   @IsNumberString()
   maxTotal?: string;
 }
