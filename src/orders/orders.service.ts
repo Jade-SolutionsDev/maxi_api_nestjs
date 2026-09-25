@@ -40,6 +40,7 @@ import {
 } from './dto/admin-orders-query.dto';
 import { CheckoutDto } from './dto/checkout.dto';
 import { CorrectOrderDto } from './dto/correct-order.dto';
+import { CreateOrderForClientDto } from './dto/create-order-for-client.dto';
 import { OrderResponseDto } from './dto/order-response.dto';
 import { PickedUpByDto } from './dto/update-order-status.dto';
 import {
@@ -193,6 +194,8 @@ export class OrdersService {
   constructor(
     @InjectRepository(Order)
     private readonly orderRepository: Repository<Order>,
+    @InjectRepository(Client)
+    private readonly clientRepository: Repository<Client>,
     private readonly cartService: CartService,
     private readonly inventoryService: InventoryService,
     private readonly paymentsService: PaymentsService,
@@ -380,6 +383,118 @@ export class OrdersService {
     });
 
     return this.findOneForClient(client.id, orderId);
+  }
+
+  /**
+   * Un pedido que hace un empleado en nombre de un cliente: quien compra por
+   * WhatsApp o por teléfono y no pasa por la tienda.
+   *
+   * Nace igual que uno de la tienda —mismo núcleo, mismas reservas, mismo
+   * plazo de caducidad— con dos diferencias: el carrito del cliente no se
+   * toca, y no se abre ningún intento de pago, porque un intento es una sesión
+   * de cobro a nombre del comprador y un empleado no puede abrirla por él.
+   */
+  async crearParaCliente(
+    user: User,
+    dto: CreateOrderForClientDto,
+  ): Promise<OrderResponseDto> {
+    const client = await this.clientRepository.findOne({
+      where: { id: dto.clientId },
+    });
+    if (!client) {
+      throw new NotFoundException(`No existe el cliente "${dto.clientId}"`);
+    }
+
+    const productIds = dto.items.map((line) => line.productId);
+    if (new Set(productIds).size !== productIds.length) {
+      throw new BadRequestException(
+        'Un producto no puede aparecer dos veces; súmalo en una sola línea',
+      );
+    }
+
+    // Mismo valorador que usa la corrección de líneas: precio del catálogo con
+    // su descuento, o el que escriba quien atiende si pactó otro por teléfono.
+    // El mapa vacío hace que resolveLines() trate todas las líneas como
+    // nuevas, que es justo lo que hace falta aquí: no hay pedido previo del
+    // que heredar nombre o precio.
+    const lineas = await this.resolveLines(dto.items, new Map());
+
+    const deliveryMunicipalityId =
+      dto.deliveryMunicipalityId ?? client.defaultMunicipalityId ?? undefined;
+
+    const fulfillment = await this.fulfillmentService.resolveChoice({
+      fulfillmentType: dto.fulfillmentType,
+      deliveryOptionId: dto.deliveryOptionId,
+      pickupAddressId: dto.pickupAddressId,
+      municipalityId: deliveryMunicipalityId,
+    });
+
+    if (fulfillment.type === FulfillmentType.PICKUP && !dto.contact) {
+      throw new BadRequestException(
+        'Faltan los datos de quien recoge el pedido',
+      );
+    }
+
+    // La disponibilidad se mira ANTES de abrir la transacción para poder decir
+    // qué falta y cuánto hay, igual que el carrito de la tienda. La red final
+    // sigue siendo `reserve`, que la re-comprueba bajo bloqueo.
+    const disponible = await this.productsService.availableForArea(productIds, {
+      municipalityId: deliveryMunicipalityId,
+    });
+    const faltan = lineas.filter(
+      (line) => (disponible.get(line.productId) ?? 0) < line.quantity,
+    );
+    if (faltan.length > 0) {
+      throw new ConflictException({
+        message: 'Some cart items are no longer available',
+        details: faltan.map((line) => ({
+          field: line.productId,
+          message: `"${line.name}": only ${disponible.get(line.productId) ?? 0} available`,
+          available: disponible.get(line.productId) ?? 0,
+        })),
+      });
+    }
+
+    // Resuelto para que un método de pago inexistente dé 400 ANTES de
+    // escribir nada. No se usa después a propósito: este alta no abre ningún
+    // intento de cobro (ver el porqué en el comentario del método).
+    const resolvedPayment = dto.paymentMethod
+      ? await this.paymentMethodsService.resolve(dto.paymentMethod)
+      : null;
+    void resolvedPayment;
+
+    const coveringIds = deliveryMunicipalityId
+      ? await this.productsService.coveringLocationIds({
+          municipalityId: deliveryMunicipalityId,
+        })
+      : undefined;
+    const allowedLocationIds =
+      coveringIds && fulfillment.pickupLocationId
+        ? [...new Set([...coveringIds, fulfillment.pickupLocationId])]
+        : coveringIds;
+
+    const orderId = await this.crearPedido({
+      clientId: client.id,
+      lineas,
+      fulfillment,
+      deliveryMunicipalityId,
+      deliveryAddress: dto.deliveryAddress ?? null,
+      contactSnapshot: dto.contact ? { ...dto.contact } : null,
+      customerNotes: dto.customerNotes ?? null,
+      allowedLocationIds,
+      actor: { userId: user.id },
+      paymentMethodCode: dto.paymentMethod ?? null,
+      metaExtra: { canal: 'back-office' },
+    });
+
+    void this.orderMailer.orderReceived(orderId).catch((err) => {
+      this.logger.error(
+        `No se pudo avisar por correo del pedido ${orderId}`,
+        err instanceof Error ? err.stack : String(err),
+      );
+    });
+
+    return this.findOneAdmin(orderId);
   }
 
   /**

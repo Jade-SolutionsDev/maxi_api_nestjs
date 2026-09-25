@@ -2,6 +2,7 @@ import { Module, forwardRef } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { AuthModule } from '../auth/auth.module';
 import { CartModule } from '../cart/cart.module';
+import { Client } from '../clients/entities/client.entity';
 import { ClientAddressesModule } from '../client-addresses/client-addresses.module';
 import { FulfillmentModule } from '../fulfillment/fulfillment.module';
 import { GeographyModule } from '../geography/geography.module';
@@ -27,7 +28,7 @@ import { StorefrontOrdersController } from './storefront-orders.controller';
 
 @Module({
   imports: [
-    TypeOrmModule.forFeature([Order, OrderItem, User, UserRole]),
+    TypeOrmModule.forFeature([Order, OrderItem, User, UserRole, Client]),
     forwardRef(() => AuthModule),
     CartModule,
     ClientAddressesModule,

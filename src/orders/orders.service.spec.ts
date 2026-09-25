@@ -105,7 +105,9 @@ describe('OrdersService', () => {
   let productsService: {
     coveringLocationIds: jest.Mock;
     findOne: jest.Mock;
+    availableForArea: jest.Mock;
   };
+  let clientRepo: { findOne: jest.Mock };
   let paymentsService: {
     createChargeForOrder: jest.Mock;
     latestChargeDto: jest.Mock;
@@ -182,7 +184,9 @@ describe('OrdersService', () => {
         isActive: true,
         deletedAt: null,
       }),
+      availableForArea: jest.fn().mockResolvedValue(new Map()),
     };
+    clientRepo = { findOne: jest.fn() };
     paymentsService = {
       createChargeForOrder: jest.fn().mockResolvedValue({ id: 'charge-1' }),
       latestChargeDto: jest.fn().mockResolvedValue(undefined),
@@ -254,6 +258,7 @@ describe('OrdersService', () => {
       providers: [
         OrdersService,
         { provide: getRepositoryToken(Order), useValue: orderRepo },
+        { provide: getRepositoryToken(Client), useValue: clientRepo },
         { provide: CartService, useValue: cartService },
         { provide: InventoryService, useValue: inventoryService },
         { provide: PaymentsService, useValue: paymentsService },
@@ -2200,6 +2205,104 @@ describe('OrdersService', () => {
         service.cancelByClient('client-1', 'order-1'),
       ).rejects.toBeInstanceOf(ConflictException);
       expect(inventoryService.releaseReservations).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('crearParaCliente', () => {
+    const dtoBase = {
+      clientId: 'client-1',
+      items: [{ productId: 'prod-2', quantity: 3 }],
+    };
+
+    beforeEach(() => {
+      orderRepo.findOne.mockResolvedValue(makeOrder({ items: [] }));
+      productsService.availableForArea = jest
+        .fn()
+        .mockResolvedValue(new Map([['prod-2', 10]]));
+      clientRepo.findOne.mockResolvedValue({
+        id: 'client-1',
+        defaultMunicipalityId: 'mun-1',
+      });
+    });
+
+    it('crea el pedido a nombre del cliente y aparta su stock', async () => {
+      await service.crearParaCliente(makeUser(Role.ADMIN), dtoBase);
+
+      expect(inventoryService.reserve).toHaveBeenCalledWith(
+        expect.anything(),
+        'order-1',
+        'prod-2',
+        3,
+        expect.anything(),
+      );
+      expect(orderRepo.save).toHaveBeenCalledWith(
+        expect.objectContaining({ clientId: 'client-1' }),
+      );
+    });
+
+    it('NO toca el carrito del cliente', async () => {
+      await service.crearParaCliente(makeUser(Role.ADMIN), dtoBase);
+
+      // Es la razón de ser del refactor: el empleado no puede borrarle al
+      // cliente lo que tenga dentro de su carrito.
+      expect(cartItemRepo.delete).not.toHaveBeenCalled();
+      expect(cartService.getCart).not.toHaveBeenCalled();
+    });
+
+    it('deja en el historial al empleado, no al cliente', async () => {
+      await service.crearParaCliente(makeUser(Role.ADMIN), dtoBase);
+
+      expect(orderEvents.record).toHaveBeenCalledWith(
+        expect.anything(),
+        expect.objectContaining({
+          kind: OrderEventKind.CREATED,
+          actor: { userId: 'user-1' },
+          meta: expect.objectContaining({ canal: 'back-office' }),
+        }),
+      );
+    });
+
+    it('no abre ningún intento de pago: eso lo hace el cliente', async () => {
+      await service.crearParaCliente(makeUser(Role.ADMIN), dtoBase);
+
+      expect(paymentsService.createChargeForOrder).not.toHaveBeenCalled();
+    });
+
+    it('manda el correo de «tenemos tu pedido»', async () => {
+      await service.crearParaCliente(makeUser(Role.ADMIN), dtoBase);
+
+      expect(mailer.orderReceived).toHaveBeenCalledWith('order-1');
+      expect(mailer.paymentReceived).not.toHaveBeenCalled();
+    });
+
+    it('sin cobro nace pendiente y sin sellar: el barrido lo cogerá', async () => {
+      await service.crearParaCliente(makeUser(Role.ADMIN), dtoBase);
+
+      const guardado = orderRepo.save.mock.calls.at(-1)?.[0];
+      expect(guardado.status).toBe(OrderStatus.PENDING);
+      expect(guardado.paymentStatus).toBe(PaymentStatus.PENDING);
+      // Sin `paidAt` no hay cobro que proteja la reserva: caduca como
+      // cualquier otra, que es lo que se decidió.
+      expect(guardado.paidAt ?? null).toBeNull();
+    });
+
+    it('404 si el cliente no existe', async () => {
+      clientRepo.findOne.mockResolvedValue(null);
+
+      await expect(
+        service.crearParaCliente(makeUser(Role.ADMIN), dtoBase),
+      ).rejects.toBeInstanceOf(NotFoundException);
+    });
+
+    it('409 con el detalle por línea si no hay stock en la zona', async () => {
+      productsService.availableForArea.mockResolvedValue(
+        new Map([['prod-2', 1]]),
+      );
+
+      await expect(
+        service.crearParaCliente(makeUser(Role.ADMIN), dtoBase),
+      ).rejects.toBeInstanceOf(ConflictException);
+      expect(inventoryService.reserve).not.toHaveBeenCalled();
     });
   });
 });
