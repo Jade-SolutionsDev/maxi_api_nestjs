@@ -312,6 +312,17 @@ describe('OrdersService', () => {
       expect(result.paymentStatus).toBe(PaymentStatus.PENDING);
     });
 
+    it('el pedido nace en pending, tanto el estado como el pago', async () => {
+      await service.checkout(makeClient(), {});
+
+      // Campo a campo, no con objectContaining: es justo lo que la mutación
+      // de status: OrderStatus.PENDING -> OrderStatus.CONFIRMED en
+      // crearPedido() no rompía antes de esta prueba.
+      const pedidoGuardado = orderRepo.save.mock.calls[0][0];
+      expect(pedidoGuardado.status).toBe(OrderStatus.PENDING);
+      expect(pedidoGuardado.paymentStatus).toBe(PaymentStatus.PENDING);
+    });
+
     it('holds pickup stock in the storage the customer collects from', async () => {
       fulfillmentService.resolveChoice.mockResolvedValue({
         type: 'pickup',
