@@ -313,15 +313,10 @@ export class OrdersService {
     // Reservations stay within the storages covering the municipality; without
     // a municipality (pickup-only client with no location) any active storage
     // may hold the stock, as before.
-    const coveringIds = deliveryMunicipalityId
-      ? await this.productsService.coveringLocationIds({
-          municipalityId: deliveryMunicipalityId,
-        })
-      : undefined;
-    const allowedLocationIds =
-      coveringIds && fulfillment.pickupLocationId
-        ? [...new Set([...coveringIds, fulfillment.pickupLocationId])]
-        : coveringIds;
+    const allowedLocationIds = await this.resolveAllowedLocationIds(
+      deliveryMunicipalityId,
+      fulfillment,
+    );
 
     const orderId = await this.crearPedido({
       clientId: client.id,
@@ -404,6 +399,14 @@ export class OrdersService {
     if (!client) {
       throw new NotFoundException(`No existe el cliente "${dto.clientId}"`);
     }
+    // Mismo criterio que auth/client-auth.service.ts: dado de baja o gateado,
+    // el panel no puede abrirle un pedido a alguien a quien la tienda ya le
+    // cerró la puerta.
+    if (!client.isActive) {
+      throw new ConflictException(
+        `El cliente "${client.id}" está desactivado; no se le puede crear un pedido`,
+      );
+    }
 
     const productIds = dto.items.map((line) => line.productId);
     if (new Set(productIds).size !== productIds.length) {
@@ -412,15 +415,37 @@ export class OrdersService {
       );
     }
 
-    // Mismo valorador que usa la corrección de líneas: precio del catálogo con
-    // su descuento, o el que escriba quien atiende si pactó otro por teléfono.
-    // El mapa vacío hace que resolveLines() trate todas las líneas como
-    // nuevas, que es justo lo que hace falta aquí: no hay pedido previo del
-    // que heredar nombre o precio.
-    const lineas = await this.resolveLines(dto.items, new Map());
+    // Se cargan una sola vez: la misma ficha sirve para juzgar si están a la
+    // venta (más abajo) y, después, para el nombre y el precio de
+    // resolveLines(). `findOne` ya 404 si algún id no existe.
+    const productos = new Map(
+      await Promise.all(
+        productIds.map(
+          async (id) => [id, await this.productsService.findOne(id)] as const,
+        ),
+      ),
+    );
 
     const deliveryMunicipalityId =
       dto.deliveryMunicipalityId ?? client.defaultMunicipalityId ?? undefined;
+
+    // La dirección es de forma libre y no se valida su estructura (ver el
+    // DTO), pero si trae un municipio que contradice el efectivo, algo está
+    // mal armado: sin este corte se entregaría con la tarifa y la cobertura
+    // de un municipio distinto al que dice la dirección, en silencio.
+    const municipioEnDireccion =
+      dto.deliveryAddress &&
+      typeof dto.deliveryAddress.municipalityId === 'string'
+        ? dto.deliveryAddress.municipalityId
+        : undefined;
+    if (
+      municipioEnDireccion &&
+      municipioEnDireccion !== deliveryMunicipalityId
+    ) {
+      throw new BadRequestException(
+        `La dirección dice el municipio "${municipioEnDireccion}", pero el pedido se está armando para "${deliveryMunicipalityId}"`,
+      );
+    }
 
     const fulfillment = await this.fulfillmentService.resolveChoice({
       fulfillmentType: dto.fulfillmentType,
@@ -441,19 +466,39 @@ export class OrdersService {
     const disponible = await this.productsService.availableForArea(productIds, {
       municipalityId: deliveryMunicipalityId,
     });
-    const faltan = lineas.filter(
-      (line) => (disponible.get(line.productId) ?? 0) < line.quantity,
-    );
+
+    // "A la venta" y "con stock" se juzgan JUNTOS, igual que el carrito
+    // (CartItemResponseDto.fromEntity: isActive && !deletedAt && stock): un
+    // único 409 con detalle por línea, para que no gane la condición que se
+    // compruebe primero. `resolveLines()`, más abajo, ya no tendrá nada que
+    // rechazar por su cuenta.
+    const faltan = dto.items
+      .map((item) => {
+        const product = productos.get(item.productId)!;
+        const available = disponible.get(item.productId) ?? 0;
+        const vendible =
+          product.isActive && !product.deletedAt && available >= item.quantity;
+        return { item, product, available, vendible };
+      })
+      .filter((linea) => !linea.vendible);
+
     if (faltan.length > 0) {
       throw new ConflictException({
         message: 'Some cart items are no longer available',
-        details: faltan.map((line) => ({
-          field: line.productId,
-          message: `"${line.name}": only ${disponible.get(line.productId) ?? 0} available`,
-          available: disponible.get(line.productId) ?? 0,
+        details: faltan.map(({ item, product, available }) => ({
+          field: item.productId,
+          message: `"${product.name}": only ${available} available`,
+          available,
         })),
       });
     }
+
+    // Mismo valorador que usa la corrección de líneas: precio del catálogo con
+    // su descuento, o el que escriba quien atiende si pactó otro por teléfono.
+    // El mapa vacío hace que resolveLines() trate todas las líneas como
+    // nuevas, que es justo lo que hace falta aquí: no hay pedido previo del
+    // que heredar nombre o precio.
+    const lineas = await this.resolveLines(dto.items, new Map());
 
     // Resuelto para que un método de pago inexistente dé 400 ANTES de
     // escribir nada. No se usa después a propósito: este alta no abre ningún
@@ -463,15 +508,16 @@ export class OrdersService {
       : null;
     void resolvedPayment;
 
-    const coveringIds = deliveryMunicipalityId
-      ? await this.productsService.coveringLocationIds({
-          municipalityId: deliveryMunicipalityId,
-        })
-      : undefined;
-    const allowedLocationIds =
-      coveringIds && fulfillment.pickupLocationId
-        ? [...new Set([...coveringIds, fulfillment.pickupLocationId])]
-        : coveringIds;
+    const allowedLocationIds = await this.resolveAllowedLocationIds(
+      deliveryMunicipalityId,
+      fulfillment,
+    );
+
+    // Rastro de quién pactó qué: un precio a mano es dinero tecleado por una
+    // persona, y sin esto el pedido no dice quién lo decidió ni cuál línea.
+    const lineasConPrecioPactado = dto.items
+      .filter((item) => item.unitPrice !== undefined && item.unitPrice !== null)
+      .map((item) => item.productId);
 
     const orderId = await this.crearPedido({
       clientId: client.id,
@@ -479,12 +525,20 @@ export class OrdersService {
       fulfillment,
       deliveryMunicipalityId,
       deliveryAddress: dto.deliveryAddress ?? null,
-      contactSnapshot: dto.contact ? { ...dto.contact } : null,
+      // Mismo `trim` y mismo criterio de «tres nulos = nada» que checkout,
+      // para que el PDF y el correo no rendericen distinto según por dónde
+      // entró el pedido.
+      contactSnapshot: snapshotContact(dto.contact ?? null),
       customerNotes: dto.customerNotes ?? null,
       allowedLocationIds,
       actor: { userId: user.id },
       paymentMethodCode: dto.paymentMethod ?? null,
-      metaExtra: { canal: 'back-office' },
+      metaExtra: {
+        canal: 'back-office',
+        ...(lineasConPrecioPactado.length > 0
+          ? { lineasConPrecioPactado }
+          : {}),
+      },
     });
 
     void this.orderMailer.orderReceived(orderId).catch((err) => {
@@ -495,6 +549,27 @@ export class OrdersService {
     });
 
     return this.findOneAdmin(orderId);
+  }
+
+  /**
+   * Los almacenes donde puede vivir la reserva: los que cubren el municipio
+   * de entrega, más el propio mostrador de recogida si el catálogo no lo
+   * contaba (una recogida puede salir de un local sin cobertura de reparto).
+   * Compartido por `checkout()` y `crearParaCliente()` — es el único cálculo
+   * de zona que existe, para que las dos vías no puedan divergir.
+   */
+  private async resolveAllowedLocationIds(
+    deliveryMunicipalityId: string | undefined,
+    fulfillment: FulfillmentChoice,
+  ): Promise<string[] | undefined> {
+    const coveringIds = deliveryMunicipalityId
+      ? await this.productsService.coveringLocationIds({
+          municipalityId: deliveryMunicipalityId,
+        })
+      : undefined;
+    return coveringIds && fulfillment.pickupLocationId
+      ? [...new Set([...coveringIds, fulfillment.pickupLocationId])]
+      : coveringIds;
   }
 
   /**

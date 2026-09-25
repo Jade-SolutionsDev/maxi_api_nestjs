@@ -2222,6 +2222,7 @@ describe('OrdersService', () => {
       clientRepo.findOne.mockResolvedValue({
         id: 'client-1',
         defaultMunicipalityId: 'mun-1',
+        isActive: true,
       });
     });
 
@@ -2292,6 +2293,22 @@ describe('OrdersService', () => {
       await expect(
         service.crearParaCliente(makeUser(Role.ADMIN), dtoBase),
       ).rejects.toBeInstanceOf(NotFoundException);
+      expect(orderRepo.save).not.toHaveBeenCalled();
+      expect(inventoryService.reserve).not.toHaveBeenCalled();
+    });
+
+    it('409 si el cliente está desactivado', async () => {
+      clientRepo.findOne.mockResolvedValue({
+        id: 'client-1',
+        defaultMunicipalityId: 'mun-1',
+        isActive: false,
+      });
+
+      await expect(
+        service.crearParaCliente(makeUser(Role.ADMIN), dtoBase),
+      ).rejects.toBeInstanceOf(ConflictException);
+      expect(orderRepo.save).not.toHaveBeenCalled();
+      expect(inventoryService.reserve).not.toHaveBeenCalled();
     });
 
     it('409 con el detalle por línea si no hay stock en la zona', async () => {
@@ -2303,6 +2320,94 @@ describe('OrdersService', () => {
         service.crearParaCliente(makeUser(Role.ADMIN), dtoBase),
       ).rejects.toBeInstanceOf(ConflictException);
       expect(inventoryService.reserve).not.toHaveBeenCalled();
+    });
+
+    it('409 con el detalle por línea si el producto no está a la venta, no un string pelado', async () => {
+      // Antes de esta corrección, resolveLines() corría primero y lanzaba un
+      // ConflictException con un string suelto, sin `details`: el panel
+      // esperaba siempre la misma forma que el 409 de stock.
+      productsService.findOne.mockResolvedValue({
+        id: 'prod-2',
+        name: 'Malta 355ml',
+        basePrice: '2.00',
+        discount: '0',
+        isActive: false,
+        deletedAt: null,
+      });
+
+      const error: unknown = await service
+        .crearParaCliente(makeUser(Role.ADMIN), dtoBase)
+        .catch((e: unknown) => e);
+
+      expect(error).toBeInstanceOf(ConflictException);
+      expect((error as ConflictException).getResponse()).toMatchObject({
+        message: 'Some cart items are no longer available',
+        details: [expect.objectContaining({ field: 'prod-2' })],
+      });
+      expect(inventoryService.reserve).not.toHaveBeenCalled();
+    });
+
+    it('400 si la dirección contradice el municipio con el que se arma el pedido', async () => {
+      await expect(
+        service.crearParaCliente(makeUser(Role.ADMIN), {
+          ...dtoBase,
+          deliveryAddress: { municipalityId: 'mun-2' },
+        }),
+      ).rejects.toBeInstanceOf(BadRequestException);
+      expect(orderRepo.save).not.toHaveBeenCalled();
+    });
+
+    it('usa snapshotContact para el contacto, con el mismo trim que checkout', async () => {
+      await service.crearParaCliente(makeUser(Role.ADMIN), {
+        ...dtoBase,
+        contact: {
+          recipientName: '  Ana  ',
+          idCard: ' 1 ',
+          contactPhone: ' 555 ',
+        },
+      });
+
+      const guardado = orderRepo.save.mock.calls.at(-1)?.[0];
+      expect(guardado.contactSnapshot).toEqual({
+        recipientName: 'Ana',
+        idCard: '1',
+        contactPhone: '555',
+      });
+    });
+
+    it('anota en el historial qué líneas trajeron un precio pactado a mano', async () => {
+      await service.crearParaCliente(makeUser(Role.ADMIN), {
+        clientId: 'client-1',
+        items: [{ productId: 'prod-2', quantity: 3, unitPrice: 1.5 }],
+      });
+
+      expect(orderEvents.record).toHaveBeenCalledWith(
+        expect.anything(),
+        expect.objectContaining({
+          meta: expect.objectContaining({
+            lineasConPrecioPactado: ['prod-2'],
+          }),
+        }),
+      );
+    });
+
+    it('un correo que falla no tumba el alta, y queda anotado', async () => {
+      const anotado = jest
+        .spyOn(Logger.prototype, 'error')
+        .mockImplementation(() => undefined);
+      mailer.orderReceived.mockRejectedValue(new Error('resend caído'));
+
+      await expect(
+        service.crearParaCliente(makeUser(Role.ADMIN), dtoBase),
+      ).resolves.toBeDefined();
+      await new Promise((sigue) => setImmediate(sigue));
+
+      expect(mailer.orderReceived).toHaveBeenCalled();
+      expect(anotado).toHaveBeenCalledWith(
+        expect.stringContaining('No se pudo avisar por correo'),
+        expect.anything(),
+      );
+      anotado.mockRestore();
     });
   });
 });
