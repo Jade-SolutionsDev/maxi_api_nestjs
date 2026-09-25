@@ -8,6 +8,7 @@ import {
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { In, Repository } from 'typeorm';
+import { contieneSinTildes } from '../common/search/accent-insensitive';
 import { Role, User } from '../users/entities/user.entity';
 import { UpdateRoleDto } from './dto/update-role.dto';
 import { Permission } from './entities/permission.entity';
@@ -468,8 +469,15 @@ export class PermissionsService implements OnModuleInit {
     return role;
   }
 
-  async listRoles(): Promise<ManagedRole[]> {
-    return this.roleRepository.find();
+  async listRoles(q?: string): Promise<ManagedRole[]> {
+    const termino = q?.trim();
+    if (!termino) return this.roleRepository.find({});
+    return this.roleRepository.find({
+      where: [
+        { name: contieneSinTildes(termino) },
+        { description: contieneSinTildes(termino) },
+      ],
+    });
   }
 
   async getRole(roleId: string): Promise<ManagedRole> {

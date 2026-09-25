@@ -8,6 +8,7 @@ import {
   Patch,
   Post,
   Put,
+  Query,
   Req,
 } from '@nestjs/common';
 import type { AuthenticatedUserRequest } from '../auth/types/authenticated-request';
@@ -50,8 +51,8 @@ export class PermissionsController {
   }
 
   @Get('roles')
-  async listRoles(): Promise<RoleResponseDto[]> {
-    const roles = await this.permissionsService.listRoles();
+  async listRoles(@Query('q') q?: string): Promise<RoleResponseDto[]> {
+    const roles = await this.permissionsService.listRoles(q);
     const permissionIdsByRole =
       await this.permissionsService.getPermissionIdsByRoleIds(
         roles.map((role) => role.id),

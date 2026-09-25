@@ -187,6 +187,39 @@ describe('UsersService', () => {
       expect(result.data[0].isActive).toBe(false);
     });
 
+    it('la búsqueda también filtra las invitaciones pendientes, sin tildes', async () => {
+      // Las invitaciones no pasan por SQL: se pegaban a la primera página
+      // aunque lo escrito no coincidiera con ellas en nada.
+      qb.getManyAndCount.mockResolvedValue([[user], 1]);
+      invitationRepository.find.mockResolvedValue([
+        {
+          id: 'inv-1',
+          email: 'pending@example.com',
+          role: Role.STAFF,
+          firstName: 'Ramón',
+          lastName: null,
+          createdAt: new Date(),
+          updatedAt: new Date(),
+        } as Invitation,
+      ]);
+
+      const ajena = await service.findAll({
+        includeInvitations: true,
+        q: 'zzz',
+      });
+      expect(ajena.meta.total).toBe(1);
+      expect(ajena.data.map((u) => u.email)).toEqual([user.email]);
+
+      const porNombre = await service.findAll({
+        includeInvitations: true,
+        q: 'ramon',
+      });
+      expect(porNombre.data.map((u) => u.email)).toEqual([
+        'pending@example.com',
+        user.email,
+      ]);
+    });
+
     it('attaches managed roles to the page in one batched call', async () => {
       // Fresh copy without the property — attach only fills unattached rows.
       qb.getManyAndCount.mockResolvedValue([

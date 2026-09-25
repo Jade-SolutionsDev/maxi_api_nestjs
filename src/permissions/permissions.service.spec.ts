@@ -387,6 +387,21 @@ describe('PermissionsService', () => {
   });
 
   describe('role management', () => {
+    it('listRoles busca por nombre o descripción cuando hay texto', async () => {
+      roleRepo.find.mockResolvedValue([]);
+
+      await service.listRoles();
+      expect(roleRepo.find).toHaveBeenLastCalledWith({});
+
+      await service.listRoles('finan');
+      expect(roleRepo.find).toHaveBeenLastCalledWith({
+        where: [
+          { name: expect.objectContaining({ _type: 'raw' }) },
+          { description: expect.objectContaining({ _type: 'raw' }) },
+        ],
+      });
+    });
+
     it('rejects creating a duplicate role', async () => {
       roleRepo.findOne.mockResolvedValue({ id: 'r1' });
       await expect(service.createRole({ name: 'Dup' })).rejects.toBeInstanceOf(
