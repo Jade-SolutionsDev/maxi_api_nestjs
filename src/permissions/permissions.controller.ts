@@ -8,6 +8,7 @@ import {
   Patch,
   Post,
   Put,
+  Query,
   Req,
 } from '@nestjs/common';
 import type { AuthenticatedUserRequest } from '../auth/types/authenticated-request';
@@ -43,12 +44,15 @@ export class PermissionsController {
     @Req() request: AuthenticatedUserRequest,
   ): Promise<RoleResponseDto> {
     const role = await this.permissionsService.createRole(dto, request.user.id);
-    return RoleResponseDto.fromEntity(role, []);
+    const permissionIds = await this.permissionsService.getRolePermissionIds(
+      role.id,
+    );
+    return RoleResponseDto.fromEntity(role, permissionIds);
   }
 
   @Get('roles')
-  async listRoles(): Promise<RoleResponseDto[]> {
-    const roles = await this.permissionsService.listRoles();
+  async listRoles(@Query('q') q?: string): Promise<RoleResponseDto[]> {
+    const roles = await this.permissionsService.listRoles(q);
     const permissionIdsByRole =
       await this.permissionsService.getPermissionIdsByRoleIds(
         roles.map((role) => role.id),

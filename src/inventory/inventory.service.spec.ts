@@ -466,6 +466,243 @@ describe('InventoryService', () => {
         expect.objectContaining({ productId: 'p-1', quantity: 3 }),
       );
     });
+
+    // Editar una línea mueve el stock de UN producto dentro de un pedido que ya
+    // existe. Es lo que más fácilmente descuadra el almacén, así que se prueba
+    // cada camino por separado.
+    describe('releaseProductUnits (una línea baja o se quita)', () => {
+      it('suelta el hold sin devolver nada al almacén', async () => {
+        const row = {
+          locationId: 'loc-A',
+          productId: 'p-1',
+          quantity: 10,
+          reservedQuantity: 4,
+        };
+        const held = {
+          orderId: 'order-1',
+          locationId: 'loc-A',
+          productId: 'p-1',
+          quantity: 4,
+          status: ReservationStatus.RESERVED,
+        };
+        reservationRepo.find.mockResolvedValueOnce([held]);
+        inventoryRepo.findOne.mockResolvedValue(row);
+
+        await service.releaseProductUnits(
+          manager as never,
+          'order-1',
+          'p-1',
+          4,
+          'user-9',
+        );
+
+        expect(row.reservedQuantity).toBe(0);
+        expect(row.quantity).toBe(10); // no se mueve mercancía
+        expect(held.status).toBe(ReservationStatus.CANCELLED);
+        expect(operationRepo.create).not.toHaveBeenCalled();
+      });
+
+      it('parte la reserva cuando solo se suelta una parte', async () => {
+        const row = {
+          locationId: 'loc-A',
+          productId: 'p-1',
+          quantity: 10,
+          reservedQuantity: 5,
+        };
+        const held = {
+          orderId: 'order-1',
+          locationId: 'loc-A',
+          productId: 'p-1',
+          quantity: 5,
+          status: ReservationStatus.RESERVED,
+        };
+        reservationRepo.find.mockResolvedValueOnce([held]);
+        inventoryRepo.findOne.mockResolvedValue(row);
+
+        await service.releaseProductUnits(
+          manager as never,
+          'order-1',
+          'p-1',
+          2,
+          'user-9',
+        );
+
+        expect(row.reservedQuantity).toBe(3);
+        expect(held.quantity).toBe(3); // lo que sigue vivo
+        expect(held.status).toBe(ReservationStatus.RESERVED);
+        expect(reservationRepo.create).toHaveBeenCalledWith(
+          expect.objectContaining({
+            quantity: 2,
+            status: ReservationStatus.CANCELLED,
+          }),
+        );
+      });
+
+      it('en un pedido ya confirmado devuelve al almacén y lo registra como entrada', async () => {
+        const row = {
+          locationId: 'loc-A',
+          productId: 'p-1',
+          quantity: 5,
+          reservedQuantity: 0,
+        };
+        const committed = {
+          orderId: 'order-1',
+          locationId: 'loc-A',
+          productId: 'p-1',
+          quantity: 3,
+          status: ReservationStatus.CONFIRMED,
+        };
+        // No hay retenidas; sí una confirmada.
+        reservationRepo.find
+          .mockResolvedValueOnce([])
+          .mockResolvedValueOnce([committed]);
+        inventoryRepo.findOne.mockResolvedValue(row);
+
+        await service.releaseProductUnits(
+          manager as never,
+          'order-1',
+          'p-1',
+          2,
+          'user-9',
+        );
+
+        expect(row.quantity).toBe(7); // 5 + 2 devueltas
+        expect(committed.quantity).toBe(1); // queda 1 confirmada
+        expect(operationRepo.create).toHaveBeenCalledWith(
+          expect.objectContaining({
+            type: OperationType.IN,
+            orderId: 'order-1',
+            createdBy: 'user-9',
+          }),
+        );
+        expect(itemRepo.create).toHaveBeenCalledWith(
+          expect.objectContaining({ productId: 'p-1', quantity: 2 }),
+        );
+      });
+
+      it('gasta primero lo retenido y solo después lo confirmado', async () => {
+        const row = {
+          locationId: 'loc-A',
+          productId: 'p-1',
+          quantity: 10,
+          reservedQuantity: 1,
+        };
+        const held = {
+          orderId: 'order-1',
+          locationId: 'loc-A',
+          productId: 'p-1',
+          quantity: 1,
+          status: ReservationStatus.RESERVED,
+        };
+        const committed = {
+          orderId: 'order-1',
+          locationId: 'loc-A',
+          productId: 'p-1',
+          quantity: 4,
+          status: ReservationStatus.CONFIRMED,
+        };
+        reservationRepo.find
+          .mockResolvedValueOnce([held])
+          .mockResolvedValueOnce([committed]);
+        inventoryRepo.findOne.mockResolvedValue(row);
+
+        await service.releaseProductUnits(
+          manager as never,
+          'order-1',
+          'p-1',
+          3,
+          'user-9',
+        );
+
+        expect(held.status).toBe(ReservationStatus.CANCELLED); // 1 del hold
+        expect(row.reservedQuantity).toBe(0);
+        expect(row.quantity).toBe(12); // + 2 devueltas del almacén
+        expect(committed.quantity).toBe(2);
+      });
+
+      it('exige saber quién actúa para devolver género al almacén', async () => {
+        const committed = {
+          orderId: 'order-1',
+          locationId: 'loc-A',
+          productId: 'p-1',
+          quantity: 3,
+          status: ReservationStatus.CONFIRMED,
+        };
+        reservationRepo.find
+          .mockResolvedValueOnce([])
+          .mockResolvedValueOnce([committed]);
+        inventoryRepo.findOne.mockResolvedValue({
+          locationId: 'loc-A',
+          productId: 'p-1',
+          quantity: 5,
+          reservedQuantity: 0,
+        });
+
+        await expect(
+          service.releaseProductUnits(manager as never, 'order-1', 'p-1', 1),
+        ).rejects.toThrow(/userId required/);
+      });
+
+      it('con cero unidades no hace nada', async () => {
+        await service.releaseProductUnits(
+          manager as never,
+          'order-1',
+          'p-1',
+          0,
+          'user-9',
+        );
+        expect(reservationRepo.find).not.toHaveBeenCalled();
+      });
+    });
+
+    describe('confirmProductReservations (una línea sube en un pedido confirmado)', () => {
+      it('descuenta solo ese producto y lo registra como salida', async () => {
+        const row = {
+          locationId: 'loc-A',
+          productId: 'p-1',
+          quantity: 10,
+          reservedQuantity: 2,
+        };
+        const held = {
+          orderId: 'order-1',
+          locationId: 'loc-A',
+          productId: 'p-1',
+          quantity: 2,
+          status: ReservationStatus.RESERVED,
+        };
+        reservationRepo.find.mockResolvedValue([held]);
+        inventoryRepo.findOne.mockResolvedValue(row);
+
+        await service.confirmProductReservations(
+          manager as never,
+          'order-1',
+          'p-1',
+          'user-9',
+        );
+
+        expect(row.quantity).toBe(8);
+        expect(row.reservedQuantity).toBe(0);
+        expect(held.status).toBe(ReservationStatus.CONFIRMED);
+        expect(operationRepo.create).toHaveBeenCalledWith(
+          expect.objectContaining({
+            type: OperationType.OUT,
+            orderId: 'order-1',
+            createdBy: 'user-9',
+          }),
+        );
+      });
+
+      it('sin nada retenido no escribe movimiento', async () => {
+        reservationRepo.find.mockResolvedValue([]);
+        await service.confirmProductReservations(
+          manager as never,
+          'order-1',
+          'p-1',
+          'user-9',
+        );
+        expect(operationRepo.create).not.toHaveBeenCalled();
+      });
+    });
   });
 
   describe('history', () => {

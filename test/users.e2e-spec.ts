@@ -61,7 +61,7 @@ describe('UsersController (e2e)', () => {
         firstName: 'Provider',
         lastName: 'User',
         email: 'grocer@example.com',
-        role: Role.GROCER,
+        role: Role.STAFF,
         isActive: true,
         clerkId: 'clerk_provider_1',
       }),

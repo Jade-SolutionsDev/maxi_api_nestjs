@@ -97,6 +97,21 @@ export class Order {
   paymentStatus: PaymentStatus;
 
   // Reference id at the (future) payment gateway; null for manual payments.
+  /**
+   * Identificador público del pedido, el que viaja en el enlace de seguimiento.
+   *
+   * Es **distinto del número de pedido y del id interno** a propósito: el
+   * número es corto y correlativo —ORD-20260134 revela cuántos pedidos hay y
+   * deja adivinar el de al lado—, y el id interno se usa en rutas autenticadas.
+   * Este se genera con 32 bytes aleatorios y no se puede deducir de nada.
+   *
+   * No cambia nunca durante la vida del pedido: quien guardó el enlace en el
+   * móvil tiene que seguir entrando meses después.
+   */
+  @Index('IDX_orders_tracking_id', { unique: true })
+  @Column({ name: 'tracking_id', type: 'varchar', length: 64, nullable: true })
+  trackingId: string | null;
+
   @Column({ name: 'payment_ref', type: 'varchar', length: 255, nullable: true })
   paymentRef: string | null;
 
@@ -141,6 +156,21 @@ export class Order {
   @Column({ name: 'pickup_location_id', type: 'uuid', nullable: true })
   pickupLocationId: string | null;
 
+  /**
+   * Plazo prometido al comprar, en días hábiles, congelado como la tarifa y
+   * la etiqueta: cambiar la opción de entrega no reescribe pedidos viejos.
+   */
+  @Column({ name: 'promise_days', type: 'int', nullable: true })
+  promiseDays: number | null;
+
+  /**
+   * Hasta cuándo está comprometido. Se sella con el pago, porque el plazo
+   * corre desde que se cobra y no desde que se crea el pedido. Si se cumplió
+   * se deduce comparándolo con `deliveredAt`.
+   */
+  @Column({ name: 'promised_at', type: 'timestamptz', nullable: true })
+  promisedAt: Date | null;
+
   @Column({ name: 'pickup_address_id', type: 'uuid', nullable: true })
   pickupAddressId: string | null;
 
@@ -152,6 +182,15 @@ export class Order {
 
   @Column({ name: 'delivery_address', type: 'jsonb', nullable: true })
   deliveryAddress: Record<string, unknown> | null;
+
+  /**
+   * Quién recibe el pedido: nombre, carnet y teléfono. Vive aparte de
+   * `deliveryAddress` porque también hace falta en las recogidas, donde
+   * `pickupAddressSnapshot` guarda la dirección **de la tienda** y no la de
+   * la persona que va a buscarlo.
+   */
+  @Column({ name: 'contact_snapshot', type: 'jsonb', nullable: true })
+  contactSnapshot: Record<string, unknown> | null;
 
   @Column({ name: 'customer_notes', type: 'text', nullable: true })
   customerNotes: string | null;
@@ -176,6 +215,39 @@ export class Order {
 
   @Column({ name: 'reinstated_by', type: 'uuid', nullable: true })
   reinstatedBy: string | null;
+
+  /**
+   * Cuándo se cobró el pedido. Se sella en el momento en que el pago pasa a
+   * `paid`, venga de la pasarela o de la administración.
+   *
+   * Es el reloj de la custodia: los recordatorios de recogida y los 30 días
+   * que el pedido se guarda cuentan desde aquí. Sin esta fecha, la política
+   * de custodia no se puede aplicar a nada.
+   */
+  @Column({ name: 'paid_at', type: 'timestamptz', nullable: true })
+  paidAt: Date | null;
+
+  /**
+   * Cuándo se entregó de verdad. Se sella al pasar el pedido a `delivered`.
+   *
+   * También es un reloj: el plazo para reclamar cuenta desde la entrega, y sin
+   * fecha registrada no hay desde cuándo contarlo ni cómo sostenerlo si el
+   * cliente discute.
+   */
+  @Column({ name: 'delivered_at', type: 'timestamptz', nullable: true })
+  deliveredAt: Date | null;
+
+  /** Quién, del back-office, registró la entrega. */
+  @Column({ name: 'delivered_by', type: 'uuid', nullable: true })
+  deliveredBy: string | null;
+
+  /**
+   * Quién se llevó el pedido: `{name, idCard}`. En las recogidas casi nunca es
+   * el comprador —está en el extranjero— sino el familiar que va al mostrador,
+   * así que se anota a quién se le entregó y con qué carné.
+   */
+  @Column({ name: 'picked_up_by', type: 'jsonb', nullable: true })
+  pickedUpBy: Record<string, unknown> | null;
 
   @OneToMany(() => OrderItem, (item) => item.order)
   items?: OrderItem[];

@@ -4,6 +4,7 @@ import configuration, {
   corsConfig,
   databaseConfig,
   paymentsConfig,
+  resendConfig,
 } from './configuration';
 
 describe('configuration', () => {
@@ -213,5 +214,26 @@ describe('configuration', () => {
   it('strips a trailing slash from the public callback base URL', () => {
     process.env.PUBLIC_API_URL = 'https://api.example.com/';
     expect(paymentsConfig().publicUrl).toBe('https://api.example.com');
+  });
+
+  describe('resendConfig', () => {
+    it('sin MAIL_TEMPLATES_OFF no apaga ninguna plantilla', () => {
+      delete process.env.MAIL_TEMPLATES_OFF;
+      expect(resendConfig().plantillasApagadas).toEqual([]);
+    });
+
+    it('parte la lista por comas y perdona los espacios', () => {
+      process.env.MAIL_TEMPLATES_OFF =
+        ' order_received , order_cancelled_payment_not_received ';
+      expect(resendConfig().plantillasApagadas).toEqual([
+        'order_received',
+        'order_cancelled_payment_not_received',
+      ]);
+    });
+
+    it('descarta las entradas vacías de una lista mal escrita', () => {
+      process.env.MAIL_TEMPLATES_OFF = 'order_received,,';
+      expect(resendConfig().plantillasApagadas).toEqual(['order_received']);
+    });
   });
 });

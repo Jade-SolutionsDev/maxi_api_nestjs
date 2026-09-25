@@ -47,6 +47,21 @@ export class ClientAddress {
   @Column({ name: 'municipality_id', type: 'uuid' })
   municipalityId: string;
 
+  // Quien recibe el pedido en esta dirección, que no tiene por qué ser quien
+  // compra: se manda a casa de un familiar y lo recoge él.
+  @Column({
+    name: 'recipient_name',
+    type: 'varchar',
+    length: 150,
+    nullable: true,
+  })
+  recipientName: string | null;
+
+  // Carnet de identidad de esa persona. Nullable a propósito: las direcciones
+  // que ya existen no lo tienen y no se les puede inventar.
+  @Column({ name: 'id_card', type: 'varchar', length: 11, nullable: true })
+  idCard: string | null;
+
   // Optional: when empty, the client's own phone is the one to call.
   @Column({
     name: 'contact_phone',

@@ -11,6 +11,8 @@ import {
   PaymentStatus,
 } from '../orders/entities/order.entity';
 import { InventoryService } from '../inventory/inventory.service';
+import { OrderEventsService } from '../order-events/order-events.service';
+import { OrderMailerService } from '../mail/order-mailer.service';
 import { ChargeStatus, PaymentCharge } from './entities/payment-charge.entity';
 import { OrderExpiryService } from './order-expiry.service';
 import { PaymentMethodsService } from './payment-methods.service';
@@ -42,6 +44,7 @@ const makeCharge = (overrides: Partial<PaymentCharge> = {}): PaymentCharge =>
   }) as PaymentCharge;
 
 describe('OrderExpiryService', () => {
+  const mailer = { cancelled: jest.fn().mockResolvedValue(null) };
   let service: OrderExpiryService;
   let orderRepo: { find: jest.Mock; findOne: jest.Mock; save: jest.Mock };
   let payments: { latestChargesFor: jest.Mock };
@@ -80,6 +83,14 @@ describe('OrderExpiryService', () => {
         { provide: PaymentsService, useValue: payments },
         { provide: PaymentMethodsService, useValue: methods },
         { provide: InventoryService, useValue: inventory },
+        {
+          provide: OrderEventsService,
+          useValue: { record: jest.fn().mockResolvedValue(undefined) },
+        },
+        {
+          provide: OrderMailerService,
+          useValue: mailer,
+        },
         {
           provide: ConfigService,
           useValue: {
@@ -243,5 +254,24 @@ describe('OrderExpiryService', () => {
     expect(where.status).toBe(OrderStatus.PENDING);
     expect(where.createdAt).toBeDefined();
     expect(payments.latestChargesFor).not.toHaveBeenCalled();
+  });
+  // `void` sin `.catch()` deja una promesa sin dueño, y en Node eso tumba el
+  // proceso. Se comprueba de dos maneras porque una sola engaña: que el correo
+  // se haya intentado —si no, la prueba no toca el camino— y que el rechazo no
+  // se propague al barrido.
+  it('un correo que revienta no tumba el barrido', async () => {
+    mailer.cancelled.mockRejectedValueOnce(new Error('resend caído'));
+    const order = makeOrder();
+
+    const result = await sweepWith(
+      order,
+      makeCharge({ createdAt: ago(31 * MINUTE) }),
+    );
+
+    expect(mailer.cancelled).toHaveBeenCalledWith(
+      order.id,
+      CancellationReason.PAYMENT_NOT_RECEIVED,
+    );
+    expect(result.cancelled).toBe(1);
   });
 });

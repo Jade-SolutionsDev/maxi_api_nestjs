@@ -12,6 +12,7 @@ import {
   MaxLength,
   Min,
 } from 'class-validator';
+import { IsImageUrl } from '../../common/validators/is-image-url.validator';
 
 export class CreateProductDto {
   @IsUUID()
@@ -40,6 +41,7 @@ export class CreateProductDto {
   @IsString()
   @IsNotEmpty()
   @MaxLength(2048)
+  @IsImageUrl()
   imageUrl: string;
 
   @IsOptional()

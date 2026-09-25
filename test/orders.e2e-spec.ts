@@ -22,6 +22,13 @@ const TABLES =
 const CRON_SECRET = 'orders_e2e_cron';
 process.env.CRON_SECRET = CRON_SECRET;
 
+// Obligatorio en toda recogida desde MxH-0104: quién pasa a buscar el pedido.
+const CONTACTO_RECOGIDA = {
+  recipientName: 'Daniel Smith',
+  idCard: '91031512345',
+  contactPhone: '55512345',
+};
+
 describe('Orders (e2e)', () => {
   let app: INestApplication;
   let clients: Repository<Client>;
@@ -196,6 +203,29 @@ describe('Orders (e2e)', () => {
     expect(row.quantity).toBe(2);
     expect(row.reservedQuantity).toBe(0);
     expect(await publicAvailability()).toBe(2);
+  });
+
+  it('direct jump pending -> delivered commits the stock exactly once', async () => {
+    const order = await addToCartAndCheckout(3);
+
+    const res = await request(app.getHttpServer())
+      .patch(`/api/orders/${order.id}/status`)
+      .set(adminAuth)
+      .send({ status: 'delivered', direct: true })
+      .expect(200);
+    expect(res.body.data.status).toBe('delivered');
+
+    const row = await physicalRow();
+    expect(row.quantity).toBe(2);
+    expect(row.reservedQuantity).toBe(0);
+
+    // Skipping steps without the flag stays forbidden.
+    const other = await addToCartAndCheckout(1);
+    await request(app.getHttpServer())
+      .patch(`/api/orders/${other.id}/status`)
+      .set(adminAuth)
+      .send({ status: 'delivered' })
+      .expect(409);
   });
 
   it('client cancel while pending releases the hold', async () => {
@@ -499,6 +529,7 @@ describe('Orders (e2e)', () => {
         .send({
           fulfillmentType: 'pickup',
           pickupAddressId: offer.pickupPoints[0].id,
+          contact: CONTACTO_RECOGIDA,
         })
         .expect(201);
 
@@ -641,6 +672,7 @@ describe('Orders (e2e)', () => {
           fulfillmentType: 'pickup',
           pickupAddressId: counter.id,
           deliveryMunicipalityId: municipalityId,
+          contact: CONTACTO_RECOGIDA,
         })
         .expect(201);
       const orderId = res.body.data.id as string;
@@ -715,6 +747,7 @@ describe('Orders (e2e)', () => {
           fulfillmentType: 'pickup',
           pickupAddressId: counter.id,
           deliveryMunicipalityId: municipalityId,
+          contact: CONTACTO_RECOGIDA,
         })
         .expect(201);
       const orderId = res.body.data.id as string;

@@ -23,9 +23,10 @@ const toBoolean = (value?: string): boolean | undefined => {
   return undefined;
 };
 
-// Access is gated per-action by managed permissions; SUPER_ADMIN/ADMIN bypass,
-// GROCER keeps its baseline (list/read/update) via DEFAULT_ROLE_PERMISSIONS. The
-// service still scopes non-managers to their assigned storages.
+// Access is gated per-action by managed permissions; SUPER_ADMIN/ADMIN bypass.
+// The service scopes non-managers to their assigned storages unless they hold
+// the global `stock-locations:view-all` permission (visibility only — writes
+// still require assignment).
 @ApiTags('stock-locations')
 @ApiBearerAuth()
 @Controller('stock-locations')
@@ -43,6 +44,15 @@ export class StockLocationsController {
       q,
       isActive: toBoolean(isActive),
     });
+  }
+
+  // Must be declared before ':id' or Nest matches it as an id.
+  @Get('assignable-users')
+  @RequirePermission({ module: 'stock-locations', action: 'update' })
+  async assignableUsers(): Promise<
+    Awaited<ReturnType<StockLocationsService['listAssignableUsers']>>
+  > {
+    return this.stockLocationsService.listAssignableUsers();
   }
 
   @Get(':id')

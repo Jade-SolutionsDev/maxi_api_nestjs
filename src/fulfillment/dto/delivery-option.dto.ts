@@ -8,6 +8,7 @@ import {
   IsString,
   IsUUID,
   MaxLength,
+  Max,
   Min,
   ValidateNested,
 } from 'class-validator';
@@ -39,6 +40,16 @@ export class CreateDeliveryOptionDto {
   @Min(0)
   fee?: number;
 
+  /**
+   * Días hábiles que se promete tardar, contados desde el pago. Vacío = sin
+   * compromiso publicado. Se cuenta de lunes a sábado, sin feriados.
+   */
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  @Max(60)
+  promiseDays?: number | null;
+
   @IsOptional()
   @IsInt()
   @Min(0)
@@ -68,6 +79,7 @@ export class DeliveryOptionResponseDto {
   label: string;
   description: string | null;
   fee: number;
+  promiseDays: number | null;
   sortOrder: number;
   enabled: boolean;
   zones: DeliveryZoneItemDto[];
@@ -83,6 +95,7 @@ export class DeliveryOptionResponseDto {
     dto.label = option.label;
     dto.description = option.description;
     dto.fee = Number(option.fee);
+    dto.promiseDays = option.promiseDays ?? null;
     dto.sortOrder = option.sortOrder;
     dto.enabled = option.enabled;
     dto.zones = zones.map((zone) => ({

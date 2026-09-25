@@ -6,8 +6,11 @@ import {
   PrimaryGeneratedColumn,
 } from 'typeorm';
 
-// Join row: a GROCER user assigned to a storage. Admins manage these; a grocer
-// may only access/edit storages they're assigned to.
+// Join row: a user assigned to a storage. Admins manage these; a non-admin may
+// only access/edit storages they're assigned to (unless they hold the global
+// stock-locations:view-all permission, which grants read-only visibility).
+// "grocer" in the table/column names is historical — any user with a
+// stock-locations grant can be assigned now.
 @Entity('stock_location_grocers')
 @Index(['locationId', 'grocerId'], { unique: true })
 export class StockLocationGrocer {

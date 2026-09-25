@@ -16,6 +16,12 @@ export interface FulfillmentSettingsData {
    * anywhere. Editable so ops can reword it without a deploy.
    */
   supportMessage: string;
+  /**
+   * Días hábiles que se tarda en tener un pedido listo para recoger. Hoy toda
+   * la venta es recogida, así que sin esto el plazo casi no se usaría. Nulo =
+   * sin compromiso.
+   */
+  pickupPromiseDays?: number | null;
 }
 
 @Entity('fulfillment_settings')

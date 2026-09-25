@@ -10,8 +10,7 @@ import {
   Post,
 } from '@nestjs/common';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
-import { Roles } from '../common/decorators/roles.decorator';
-import { Role } from '../users/entities/user.entity';
+import { RequirePermission } from '../permissions/decorators/require-permission.decorator';
 import { CmsService } from './cms.service';
 import {
   CmsServiceResponseDto,
@@ -22,17 +21,18 @@ import {
 @ApiTags('cms')
 @ApiBearerAuth()
 @Controller('cms/services')
-@Roles(Role.SUPER_ADMIN, Role.ADMIN)
 export class CmsServicesController {
   constructor(private readonly cmsService: CmsService) {}
 
   @Get()
+  @RequirePermission({ module: 'cms-services', action: 'list' })
   async findAll(): Promise<CmsServiceResponseDto[]> {
     const services = await this.cmsService.listServicesAdmin();
     return services.map(CmsServiceResponseDto.fromEntity);
   }
 
   @Get(':id')
+  @RequirePermission({ module: 'cms-services', action: 'read' })
   async findOne(
     @Param('id', ParseUUIDPipe) id: string,
   ): Promise<CmsServiceResponseDto> {
@@ -42,6 +42,7 @@ export class CmsServicesController {
   }
 
   @Post()
+  @RequirePermission({ module: 'cms-services', action: 'create' })
   async create(
     @Body() dto: CreateCmsServiceDto,
   ): Promise<CmsServiceResponseDto> {
@@ -51,6 +52,7 @@ export class CmsServicesController {
   }
 
   @Patch(':id')
+  @RequirePermission({ module: 'cms-services', action: 'update' })
   async update(
     @Param('id', ParseUUIDPipe) id: string,
     @Body() dto: UpdateCmsServiceDto,
@@ -61,6 +63,7 @@ export class CmsServicesController {
   }
 
   @Delete(':id')
+  @RequirePermission({ module: 'cms-services', action: 'delete' })
   @HttpCode(204)
   async remove(@Param('id', ParseUUIDPipe) id: string): Promise<void> {
     await this.cmsService.removeService(id);

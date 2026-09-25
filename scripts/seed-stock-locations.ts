@@ -11,7 +11,7 @@ import { Role, User } from '../src/users/entities/user.entity';
 
 /**
  * Additive seed for testing: inserts a couple of storages with coverage (and a
- * grocer assignment if a GROCER exists). Idempotent by name — safe to re-run,
+ * grocer assignment if a STAFF user exists). Idempotent by name — safe to re-run,
  * never drops data. Geography must already be seeded (boot the app once).
  *
  * Run: pnpm run seed:stock-locations
@@ -58,7 +58,7 @@ async function main() {
     order: { name: 'ASC' },
     take: 3,
   });
-  const grocer = await userRepo.findOne({ where: { role: Role.GROCER } });
+  const grocer = await userRepo.findOne({ where: { role: Role.STAFF } });
 
   const seeds: {
     name: string;

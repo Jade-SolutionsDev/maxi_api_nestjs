@@ -2,6 +2,7 @@ import { forwardRef, Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { AuthModule } from '../auth/auth.module';
 import { ClientsModule } from '../clients/clients.module';
+import { PermissionsModule } from '../permissions/permissions.module';
 import { Invitation } from './entities/invitation.entity';
 import { User } from './entities/user.entity';
 import { InvitationsService } from './invitations.service';
@@ -14,6 +15,7 @@ import { UsersService } from './users.service';
     TypeOrmModule.forFeature([User, Invitation]),
     forwardRef(() => AuthModule),
     forwardRef(() => ClientsModule),
+    PermissionsModule,
   ],
   controllers: [UsersController, StorefrontMirrorController],
   providers: [UsersService, InvitationsService],

@@ -10,8 +10,7 @@ import {
   Post,
 } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
-import { Roles } from '../common/decorators/roles.decorator';
-import { Role } from '../users/entities/user.entity';
+import { RequirePermission } from '../permissions/decorators/require-permission.decorator';
 import {
   CreateDeliveryOptionDto,
   DeliveryOptionResponseDto,
@@ -24,17 +23,18 @@ import { FulfillmentService } from './fulfillment.service';
 @ApiTags('fulfillment')
 @ApiBearerAuth()
 @Controller('delivery-options')
-@Roles(Role.SUPER_ADMIN, Role.ADMIN)
 export class DeliveryOptionsController {
   constructor(private readonly fulfillmentService: FulfillmentService) {}
 
   @Get()
+  @RequirePermission({ module: 'delivery-options', action: 'list' })
   @ApiOperation({ summary: 'All delivery options, enabled or not' })
   findAll(): Promise<DeliveryOptionResponseDto[]> {
     return this.fulfillmentService.findAllOptions();
   }
 
   @Get(':id')
+  @RequirePermission({ module: 'delivery-options', action: 'read' })
   findOne(
     @Param('id', ParseUUIDPipe) id: string,
   ): Promise<DeliveryOptionResponseDto> {
@@ -42,6 +42,7 @@ export class DeliveryOptionsController {
   }
 
   @Post()
+  @RequirePermission({ module: 'delivery-options', action: 'create' })
   @ApiOperation({
     summary: 'Create a delivery option',
     description:
@@ -56,6 +57,7 @@ export class DeliveryOptionsController {
   }
 
   @Patch(':id')
+  @RequirePermission({ module: 'delivery-options', action: 'update' })
   @ApiOperation({ summary: 'Edit an option; zones are replaced wholesale' })
   update(
     @Param('id', ParseUUIDPipe) id: string,
@@ -65,6 +67,7 @@ export class DeliveryOptionsController {
   }
 
   @Delete(':id')
+  @RequirePermission({ module: 'delivery-options', action: 'delete' })
   @HttpCode(204)
   @ApiOperation({
     summary: 'Remove an option',

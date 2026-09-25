@@ -18,6 +18,8 @@ function makeAddress(overrides: Partial<ClientAddress> = {}): ClientAddress {
     betweenStreets: 'entre 8 y 10',
     reference: 'Edificio azul',
     municipalityId: 'mun-1',
+    recipientName: 'Daniel Smith',
+    idCard: '91031512345',
     contactPhone: '55512345',
     isDefault: true,
     createdAt: new Date('2026-01-01'),
@@ -154,6 +156,29 @@ describe('ClientAddressesService', () => {
         where: { id: 'addr-9', clientId: 'client-1' },
       });
     });
+  });
+
+  it('guarda el destinatario y el carnet, no solo la calle', async () => {
+    // Se escapó una vez: el servicio construye la entidad campo a campo y los
+    // dos nuevos no estaban, asi que el pedido los llevaba y la libreta no.
+    repository.count.mockResolvedValue(0);
+    repository.create.mockImplementation((v) => v as never);
+    repository.save.mockImplementation((v) => Promise.resolve(v as never));
+
+    await service.create('client-1', {
+      street: 'Calle 12 #345',
+      municipalityId: 'mun-1',
+      recipientName: 'Merlinda Vargas',
+      idCard: '85072045678',
+      contactPhone: '55987654',
+    });
+
+    expect(repository.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        recipientName: 'Merlinda Vargas',
+        idCard: '85072045678',
+      }),
+    );
   });
 
   describe('update', () => {

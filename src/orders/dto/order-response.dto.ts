@@ -35,7 +35,7 @@ export class OrderResponseDto {
   id: string;
   orderNumber: string | null;
   clientId: string;
-  // Denormalized so the admin list needs no /clients lookups (GROCER can't
+  // Denormalized so the admin list needs no /clients lookups (staff can't
   // read that resource).
   clientName: string | null;
   clientEmail: string | null;
@@ -53,6 +53,7 @@ export class OrderResponseDto {
   pickupAddress: Record<string, unknown> | null;
   pickupLocationId: string | null;
   deliveryAddress: Record<string, unknown> | null;
+  contactSnapshot: Record<string, unknown> | null;
   customerNotes: string | null;
   /** Present on detail responses; omitted on lists. */
   items?: OrderItemResponseDto[];
@@ -73,6 +74,24 @@ export class OrderResponseDto {
    * refund is owed. Null for an ordinary cancellation.
    */
   cancellationReason: CancellationReason | null;
+  /** Cuándo entró el dinero. Desde aquí cuentan la custodia y sus avisos. */
+  paidAt: Date | null;
+  /** Cuándo se entregó. Desde aquí cuenta el plazo para reclamar. */
+  deliveredAt: Date | null;
+  /** Días hábiles prometidos al comprar. */
+  /**
+   * El identificador del enlace de seguimiento. Se devuelve a quien ya puede
+   * ver el pedido entero —su dueño y la administración—, para que la tienda
+   * pueda ofrecer «compartir seguimiento» sin pedirlo aparte. Para el resto
+   * del mundo la única puerta es /storefront/tracking/:id, que no devuelve
+   * datos personales.
+   */
+  trackingId: string | null;
+  promiseDays: number | null;
+  /** Hasta cuándo está comprometida la entrega; se sella con el pago. */
+  promisedAt: Date | null;
+  /** A quién se le entregó: `{name, idCard}`. */
+  pickedUpBy: Record<string, unknown> | null;
   /**
    * Set when an admin brought the order back from cancelled to pending
    * («Restablecer orden»). The payment window restarts from this instant.
@@ -122,8 +141,15 @@ export class OrderResponseDto {
     dto.pickupAddress = order.pickupAddressSnapshot;
     dto.pickupLocationId = order.pickupLocationId;
     dto.deliveryAddress = order.deliveryAddress;
+    dto.contactSnapshot = order.contactSnapshot;
     dto.customerNotes = order.customerNotes;
     dto.cancellationReason = order.cancellationReason;
+    dto.paidAt = order.paidAt;
+    dto.deliveredAt = order.deliveredAt;
+    dto.trackingId = order.trackingId ?? null;
+    dto.promiseDays = order.promiseDays;
+    dto.promisedAt = order.promisedAt;
+    dto.pickedUpBy = order.pickedUpBy;
     dto.reinstatedAt = order.reinstatedAt ?? null;
     dto.reinstatedBy = order.reinstatedBy ?? null;
     dto.items = order.items?.map(OrderItemResponseDto.fromEntity);

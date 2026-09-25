@@ -8,6 +8,7 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { getRepositoryToken } from '@nestjs/typeorm';
 import { DataSource } from 'typeorm';
 import { InventoryService } from '../inventory/inventory.service';
+import { OrderEventsService } from '../order-events/order-events.service';
 import { ProductsService } from '../products/products.service';
 import { OrderItem } from '../orders/entities/order-item.entity';
 import {
@@ -23,6 +24,8 @@ import {
   PaymentGateway,
 } from './payment-gateway.interface';
 import { PaymentMethodsService } from './payment-methods.service';
+import { OrderMailerService } from '../mail/order-mailer.service';
+import { RefundsService } from '../refunds/refunds.service';
 import { PaymentsService } from './payments.service';
 
 function makeOrder(overrides: Partial<Order> = {}): Order {
@@ -55,8 +58,6 @@ function makeCharge(overrides: Partial<PaymentCharge> = {}): PaymentCharge {
     errorMessage: null,
     expiresAt: new Date(Date.now() + 300_000),
     completedAt: null,
-    customerReference: null,
-    receiptUrl: null,
     createdAt: new Date(),
     updatedAt: new Date(),
     ...overrides,
@@ -119,6 +120,8 @@ describe('PaymentsService', () => {
   let methods: { gatewayFor: jest.Mock; resolve: jest.Mock };
   let orderItemRepo: { find: jest.Mock };
   let inventory: { reserve: jest.Mock };
+  let refunds: { requestForLatePaymentWithoutStock: jest.Mock };
+  let mailer: { paymentReceived: jest.Mock; cancelled: jest.Mock };
 
   // `createChargeForOrder` recibe la pasarela y la fila que la eligió.
   const resolved = () => ({ gateway, method: methodRow(gateway.code) });
@@ -143,6 +146,13 @@ describe('PaymentsService', () => {
       find: jest.fn().mockResolvedValue([{ productId: 'prod-1', quantity: 2 }]),
     };
     inventory = { reserve: jest.fn() };
+    refunds = {
+      requestForLatePaymentWithoutStock: jest.fn().mockResolvedValue(undefined),
+    };
+    mailer = {
+      paymentReceived: jest.fn().mockResolvedValue(null),
+      cancelled: jest.fn().mockResolvedValue(null),
+    };
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
@@ -152,6 +162,10 @@ describe('PaymentsService', () => {
         { provide: getRepositoryToken(OrderItem), useValue: orderItemRepo },
         { provide: PaymentMethodsService, useValue: methods },
         { provide: InventoryService, useValue: inventory },
+        {
+          provide: OrderEventsService,
+          useValue: { record: jest.fn().mockResolvedValue(undefined) },
+        },
         {
           provide: ProductsService,
           useValue: { coveringLocationIds: jest.fn().mockResolvedValue([]) },
@@ -164,6 +178,8 @@ describe('PaymentsService', () => {
             ),
           },
         },
+        { provide: RefundsService, useValue: refunds },
+        { provide: OrderMailerService, useValue: mailer },
       ],
     }).compile();
 

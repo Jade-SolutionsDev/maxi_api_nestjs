@@ -10,8 +10,7 @@ import {
   Post,
 } from '@nestjs/common';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
-import { Roles } from '../common/decorators/roles.decorator';
-import { Role } from '../users/entities/user.entity';
+import { RequirePermission } from '../permissions/decorators/require-permission.decorator';
 import { CmsService } from './cms.service';
 import {
   CmsStaffMemberResponseDto,
@@ -22,17 +21,18 @@ import {
 @ApiTags('cms')
 @ApiBearerAuth()
 @Controller('cms/staff')
-@Roles(Role.SUPER_ADMIN, Role.ADMIN)
 export class CmsStaffController {
   constructor(private readonly cmsService: CmsService) {}
 
   @Get()
+  @RequirePermission({ module: 'cms-staff', action: 'list' })
   async findAll(): Promise<CmsStaffMemberResponseDto[]> {
     const staff = await this.cmsService.listStaffAdmin();
     return staff.map(CmsStaffMemberResponseDto.fromEntity);
   }
 
   @Get(':id')
+  @RequirePermission({ module: 'cms-staff', action: 'read' })
   async findOne(
     @Param('id', ParseUUIDPipe) id: string,
   ): Promise<CmsStaffMemberResponseDto> {
@@ -42,6 +42,7 @@ export class CmsStaffController {
   }
 
   @Post()
+  @RequirePermission({ module: 'cms-staff', action: 'create' })
   async create(
     @Body() dto: CreateCmsStaffMemberDto,
   ): Promise<CmsStaffMemberResponseDto> {
@@ -51,6 +52,7 @@ export class CmsStaffController {
   }
 
   @Patch(':id')
+  @RequirePermission({ module: 'cms-staff', action: 'update' })
   async update(
     @Param('id', ParseUUIDPipe) id: string,
     @Body() dto: UpdateCmsStaffMemberDto,
@@ -61,6 +63,7 @@ export class CmsStaffController {
   }
 
   @Delete(':id')
+  @RequirePermission({ module: 'cms-staff', action: 'delete' })
   @HttpCode(204)
   async remove(@Param('id', ParseUUIDPipe) id: string): Promise<void> {
     await this.cmsService.removeStaffMember(id);

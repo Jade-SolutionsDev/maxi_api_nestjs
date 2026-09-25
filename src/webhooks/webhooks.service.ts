@@ -9,6 +9,7 @@ import { verifyWebhook } from '@clerk/backend/webhooks';
 import { ClientsService } from '../clients/clients.service';
 import { InvitationsService } from '../users/invitations.service';
 import { UsersService } from '../users/users.service';
+import { ClientMailerService } from '../mail/client-mailer.service';
 
 interface ClerkWebhookPayload {
   type: string;
@@ -29,6 +30,7 @@ export class WebhooksService {
     private readonly clientsService: ClientsService,
     private readonly usersService: UsersService,
     private readonly invitationsService: InvitationsService,
+    private readonly clientMailer: ClientMailerService,
   ) {}
 
   async handleStoreWebhook(
@@ -42,6 +44,8 @@ export class WebhooksService {
 
     switch (payload.type) {
       case 'user.created':
+        await this.upsertClient(payload.data, true);
+        break;
       case 'user.updated':
         await this.upsertClient(payload.data);
         break;
@@ -157,17 +161,34 @@ export class WebhooksService {
     return h;
   }
 
-  private async upsertClient(data: Record<string, unknown>): Promise<void> {
+  private async upsertClient(
+    data: Record<string, unknown>,
+    isNewAccount = false,
+  ): Promise<void> {
     const clerkId = data.id as string;
     const email = this.extractPrimaryEmail(data);
     const firstName = (data.first_name as string | null) ?? undefined;
     const lastName = (data.last_name as string | null) ?? undefined;
 
-    await this.clientsService.createOrUpdateFromClerk(clerkId, {
+    const client = await this.clientsService.createOrUpdateFromClerk(clerkId, {
       email: email ?? undefined,
       firstName,
       lastName,
     });
+
+    if (!isNewAccount) {
+      return;
+    }
+    // La bienvenida no puede tumbar el alta: si el correo falla, el cliente
+    // ya está creado y eso es lo que importa. El fallo queda en `email_log`.
+    try {
+      await this.clientMailer.welcome(client);
+    } catch (err) {
+      this.logger.error(
+        `No se pudo enviar la bienvenida a ${email ?? clerkId}`,
+        err instanceof Error ? err.stack : String(err),
+      );
+    }
   }
 
   private async createAdminUserFromInvitation(
@@ -199,6 +220,7 @@ export class WebhooksService {
       firstName,
       lastName,
       role: invitation.role,
+      roleIds: invitation.roleIds,
       phone,
       businessName,
     });

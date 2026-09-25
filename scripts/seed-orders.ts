@@ -73,9 +73,24 @@ const SCENARIOS: Scenario[] = [
 ];
 
 const DEMO_CLIENTS = [
-  { clerkId: 'seed_client_ana', firstName: 'Ana', lastName: 'Pérez', email: 'ana.perez@example.com' },
-  { clerkId: 'seed_client_luis', firstName: 'Luis', lastName: 'García', email: 'luis.garcia@example.com' },
-  { clerkId: 'seed_client_marta', firstName: 'Marta', lastName: 'Díaz', email: 'marta.diaz@example.com' },
+  {
+    clerkId: 'seed_client_ana',
+    firstName: 'Ana',
+    lastName: 'Pérez',
+    email: 'ana.perez@example.com',
+  },
+  {
+    clerkId: 'seed_client_luis',
+    firstName: 'Luis',
+    lastName: 'García',
+    email: 'luis.garcia@example.com',
+  },
+  {
+    clerkId: 'seed_client_marta',
+    firstName: 'Marta',
+    lastName: 'Díaz',
+    email: 'marta.diaz@example.com',
+  },
 ];
 
 async function main() {
@@ -112,7 +127,9 @@ async function main() {
     const client = clients[index % clients.length];
 
     // 1-3 lines per order, rotating through the in-stock catalog.
-    const lines = inStock.slice(index % inStock.length).slice(0, 1 + (index % 3));
+    const lines = inStock
+      .slice(index % inStock.length)
+      .slice(0, 1 + (index % 3));
     await cartService.clear(client.id);
     for (const line of lines) {
       await cartService.addItem(
@@ -131,7 +148,11 @@ async function main() {
       await ordersService.updateStatus(admin, order.id, status);
     }
     if (scenario.payment) {
-      await ordersService.updatePaymentStatus(order.id, scenario.payment);
+      await ordersService.updatePaymentStatus(
+        admin,
+        order.id,
+        scenario.payment,
+      );
     }
 
     const finalStatus = scenario.statuses.at(-1) ?? OrderStatus.PENDING;

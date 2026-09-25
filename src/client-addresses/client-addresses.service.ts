@@ -14,6 +14,8 @@ import { ClientAddress } from './entities/client-address.entity';
 export const MAX_ADDRESSES_PER_CLIENT = 20;
 
 export interface CreateClientAddressInput {
+  recipientName?: string;
+  idCard?: string;
   label?: string;
   street: string;
   betweenStreets?: string;
@@ -74,6 +76,8 @@ export class ClientAddressesService {
         betweenStreets: input.betweenStreets ?? null,
         reference: input.reference ?? null,
         municipalityId: input.municipalityId,
+        recipientName: input.recipientName ?? null,
+        idCard: input.idCard ?? null,
         contactPhone: input.contactPhone ?? null,
         isDefault,
       }),
@@ -118,6 +122,12 @@ export class ClientAddressesService {
     }
     if (input.reference !== undefined) {
       address.reference = input.reference || null;
+    }
+    if (input.recipientName !== undefined) {
+      address.recipientName = input.recipientName || null;
+    }
+    if (input.idCard !== undefined) {
+      address.idCard = input.idCard || null;
     }
     if (input.contactPhone !== undefined) {
       address.contactPhone = input.contactPhone || null;

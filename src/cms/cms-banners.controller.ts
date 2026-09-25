@@ -10,8 +10,7 @@ import {
   Post,
 } from '@nestjs/common';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
-import { Roles } from '../common/decorators/roles.decorator';
-import { Role } from '../users/entities/user.entity';
+import { RequirePermission } from '../permissions/decorators/require-permission.decorator';
 import { CmsService } from './cms.service';
 import {
   CmsBannerResponseDto,
@@ -22,17 +21,18 @@ import {
 @ApiTags('cms')
 @ApiBearerAuth()
 @Controller('cms/banners')
-@Roles(Role.SUPER_ADMIN, Role.ADMIN)
 export class CmsBannersController {
   constructor(private readonly cmsService: CmsService) {}
 
   @Get()
+  @RequirePermission({ module: 'cms-banners', action: 'list' })
   async findAll(): Promise<CmsBannerResponseDto[]> {
     const banners = await this.cmsService.listBannersAdmin();
     return banners.map(CmsBannerResponseDto.fromView);
   }
 
   @Get(':id')
+  @RequirePermission({ module: 'cms-banners', action: 'read' })
   async findOne(
     @Param('id', ParseUUIDPipe) id: string,
   ): Promise<CmsBannerResponseDto> {
@@ -40,6 +40,7 @@ export class CmsBannersController {
   }
 
   @Post()
+  @RequirePermission({ module: 'cms-banners', action: 'create' })
   async create(@Body() dto: CreateCmsBannerDto): Promise<CmsBannerResponseDto> {
     return CmsBannerResponseDto.fromView(
       await this.cmsService.createBanner(dto),
@@ -47,6 +48,7 @@ export class CmsBannersController {
   }
 
   @Patch(':id')
+  @RequirePermission({ module: 'cms-banners', action: 'update' })
   async update(
     @Param('id', ParseUUIDPipe) id: string,
     @Body() dto: UpdateCmsBannerDto,
@@ -57,6 +59,7 @@ export class CmsBannersController {
   }
 
   @Delete(':id')
+  @RequirePermission({ module: 'cms-banners', action: 'delete' })
   @HttpCode(204)
   async remove(@Param('id', ParseUUIDPipe) id: string): Promise<void> {
     await this.cmsService.removeBanner(id);
