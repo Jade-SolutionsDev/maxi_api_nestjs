@@ -58,7 +58,10 @@ import {
 } from './entities/order.entity';
 import { ClientAddressesService } from '../client-addresses/client-addresses.service';
 import { ClientAddress } from '../client-addresses/entities/client-address.entity';
-import { FulfillmentService } from '../fulfillment/fulfillment.service';
+import {
+  FulfillmentChoice,
+  FulfillmentService,
+} from '../fulfillment/fulfillment.service';
 import { GeographyService } from '../geography/geography.service';
 import {
   PaymentMethodsService,
@@ -151,6 +154,39 @@ const snapshotContact = (
   if (!recipientName && !idCard && !contactPhone) return null;
   return { recipientName, idCard, contactPhone };
 };
+
+/** Una línea ya valorada: el núcleo no vuelve a mirar el catálogo. */
+interface LineaResuelta {
+  productId: string;
+  name: string;
+  quantity: number;
+  unitPrice: number;
+}
+
+interface CrearPedidoParams {
+  clientId: string;
+  lineas: LineaResuelta[];
+  /** Suma de las líneas, ya redondeada por quien las resolvió. */
+  subtotal: number;
+  fulfillment: FulfillmentChoice;
+  deliveryMunicipalityId?: string;
+  deliveryAddress: Record<string, unknown> | null;
+  contactSnapshot: Record<string, unknown> | null;
+  customerNotes: string | null;
+  allowedLocationIds?: string[];
+  /** Quién crea el pedido: el propio cliente, o un empleado por él. */
+  actor: { clientId: string } | { userId: string };
+  /** Código del método de pago, solo para el `meta` del evento. */
+  paymentMethodCode: string | null;
+  /** Lo que cada llamador quiera dejar en el `meta` del evento de creación. */
+  metaExtra?: Record<string, unknown>;
+  /**
+   * Trabajo extra que tiene que caber en la MISMA transacción. La tienda vacía
+   * aquí el carrito; el panel sella aquí el cobro. El núcleo no sabe de
+   * carritos ni de cobros.
+   */
+  alFinalizar?: (manager: EntityManager, order: Order) => Promise<void>;
+}
 
 @Injectable()
 export class OrdersService {
@@ -273,8 +309,6 @@ export class OrdersService {
       dto.paymentMethod,
     );
 
-    const total = (cart.subtotal + Number(fulfillment.fee)).toFixed(2);
-
     // Reservations stay within the storages covering the municipality; without
     // a municipality (pickup-only client with no location) any active storage
     // may hold the stock, as before.
@@ -288,87 +322,30 @@ export class OrdersService {
         ? [...new Set([...coveringIds, fulfillment.pickupLocationId])]
         : coveringIds;
 
-    const orderId = await this.dataSource.transaction(async (manager) => {
-      const orderRepo = manager.getRepository(Order);
-      const order = await orderRepo.save(
-        orderRepo.create({
-          clientId: client.id,
-          status: OrderStatus.PENDING,
-          paymentStatus: PaymentStatus.PENDING,
-          subtotal: cart.subtotal.toFixed(2),
-          deliveryFee: fulfillment.fee,
-          total,
-          fulfillmentType: fulfillment.type,
-          deliveryOptionId: fulfillment.deliveryOptionId,
-          deliveryOptionLabel: fulfillment.deliveryOptionLabel,
-          pickupLocationId: fulfillment.pickupLocationId,
-          pickupAddressId: fulfillment.pickupAddressId,
-          pickupAddressSnapshot: fulfillment.pickupAddressSnapshot,
-          // El plazo se congela aquí, como la etiqueta y la tarifa: cambiar
-          // la opción de entrega mañana no reescribe lo prometido hoy.
-          promiseDays: fulfillment.promiseDays,
-          deliveryMunicipalityId: deliveryMunicipalityId ?? null,
-          // A snapshot: the saved address may be edited or deleted later, the
-          // order must still say where it was going.
-          deliveryAddress: address
-            ? snapshotAddress(address, place)
-            : (dto.deliveryAddress ?? null),
-          // `contact` manda sobre la dirección: es lo que el cliente acaba de
-          // escribir en este checkout, mientras que la dirección guardada
-          // puede llevar meses ahí con otro destinatario.
-          contactSnapshot: snapshotContact(dto.contact ?? address),
-          customerNotes: dto.customerNotes ?? null,
-        }),
-      );
-      order.orderNumber = `ORD-${new Date().getFullYear()}${String(order.seq).padStart(4, '0')}`;
-      // El enlace de seguimiento se reparte por fuera (WhatsApp, correo), así
-      // que su identificador no puede deducirse del número de pedido, que es
-      // correlativo. 32 bytes aleatorios, y no cambia en toda la vida del pedido.
-      order.trackingId = randomBytes(32).toString('hex');
-      await orderRepo.save(order);
-
-      const itemRepo = manager.getRepository(OrderItem);
-      for (const line of cart.items) {
-        // reserve() re-checks availability under lock — a concurrent checkout
-        // of the same stock loses with the same 409 shape as the cart.
-        await this.inventoryService.reserve(
-          manager,
-          order.id,
-          line.productId,
-          line.quantity,
-          {
-            allowedLocationIds,
-            // Pickup drains the customer's counter first; overflow lands at
-            // sibling covering storages and flags the order for a transfer.
-            preferredLocationId: fulfillment.pickupLocationId ?? undefined,
-          },
-        );
-        await itemRepo.save(
-          itemRepo.create({
-            orderId: order.id,
-            productId: line.productId,
-            productNameSnapshot: line.name,
-            unitPrice: line.unitPrice.toFixed(2),
-            quantity: line.quantity,
-            lineTotal: line.lineTotal.toFixed(2),
-          }),
-        );
-      }
-
-      await manager.getRepository(CartItem).delete({ clientId: client.id });
-      await this.orderEvents.record(manager, {
-        orderId: order.id,
-        kind: OrderEventKind.CREATED,
-        actor: { clientId: client.id },
-        field: 'status',
-        nextValue: OrderStatus.PENDING,
-        meta: {
-          total,
-          fulfillmentType: fulfillment.type,
-          paymentMethod: dto.paymentMethod ?? null,
-        },
-      });
-      return order.id;
+    const orderId = await this.crearPedido({
+      clientId: client.id,
+      lineas: cart.items.map((line) => ({
+        productId: line.productId,
+        name: line.name,
+        quantity: line.quantity,
+        unitPrice: line.unitPrice,
+      })),
+      subtotal: cart.subtotal,
+      fulfillment,
+      deliveryMunicipalityId,
+      deliveryAddress: address
+        ? snapshotAddress(address, place)
+        : (dto.deliveryAddress ?? null),
+      contactSnapshot: snapshotContact(dto.contact ?? address),
+      customerNotes: dto.customerNotes ?? null,
+      allowedLocationIds,
+      actor: { clientId: client.id },
+      paymentMethodCode: dto.paymentMethod ?? null,
+      // El carrito se vacía DENTRO de la transacción, como hasta ahora: si la
+      // reserva falla, el cliente conserva su carrito.
+      alFinalizar: async (manager) => {
+        await manager.getRepository(CartItem).delete({ clientId: client.id });
+      },
     });
 
     // Deliberately NOT awaited. Creating the attempt is a live call to the
@@ -406,6 +383,109 @@ export class OrdersService {
     });
 
     return this.findOneForClient(client.id, orderId);
+  }
+
+  /**
+   * Crea el pedido y aparta su stock, en una sola transacción.
+   *
+   * Es el único sitio donde nace un pedido. Recibe las líneas **ya valoradas**
+   * y no sabe de dónde salieron: del carrito del cliente en la tienda, o de lo
+   * que escribió un empleado en el panel. Así las dos vías no pueden acabar
+   * contando el stock o los totales de maneras distintas.
+   *
+   * No toca carritos y no manda correos: eso lo decide cada llamador.
+   */
+  private async crearPedido(params: CrearPedidoParams): Promise<string> {
+    return this.dataSource.transaction(async (manager) => {
+      const total = (params.subtotal + Number(params.fulfillment.fee)).toFixed(
+        2,
+      );
+
+      const orderRepo = manager.getRepository(Order);
+      const order = await orderRepo.save(
+        orderRepo.create({
+          clientId: params.clientId,
+          status: OrderStatus.PENDING,
+          paymentStatus: PaymentStatus.PENDING,
+          subtotal: params.subtotal.toFixed(2),
+          deliveryFee: params.fulfillment.fee,
+          total,
+          fulfillmentType: params.fulfillment.type,
+          deliveryOptionId: params.fulfillment.deliveryOptionId,
+          deliveryOptionLabel: params.fulfillment.deliveryOptionLabel,
+          pickupLocationId: params.fulfillment.pickupLocationId,
+          pickupAddressId: params.fulfillment.pickupAddressId,
+          pickupAddressSnapshot: params.fulfillment.pickupAddressSnapshot,
+          // El plazo se congela aquí, como la etiqueta y la tarifa: cambiar
+          // la opción de entrega mañana no reescribe lo prometido hoy.
+          promiseDays: params.fulfillment.promiseDays,
+          deliveryMunicipalityId: params.deliveryMunicipalityId ?? null,
+          // A snapshot: the saved address may be edited or deleted later, the
+          // order must still say where it was going.
+          deliveryAddress: params.deliveryAddress,
+          // `contact` manda sobre la dirección: es lo que el cliente acaba de
+          // escribir en este checkout, mientras que la dirección guardada
+          // puede llevar meses ahí con otro destinatario.
+          contactSnapshot: params.contactSnapshot,
+          customerNotes: params.customerNotes,
+        }),
+      );
+      order.orderNumber = `ORD-${new Date().getFullYear()}${String(order.seq).padStart(4, '0')}`;
+      // El enlace de seguimiento se reparte por fuera (WhatsApp, correo), así
+      // que su identificador no puede deducirse del número de pedido, que es
+      // correlativo. 32 bytes aleatorios, y no cambia en toda la vida del pedido.
+      order.trackingId = randomBytes(32).toString('hex');
+      await orderRepo.save(order);
+
+      const itemRepo = manager.getRepository(OrderItem);
+      for (const line of params.lineas) {
+        // reserve() re-checks availability under lock — a concurrent checkout
+        // of the same stock loses with the same 409 shape as the cart.
+        await this.inventoryService.reserve(
+          manager,
+          order.id,
+          line.productId,
+          line.quantity,
+          {
+            allowedLocationIds: params.allowedLocationIds,
+            // Pickup drains the customer's counter first; overflow lands at
+            // sibling covering storages and flags the order for a transfer.
+            preferredLocationId:
+              params.fulfillment.pickupLocationId ?? undefined,
+          },
+        );
+        const lineTotal = (
+          Math.round(line.unitPrice * line.quantity * 100) / 100
+        ).toFixed(2);
+        await itemRepo.save(
+          itemRepo.create({
+            orderId: order.id,
+            productId: line.productId,
+            productNameSnapshot: line.name,
+            unitPrice: line.unitPrice.toFixed(2),
+            quantity: line.quantity,
+            lineTotal,
+          }),
+        );
+      }
+
+      await this.orderEvents.record(manager, {
+        orderId: order.id,
+        kind: OrderEventKind.CREATED,
+        actor: params.actor,
+        field: 'status',
+        nextValue: OrderStatus.PENDING,
+        meta: {
+          total,
+          fulfillmentType: params.fulfillment.type,
+          paymentMethod: params.paymentMethodCode,
+          ...params.metaExtra,
+        },
+      });
+
+      await params.alFinalizar?.(manager, order);
+      return order.id;
+    });
   }
 
   /**
