@@ -78,8 +78,8 @@ const cartLine = {
 };
 
 const contacto = {
-  recipientName: 'Daniel Smith',
-  idCard: '91031512345',
+  recipientName: 'Ana Rodríguez',
+  idCard: '90051512345',
   contactPhone: '55512345',
 };
 
