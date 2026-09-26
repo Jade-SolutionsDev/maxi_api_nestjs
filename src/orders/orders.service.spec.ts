@@ -80,7 +80,7 @@ const cartLine = {
 const contacto = {
   recipientName: 'Ana Rodríguez',
   idCard: '90051512345',
-  contactPhone: '55512345',
+  contactPhone: '+53 5251 9414',
 };
 
 describe('OrdersService', () => {

@@ -62,7 +62,7 @@ describe('ClientsController · listado (e2e)', () => {
         email: 'aurelio@example.com',
         firstName: 'Aurelio',
         lastName: 'Bermúdez',
-        phone: '55512345',
+        phone: '+53 5251 9414',
         isActive: true,
       }),
       clients.create({
