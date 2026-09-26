@@ -18,9 +18,9 @@ function makeAddress(overrides: Partial<ClientAddress> = {}): ClientAddress {
     betweenStreets: 'entre 8 y 10',
     reference: 'Edificio azul',
     municipalityId: 'mun-1',
-    recipientName: 'Daniel Smith',
-    idCard: '91031512345',
-    contactPhone: '55512345',
+    recipientName: 'Ana Rodríguez',
+    idCard: '90051512345',
+    contactPhone: '+53 5251 9414',
     isDefault: true,
     createdAt: new Date('2026-01-01'),
     updatedAt: new Date('2026-01-01'),
@@ -170,7 +170,7 @@ describe('ClientAddressesService', () => {
       municipalityId: 'mun-1',
       recipientName: 'Merlinda Vargas',
       idCard: '85072045678',
-      contactPhone: '55987654',
+      contactPhone: '+53 5251 9414',
     });
 
     expect(repository.create).toHaveBeenCalledWith(

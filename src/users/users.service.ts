@@ -1,4 +1,4 @@
-import { sinTildes } from '../common/search/accent-insensitive';
+import { contieneTexto, sinTildes } from '../common/search/accent-insensitive';
 import {
   BadRequestException,
   ConflictException,
@@ -162,6 +162,14 @@ export class UsersService {
     // invitations too — by tier, or by invited managed role.
     if (!filter.status && filter.includeInvitations) {
       let pendingUsers = await this.loadPendingInvitationUsers();
+      // Invitations never went through the SQL search above, so they stuck to
+      // page 1 no matter what was typed. Same columns, same accent rule.
+      if (filter.q) {
+        const q = filter.q;
+        pendingUsers = pendingUsers.filter((u) =>
+          contieneTexto(q, u.firstName, u.lastName, u.email),
+        );
+      }
       if (tierFilter) {
         pendingUsers = pendingUsers.filter((u) => u.role === tierFilter);
       }

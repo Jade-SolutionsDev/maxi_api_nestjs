@@ -45,7 +45,9 @@ class FaqLinkPairConstraint implements ValidatorConstraintInterface {
 class CmsFaqCategoryFields {
   @IsString()
   @IsNotEmpty()
-  @MaxLength(160)
+  @MaxLength(160, {
+    message: 'El título no puede superar los 160 caracteres',
+  })
   title: string;
 
   @IsOptional()
@@ -64,7 +66,9 @@ export class UpdateCmsFaqCategoryDto {
   @IsOptional()
   @IsString()
   @IsNotEmpty()
-  @MaxLength(160)
+  @MaxLength(160, {
+    message: 'El título no puede superar los 160 caracteres',
+  })
   title?: string;
 
   @IsOptional()
@@ -83,7 +87,9 @@ class CmsFaqQuestionFields {
 
   @IsString()
   @IsNotEmpty()
-  @MaxLength(300)
+  @MaxLength(300, {
+    message: 'La pregunta no puede superar los 300 caracteres',
+  })
   question: string;
 
   @IsString()
@@ -92,7 +98,9 @@ class CmsFaqQuestionFields {
 
   @IsOptional()
   @IsString()
-  @MaxLength(120)
+  @MaxLength(120, {
+    message: 'El texto del enlace no puede superar los 120 caracteres',
+  })
   linkLabel?: string | null;
 
   @Validate(FaqLinkPairConstraint)
@@ -118,7 +126,9 @@ export class UpdateCmsFaqQuestionDto {
   @IsOptional()
   @IsString()
   @IsNotEmpty()
-  @MaxLength(300)
+  @MaxLength(300, {
+    message: 'La pregunta no puede superar los 300 caracteres',
+  })
   question?: string;
 
   @IsOptional()
@@ -128,7 +138,9 @@ export class UpdateCmsFaqQuestionDto {
 
   @IsOptional()
   @IsString()
-  @MaxLength(120)
+  @MaxLength(120, {
+    message: 'El texto del enlace no puede superar los 120 caracteres',
+  })
   linkLabel?: string | null;
 
   @Validate(FaqLinkPairConstraint)

@@ -9,7 +9,7 @@ describe('CreateUserDto', () => {
     email: 'jane@example.com',
     firstName: 'Jane',
     lastName: 'Doe',
-    phone: '+1234567890',
+    phone: '+53 5251 9414',
   };
 
   it('should validate a correct payload', async () => {

@@ -78,9 +78,9 @@ const cartLine = {
 };
 
 const contacto = {
-  recipientName: 'Daniel Smith',
-  idCard: '91031512345',
-  contactPhone: '55512345',
+  recipientName: 'Ana Rodríguez',
+  idCard: '90051512345',
+  contactPhone: '+53 5251 9414',
 };
 
 describe('OrdersService', () => {
@@ -708,6 +708,26 @@ describe('OrdersService', () => {
       );
       expect(condition).toContain('client.phone');
       expect(parameters).toEqual({ q: '%Aurelio García%' });
+    });
+
+    // Al mostrador llega quien va a recoger, no quien compró: si solo se busca
+    // por los datos del titular, el empleado tiene delante a una persona con su
+    // carnet en la mano y no puede encontrar su pedido.
+    it('busca también por el beneficiario: nombre, carnet y teléfono', async () => {
+      const qb = filtrosFalsos();
+      orderRepo.createQueryBuilder.mockReturnValue(qb);
+
+      await service.findAllAdmin({ q: '85042312345' });
+
+      const [condition] = qb.andWhere.mock.calls[0] as [string];
+      // Con los paréntesis, y no es un detalle de estilo: sin ellos TypeORM no
+      // reconoce la columna, no la escapa, y Postgres revienta con un 500
+      // porque `order` es palabra reservada. Pasó en staging el 26-sep.
+      expect(condition).toContain("(order.contact_snapshot)->>'recipientName'");
+      expect(condition).toContain("(order.contact_snapshot)->>'idCard'");
+      expect(condition).toContain("(order.contact_snapshot)->>'contactPhone'");
+      // Y nunca la columna suelta: esa es exactamente la forma que falla.
+      expect(condition).not.toMatch(/[^(]order\.contact_snapshot/);
     });
 
     // «Hasta el 24» tiene que incluir los pedidos de esa tarde. Cortar a

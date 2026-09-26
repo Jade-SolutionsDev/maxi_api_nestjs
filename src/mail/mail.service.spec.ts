@@ -7,11 +7,18 @@ import { MailService } from './mail.service';
 describe('MailService', () => {
   let service: MailService;
   let saved: Partial<EmailLog>[];
+  let enviados: number;
   let resend: {
     apiKey?: string;
     fromAddress?: string;
     replyTo?: string;
     configured: boolean;
+    plantillasApagadas?: string[];
+    cupoMensual?: number;
+    cupoDiario?: number;
+    reservaMensual?: number;
+    reservaDiaria?: number;
+    plantillasPrescindibles?: string[];
   };
 
   const build = async (): Promise<MailService> => {
@@ -32,7 +39,9 @@ describe('MailService', () => {
               saved.push(row);
               return Promise.resolve(row);
             }),
-            count: jest.fn().mockResolvedValue(0),
+            count: jest
+              .fn()
+              .mockImplementation(() => Promise.resolve(enviados)),
           },
         },
       ],
@@ -51,6 +60,7 @@ describe('MailService', () => {
 
   beforeEach(async () => {
     saved = [];
+    enviados = 0;
     resend = { configured: false };
     service = await build();
   });
@@ -199,5 +209,148 @@ describe('MailService', () => {
 
     const cuerpo = JSON.parse(fetchMock.mock.calls[0][1].body as string);
     expect('attachments' in cuerpo).toBe(false);
+  });
+
+  describe('plantillas apagadas', () => {
+    const encendido = {
+      apiKey: 'k',
+      fromAddress: 'Maxi <no-reply@x.cu>',
+      configured: true,
+    };
+
+    it('no manda una plantilla apagada, aunque haya credenciales', async () => {
+      resend = { ...encendido, plantillasApagadas: ['order_received'] };
+      service = await build();
+      const fetchMock = jest.fn();
+      global.fetch = fetchMock;
+
+      const result = await service.send({
+        ...email,
+        template: 'order_received',
+      });
+
+      expect(fetchMock).not.toHaveBeenCalled();
+      expect(result.status).toBe(EmailStatus.SKIPPED);
+      expect(saved[0]).toMatchObject({
+        template: 'order_received',
+        status: EmailStatus.SKIPPED,
+      });
+      expect(saved[0].errorMessage).toContain('MAIL_TEMPLATES_OFF');
+    });
+
+    it('apagar una plantilla no apaga las demás', async () => {
+      resend = { ...encendido, plantillasApagadas: ['order_received'] };
+      service = await build();
+      const fetchMock = jest.fn().mockResolvedValue({
+        ok: true,
+        json: () => Promise.resolve({ id: 'res-1' }),
+      });
+      global.fetch = fetchMock;
+
+      const result = await service.send({
+        ...email,
+        template: 'payment_received',
+      });
+
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+      expect(result.status).toBe(EmailStatus.SENT);
+    });
+
+    it('la lista vacía no apaga nada', async () => {
+      resend = { ...encendido, plantillasApagadas: [] };
+      service = await build();
+      expect(service.apagada('order_received')).toBe(false);
+    });
+  });
+
+  describe('reserva de cupo', () => {
+    const encendido = {
+      apiKey: 'k',
+      fromAddress: 'Maxi <no-reply@x.cu>',
+      configured: true,
+      cupoMensual: 3000,
+      cupoDiario: 100,
+      reservaMensual: 200,
+      reservaDiaria: 20,
+      plantillasPrescindibles: ['welcome'],
+    };
+
+    const conEnvioOk = () => {
+      const fetchMock = jest.fn().mockResolvedValue({
+        ok: true,
+        json: () => Promise.resolve({ id: 'res-1' }),
+      });
+      global.fetch = fetchMock;
+      return fetchMock;
+    };
+
+    it('deja pasar lo prescindible mientras sobra cupo', async () => {
+      resend = encendido;
+      enviados = 10;
+      service = await build();
+      const fetchMock = conEnvioOk();
+
+      const result = await service.send({ ...email, template: 'welcome' });
+
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+      expect(result.status).toBe(EmailStatus.SENT);
+    });
+
+    it('corta lo prescindible al tocar la reserva diaria', async () => {
+      resend = encendido;
+      enviados = 80; // 100 - 20 de reserva
+      service = await build();
+      const fetchMock = conEnvioOk();
+
+      const result = await service.send({ ...email, template: 'welcome' });
+
+      expect(fetchMock).not.toHaveBeenCalled();
+      expect(result.status).toBe(EmailStatus.SKIPPED);
+      expect(saved[0].errorMessage).toContain('reserva de cupo');
+    });
+
+    /** La razón de ser de todo esto: el correo del dinero usa la reserva. */
+    it('lo esencial sigue saliendo dentro de la reserva', async () => {
+      resend = encendido;
+      enviados = 95;
+      service = await build();
+      const fetchMock = conEnvioOk();
+
+      const result = await service.send({
+        ...email,
+        template: 'payment_received',
+      });
+
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+      expect(result.status).toBe(EmailStatus.SENT);
+    });
+
+    it('con el cupo a cero no comprueba nada', async () => {
+      resend = { ...encendido, cupoMensual: 0, cupoDiario: 0 };
+      enviados = 99999;
+      service = await build();
+      const fetchMock = conEnvioOk();
+
+      await service.send({ ...email, template: 'welcome' });
+
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+    });
+
+    it('si el contador falla, el correo sale igual', async () => {
+      resend = encendido;
+      service = await build();
+      const repo = (
+        service as unknown as {
+          emailLogRepository: { count: jest.Mock };
+        }
+      ).emailLogRepository;
+      repo.count.mockRejectedValue(new Error('base caída'));
+      const fetchMock = conEnvioOk();
+
+      const result = await service.send({ ...email, template: 'welcome' });
+
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+      expect(result.status).toBe(EmailStatus.SENT);
+    });
   });
 });

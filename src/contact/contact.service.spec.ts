@@ -95,6 +95,38 @@ describe('ContactService', () => {
     service = module.get<ContactService>(ContactService);
   });
 
+  describe('listMessages', () => {
+    it('busca sin tildes en nombre, apellido, correo, teléfono y mensaje', async () => {
+      const qb = {
+        orderBy: jest.fn().mockReturnThis(),
+        skip: jest.fn().mockReturnThis(),
+        take: jest.fn().mockReturnThis(),
+        andWhere: jest.fn().mockReturnThis(),
+        getManyAndCount: jest.fn().mockResolvedValue([[], 0]),
+      };
+      messageRepo.createQueryBuilder.mockReturnValue(qb);
+
+      await service.listMessages({ q: 'reparacion' });
+
+      const [condicion, params] = qb.andWhere.mock.calls[0] as [
+        string,
+        Record<string, string>,
+      ];
+      for (const columna of [
+        'm.name',
+        'm.lastName',
+        'm.email',
+        'm.phone',
+        'm.message',
+      ]) {
+        expect(condicion).toContain(
+          `f_unaccent(${columna}) ILIKE f_unaccent(:q)`,
+        );
+      }
+      expect(params).toEqual({ q: '%reparacion%' });
+    });
+  });
+
   describe('submitMessage', () => {
     const anonymousDto = {
       motiveId: 'mot-1',
@@ -157,7 +189,7 @@ describe('ContactService', () => {
         firstName: 'Pedro',
         lastName: 'Gómez',
         email: 'pedro@example.com',
-        phone: '+53 5 111 2233',
+        phone: '+53 5251 9414',
       } as Client;
 
       await service.submitMessage(
@@ -170,7 +202,7 @@ describe('ContactService', () => {
           clientId: 'cli-1',
           name: 'Pedro',
           email: 'pedro@example.com',
-          phone: '+53 5 111 2233',
+          phone: '+53 5251 9414',
         }),
       );
     });

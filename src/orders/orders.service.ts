@@ -939,10 +939,26 @@ export class OrdersService {
     }
     if (query.q) {
       qb.andWhere(
+        // También por el beneficiario, no solo por el titular: al mostrador
+        // llega quien va a recoger, con su carnet en la mano, y hasta ahora no
+        // había forma de encontrar su pedido con ninguno de sus datos.
+        // `contact_snapshot` es jsonb y puede ser null: `->>` devuelve NULL y
+        // el ILIKE no casa, que es lo que se quiere.
+        //
+        // Los paréntesis alrededor de la columna NO son decorativos. TypeORM
+        // sustituye `alias.columna` por su forma escapada con un regex que
+        // captura «todo hasta un espacio, = ( ) o coma»: sin los paréntesis se
+        // lleva también el `->>'campo'`, no encuentra esa clave, y deja
+        // `order.contact_snapshot` tal cual. Y `order` sin comillas es palabra
+        // reservada en Postgres, así que la consulta entera revienta con un
+        // 500. Pasó en staging el 26-sep.
         `(${sinTildes('order.orderNumber')} OR ${sinTildes('client.email')}
           OR ${sinTildes('client.firstName')} OR ${sinTildes('client.lastName')}
           OR ${sinTildes("concat_ws(' ', client.firstName, client.lastName)")}
-          OR ${sinTildes('client.phone')})`,
+          OR ${sinTildes('client.phone')}
+          OR ${sinTildes("(order.contact_snapshot)->>'recipientName'")}
+          OR ${sinTildes("(order.contact_snapshot)->>'idCard'")}
+          OR ${sinTildes("(order.contact_snapshot)->>'contactPhone'")})`,
         { q: `%${query.q}%` },
       );
     }

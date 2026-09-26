@@ -42,6 +42,34 @@ describe('plantillas de correo', () => {
     expect(rendered.html).toContain('&lt;img');
   });
 
+  it('el correo de recogida dice a nombre de quién está el pedido', () => {
+    const rendered = paymentReceived({
+      ...order,
+      recipient: { name: 'Ana Pérez', idCard: '85042312345' },
+    });
+
+    // Quien va a buscarlo suele no ser quien compró: si el correo no lo dice,
+    // el familiar llega al mostrador sin saber si puede retirarlo.
+    expect(rendered.text).toContain('Ana Pérez');
+    expect(rendered.text).toContain('85042312345');
+  });
+
+  it('sin carnet registrado, el correo no inventa un paréntesis vacío', () => {
+    const rendered = paymentReceived({
+      ...order,
+      recipient: { name: 'Ana Pérez', idCard: null },
+    });
+
+    expect(rendered.text).toContain('Ana Pérez');
+    expect(rendered.text).not.toContain('()');
+  });
+
+  it('un pedido sin destinatario registrado no enseña la fila', () => {
+    const rendered = paymentReceived(order);
+
+    expect(rendered.text).not.toContain('Lo recoge');
+  });
+
   it('tutea, como el resto de lo que ve el cliente', () => {
     const rendered = paymentReceived(order);
     expect(rendered.text).toContain('tu pedido');

@@ -1,5 +1,5 @@
 import { Logger } from '@nestjs/common';
-import { isLocalEnv } from './configuration';
+import { isLocalEnv, resendConfig } from './configuration';
 
 /**
  * Lo que la aplicación necesita para funcionar, comprobado antes de aceptar la
@@ -86,6 +86,30 @@ export function comprobarConfiguracion(): void {
 
   for (const v of DEGRADAN.filter((v) => falta(v.nombre))) {
     logger.warn(`${v.nombre} no está definida: ${v.porque}.`);
+  }
+
+  // Un correo apagado no se nota: no hay error, simplemente nadie recibe nada.
+  // Decirlo al arrancar es lo que evita que un apagado temporal se quede
+  // encendido seis meses porque nadie se acordaba de que estaba puesto.
+  const apagadas = (process.env.MAIL_TEMPLATES_OFF ?? '')
+    .split(',')
+    .map((c) => c.trim())
+    .filter(Boolean);
+  if (apagadas.length > 0) {
+    logger.warn(
+      `Correos apagados en este entorno (MAIL_TEMPLATES_OFF): ${apagadas.join(', ')}. No se enviará ninguno de ellos.`,
+    );
+  }
+
+  // La reserva solo se nota cuando ya ha cortado algo, y para entonces el
+  // correo lleva rato sin salir. Decir de cuánto es al arrancar permite
+  // cuadrarla con el plan contratado sin tener que leer el código.
+  const { cupoMensual, cupoDiario, reservaMensual, reservaDiaria } =
+    resendConfig();
+  if (cupoMensual > 0 || cupoDiario > 0) {
+    logger.log(
+      `Cupo de correo: ${cupoMensual}/mes y ${cupoDiario}/día, con ${reservaMensual} y ${reservaDiaria} en reserva para lo esencial.`,
+    );
   }
 
   const sinPasarela = falta('TROPIPAY_CLIENT_ID') && falta('MIBI_KEY_ID');

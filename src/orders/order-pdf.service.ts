@@ -59,6 +59,64 @@ const fecha = (valor: Date | null | undefined): string =>
  * de donde venga —la administración hoy, un correo adjunto mañana— y no
  * depende del navegador de quien lo pide.
  */
+/**
+ * El recuadro de entrega del comprobante, línea a línea.
+ *
+ * Función aparte y exportada para que se pueda comprobar lo que dice: dentro
+ * del servicio solo se podía verificar que el PDF era un PDF, y así se coló
+ * durante meses que leyera `fullName`, `phone` y `city` —tres nombres de campo
+ * que nadie escribe— y saliera sin destinatario ni municipio.
+ *
+ * Los nombres buenos son los que escriben `snapshotContact` y
+ * `snapshotAddress` en `orders.service.ts`.
+ */
+export const lineasDeEntrega = (order: Order): string[] => {
+  const esRecogida = order.fulfillmentType === FulfillmentType.PICKUP;
+  const contacto = order.contactSnapshot as {
+    recipientName?: string;
+    idCard?: string;
+    contactPhone?: string;
+  } | null;
+  const quienRecibe = contacto?.recipientName
+    ? `${contacto.recipientName}${contacto.idCard ? ` (${contacto.idCard})` : ''}`
+    : '';
+  const telefono = contacto?.contactPhone
+    ? `Teléfono: ${contacto.contactPhone}`
+    : '';
+
+  if (esRecogida) {
+    const recogida = order.pickupAddressSnapshot as {
+      locationName?: string;
+      label?: string;
+      address?: string;
+    } | null;
+    return [
+      'Recogida en mostrador',
+      [recogida?.locationName, recogida?.label].filter(Boolean).join(' · '),
+      recogida?.address ?? '',
+      quienRecibe ? `Recoge: ${quienRecibe}` : '',
+      telefono,
+    ];
+  }
+
+  const entrega = order.deliveryAddress as {
+    street?: string;
+    municipalityName?: string;
+    provinceName?: string;
+    reference?: string;
+  } | null;
+  const lugar = [entrega?.municipalityName, entrega?.provinceName]
+    .filter(Boolean)
+    .join(', ');
+  return [
+    order.deliveryOptionLabel ?? 'Entrega a domicilio',
+    entrega?.street ?? '',
+    lugar,
+    quienRecibe ? `Recibe: ${quienRecibe}` : '',
+    telefono,
+  ];
+};
+
 @Injectable()
 export class OrderPdfService {
   private readonly logger = new Logger(OrderPdfService.name);
@@ -284,40 +342,7 @@ export class OrderPdfService {
     ]);
 
     const esRecogida = order.fulfillmentType === FulfillmentType.PICKUP;
-    const contacto = order.contactSnapshot as {
-      fullName?: string;
-      name?: string;
-      idCard?: string;
-      phone?: string;
-    } | null;
-    const recogida = order.pickupAddressSnapshot as {
-      locationName?: string;
-      label?: string;
-      address?: string;
-    } | null;
-    const entrega = order.deliveryAddress as {
-      street?: string;
-      city?: string;
-      reference?: string;
-    } | null;
-
-    const lineasEntrega = esRecogida
-      ? [
-          'Recogida en mostrador',
-          [recogida?.locationName, recogida?.label].filter(Boolean).join(' · '),
-          recogida?.address ?? '',
-          contacto?.fullName || contacto?.name
-            ? `Recoge: ${contacto.fullName ?? contacto.name}${
-                contacto.idCard ? ` (${contacto.idCard})` : ''
-              }`
-            : '',
-        ]
-      : [
-          order.deliveryOptionLabel ?? 'Entrega a domicilio',
-          entrega?.street ?? '',
-          entrega?.city ?? '',
-          contacto?.phone ? `Teléfono: ${contacto.phone}` : '',
-        ];
+    const lineasEntrega = lineasDeEntrega(order);
 
     this.recuadro(
       doc,

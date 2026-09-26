@@ -80,12 +80,20 @@ export class OrderMailerService {
     );
   }
 
-  /** El motivo elige el texto; `null` es la cancelación ordinaria. */
+  /**
+   * El motivo elige el texto; `null` es la cancelación ordinaria.
+   *
+   * El motivo entra también en la clave del registro
+   * (`order_cancelled_payment_not_received`) porque no son el mismo aviso:
+   * que un operario cancele un pedido y que caduque solo por no pagarse son
+   * cosas distintas para el cliente, se miden aparte y se apagan aparte.
+   */
   async cancelled(
     orderId: string,
     motivo: MotivoCancelacion = null,
   ): Promise<SendResult | null> {
-    return this.dispatch(orderId, 'order_cancelled', (data) =>
+    const clave = motivo ? `order_cancelled_${motivo}` : 'order_cancelled';
+    return this.dispatch(orderId, clave, (data) =>
       orderCancelled(data, motivo),
     );
   }
@@ -172,6 +180,21 @@ export class OrderMailerService {
     return contact?.email?.trim() || null;
   }
 
+  /**
+   * Quién recibe el pedido, tal como se congeló al comprar. Los pedidos
+   * anteriores a MxH-0104 no lo llevan, y entonces el correo no dice nada en
+   * vez de enseñar un hueco.
+   */
+  private quienRecibe(order: Order): OrderMailData['recipient'] {
+    const contacto = order.contactSnapshot as {
+      recipientName?: string | null;
+      idCard?: string | null;
+    } | null;
+    const name = contacto?.recipientName?.trim();
+    if (!name) return null;
+    return { name, idCard: contacto?.idCard?.trim() || null };
+  }
+
   private toMailData(order: Order): OrderMailData {
     const client = order.client;
     const tienda = this.configService.get<StorefrontConfig>('storefront')?.url;
@@ -190,6 +213,7 @@ export class OrderMailerService {
       // términos no salía en ningún correo aunque el layout supiera armarlo.
       storeUrl: tienda ?? null,
       orderUrl: tienda ? `${tienda}/pedidos/${order.id}` : null,
+      recipient: this.quienRecibe(order),
     };
   }
 

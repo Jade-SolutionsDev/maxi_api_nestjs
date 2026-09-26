@@ -5,8 +5,9 @@ import {
   UnprocessableEntityException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Brackets, In, Repository } from 'typeorm';
+import { In, Repository } from 'typeorm';
 import { Client } from '../clients/entities/client.entity';
+import { sinTildes } from '../common/search/accent-insensitive';
 import {
   PaginatedResponse,
   buildPaginatedResponse,
@@ -143,15 +144,11 @@ export class ContactService {
       .take(limit);
 
     if (query.q) {
+      // Accent-insensitive like every other search: "reparacion" must find
+      // "reparación".
       qb.andWhere(
-        new Brackets((where) => {
-          where
-            .where('m.name ILIKE :q', { q: `%${query.q}%` })
-            .orWhere('m.lastName ILIKE :q')
-            .orWhere('m.email ILIKE :q')
-            .orWhere('m.phone ILIKE :q')
-            .orWhere('m.message ILIKE :q');
-        }),
+        `(${sinTildes('m.name')} OR ${sinTildes('m.lastName')} OR ${sinTildes('m.email')} OR ${sinTildes('m.phone')} OR ${sinTildes('m.message')})`,
+        { q: `%${query.q}%` },
       );
     }
     if (query.motiveId) {
