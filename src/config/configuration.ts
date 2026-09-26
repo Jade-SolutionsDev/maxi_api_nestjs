@@ -127,6 +127,30 @@ export interface ResendConfig {
    * importan. Se apagan por entorno para poder seguir probándolos en staging.
    */
   plantillasApagadas: string[];
+  /**
+   * Cupo del plan de Resend y cuánto se aparta para lo que no puede fallar.
+   *
+   * El plan gratuito da 3.000 correos al mes y 100 al día. El total mensual
+   * sobra —medido en producción el 26-sep-2026 salen unos 1.700—, pero el
+   * tope diario se rompe cuatro o cinco días al mes en los picos de registro
+   * (hubo días de 145, 129, 111 y 102 altas, y cada alta es un correo de
+   * bienvenida). Y cuando un tope se agota no elige a quién corta: puede
+   * tocarle al cliente que acaba de pagar.
+   *
+   * De ahí la reserva: las plantillas prescindibles dejan de salir antes de
+   * llegar al límite, y ese margen queda para los correos del dinero y la
+   * entrega. `cupoMensual`/`cupoDiario` a 0 desactivan la comprobación.
+   */
+  cupoMensual: number;
+  cupoDiario: number;
+  reservaMensual: number;
+  reservaDiaria: number;
+  /**
+   * Las que ceden el paso cuando se toca la reserva. La bienvenida es el 79%
+   * del volumen y la que rompe los picos, así que es la primera candidata;
+   * todo lo que no esté aquí se considera intocable.
+   */
+  plantillasPrescindibles: string[];
 }
 
 /** Datos de contacto que aparecen en los correos al cliente. */
@@ -298,6 +322,18 @@ export const storefrontConfig = (): StorefrontConfig => ({
   revalidateSecret: process.env.STOREFRONT_REVALIDATE_SECRET,
 });
 
+const listaDeClaves = (valor: string | undefined): string[] =>
+  (valor ?? '')
+    .split(',')
+    .map((clave) => clave.trim())
+    .filter(Boolean);
+
+/** Un número mal escrito no debe apagar el correo: se cae al valor por defecto. */
+const entero = (valor: string | undefined, porDefecto: number): number => {
+  const n = Number.parseInt(valor ?? '', 10);
+  return Number.isFinite(n) && n >= 0 ? n : porDefecto;
+};
+
 export const resendConfig = (): ResendConfig => {
   const apiKey = process.env.RESEND_API_KEY;
   const fromAddress = process.env.RESEND_FROM;
@@ -306,10 +342,14 @@ export const resendConfig = (): ResendConfig => {
     fromAddress,
     replyTo: process.env.RESEND_REPLY_TO,
     configured: isConfigured(apiKey, fromAddress),
-    plantillasApagadas: (process.env.MAIL_TEMPLATES_OFF ?? '')
-      .split(',')
-      .map((clave) => clave.trim())
-      .filter(Boolean),
+    plantillasApagadas: listaDeClaves(process.env.MAIL_TEMPLATES_OFF),
+    cupoMensual: entero(process.env.MAIL_MONTHLY_QUOTA, 3000),
+    cupoDiario: entero(process.env.MAIL_DAILY_QUOTA, 100),
+    reservaMensual: entero(process.env.MAIL_QUOTA_RESERVE, 200),
+    reservaDiaria: entero(process.env.MAIL_DAILY_RESERVE, 20),
+    plantillasPrescindibles: listaDeClaves(
+      process.env.MAIL_TEMPLATES_LOW_PRIORITY ?? 'welcome',
+    ),
   };
 };
 
