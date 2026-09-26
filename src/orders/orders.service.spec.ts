@@ -2294,10 +2294,21 @@ describe('OrdersService', () => {
       expect(paymentsService.createChargeForOrder).not.toHaveBeenCalled();
     });
 
-    it('manda el correo de «tenemos tu pedido»', async () => {
+    /**
+     * El canal no es decorativo. En producción el aviso de la tienda está
+     * apagado por volumen (MxH-0121): el 92% de los pedidos de la web nacen y
+     * caducan sin pagarse, así que ese correo iba sobre todo a quien abandonó
+     * un carrito. Si el alta del panel no declarara su canal caería en el
+     * mismo apagado, y quien encarga por teléfono —que no tiene el número del
+     * pedido ni sabe cuánto pagar— se quedaría sin su única constancia.
+     */
+    it('manda el correo de «tenemos tu pedido», declarando el canal', async () => {
       await service.crearParaCliente(makeUser(Role.ADMIN), dtoBase);
 
-      expect(mailer.orderReceived).toHaveBeenCalledWith('order-1');
+      expect(mailer.orderReceived).toHaveBeenCalledWith(
+        'order-1',
+        'back-office',
+      );
       expect(mailer.paymentReceived).not.toHaveBeenCalled();
     });
 

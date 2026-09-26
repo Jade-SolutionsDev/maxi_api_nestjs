@@ -629,9 +629,12 @@ export class OrdersService {
         : undefined,
     });
 
+    // El canal importa: sin cobro, el aviso sale bajo la clave del
+    // back-office, que no comparte el apagado de la tienda. Quien encarga por
+    // teléfono no tiene otra constancia de su pedido.
     const aviso = cobro
       ? this.orderMailer.paymentReceived(orderId)
-      : this.orderMailer.orderReceived(orderId);
+      : this.orderMailer.orderReceived(orderId, 'back-office');
     void aviso.catch((err) => {
       this.logger.error(
         `No se pudo avisar por correo del pedido ${orderId}`,
