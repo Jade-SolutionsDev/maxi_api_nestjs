@@ -56,6 +56,25 @@ export class OrderMailerService {
     );
   }
 
+  /**
+   * El mismo correo, con clave propia para el pedido que toma un empleado.
+   *
+   * `order_received` está apagado en producción por volumen: el 92% de los
+   * pedidos de la tienda nacen y caducan sin pagarse, y avisar de todos se
+   * come el cupo del plan. Pero quien encarga por teléfono es el caso
+   * contrario — no ha pasado por la web, no tiene el número del pedido ni sabe
+   * cuánto pagar, y este correo es su única constancia.
+   *
+   * Una clave distinta permite apagar uno sin apagar el otro, que es el mismo
+   * truco que ya usa la cancelación por impago. El volumen es despreciable
+   * frente a los ~115 diarios de la tienda.
+   */
+  async orderReceivedBackOffice(orderId: string): Promise<SendResult | null> {
+    return this.dispatch(orderId, 'order_received_back_office', (data) =>
+      orderReceived(data),
+    );
+  }
+
   async paymentReceived(orderId: string): Promise<SendResult | null> {
     return this.dispatch(orderId, 'payment_received', (data) =>
       paymentReceived(data),

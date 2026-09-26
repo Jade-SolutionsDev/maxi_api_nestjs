@@ -229,6 +229,7 @@ describe('OrdersService', () => {
     };
     mailer = {
       orderReceived: jest.fn().mockResolvedValue(null),
+      orderReceivedBackOffice: jest.fn().mockResolvedValue(null),
       paymentReceived: jest.fn().mockResolvedValue(null),
       shipped: jest.fn().mockResolvedValue(null),
       delivered: jest.fn().mockResolvedValue(null),
@@ -2297,7 +2298,11 @@ describe('OrdersService', () => {
     it('manda el correo de «tenemos tu pedido»', async () => {
       await service.crearParaCliente(makeUser(Role.ADMIN), dtoBase);
 
-      expect(mailer.orderReceived).toHaveBeenCalledWith('order-1');
+      // Con la clave del panel, no con la de la tienda: `order_received` está
+      // apagado en producción y este correo es lo único que recibe quien
+      // encarga por teléfono.
+      expect(mailer.orderReceivedBackOffice).toHaveBeenCalledWith('order-1');
+      expect(mailer.orderReceived).not.toHaveBeenCalled();
       expect(mailer.paymentReceived).not.toHaveBeenCalled();
     });
 
@@ -2483,14 +2488,16 @@ describe('OrdersService', () => {
       const anotado = jest
         .spyOn(Logger.prototype, 'error')
         .mockImplementation(() => undefined);
-      mailer.orderReceived.mockRejectedValue(new Error('resend caído'));
+      mailer.orderReceivedBackOffice.mockRejectedValue(
+        new Error('resend caído'),
+      );
 
       await expect(
         service.crearParaCliente(makeUser(Role.ADMIN), dtoBase),
       ).resolves.toBeDefined();
       await new Promise((sigue) => setImmediate(sigue));
 
-      expect(mailer.orderReceived).toHaveBeenCalled();
+      expect(mailer.orderReceivedBackOffice).toHaveBeenCalled();
       expect(anotado).toHaveBeenCalledWith(
         expect.stringContaining('No se pudo avisar por correo'),
         expect.anything(),

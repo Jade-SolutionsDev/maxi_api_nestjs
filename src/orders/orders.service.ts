@@ -631,7 +631,9 @@ export class OrdersService {
 
     const aviso = cobro
       ? this.orderMailer.paymentReceived(orderId)
-      : this.orderMailer.orderReceived(orderId);
+      : // Clave propia, no la de la tienda: `order_received` está apagado en
+        // producción y aquí el correo es lo único que le llega al cliente.
+        this.orderMailer.orderReceivedBackOffice(orderId);
     void aviso.catch((err) => {
       this.logger.error(
         `No se pudo avisar por correo del pedido ${orderId}`,

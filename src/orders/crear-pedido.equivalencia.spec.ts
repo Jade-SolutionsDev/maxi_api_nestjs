@@ -224,6 +224,7 @@ describe('la tienda y el panel crean el mismo pedido', () => {
     };
     mailer = {
       orderReceived: jest.fn().mockResolvedValue(null),
+      orderReceivedBackOffice: jest.fn().mockResolvedValue(null),
       paymentReceived: jest.fn().mockResolvedValue(null),
       shipped: jest.fn().mockResolvedValue(null),
       delivered: jest.fn().mockResolvedValue(null),
