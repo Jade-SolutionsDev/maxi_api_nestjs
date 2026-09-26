@@ -574,10 +574,18 @@ export class OrdersService {
     }
     if (query.q) {
       qb.andWhere(
+        // También por el beneficiario, no solo por el titular: al mostrador
+        // llega quien va a recoger, con su carnet en la mano, y hasta ahora no
+        // había forma de encontrar su pedido con ninguno de sus datos.
+        // `contact_snapshot` es jsonb y puede ser null: `->>` devuelve NULL y
+        // el ILIKE no casa, que es lo que se quiere.
         `(${sinTildes('order.orderNumber')} OR ${sinTildes('client.email')}
           OR ${sinTildes('client.firstName')} OR ${sinTildes('client.lastName')}
           OR ${sinTildes("concat_ws(' ', client.firstName, client.lastName)")}
-          OR ${sinTildes('client.phone')})`,
+          OR ${sinTildes('client.phone')}
+          OR ${sinTildes("order.contact_snapshot->>'recipientName'")}
+          OR ${sinTildes("order.contact_snapshot->>'idCard'")}
+          OR ${sinTildes("order.contact_snapshot->>'contactPhone'")})`,
         { q: `%${query.q}%` },
       );
     }

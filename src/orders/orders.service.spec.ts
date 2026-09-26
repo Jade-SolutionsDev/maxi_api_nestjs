@@ -663,6 +663,21 @@ describe('OrdersService', () => {
       expect(parameters).toEqual({ q: '%Aurelio García%' });
     });
 
+    // Al mostrador llega quien va a recoger, no quien compró: si solo se busca
+    // por los datos del titular, el empleado tiene delante a una persona con su
+    // carnet en la mano y no puede encontrar su pedido.
+    it('busca también por el beneficiario: nombre, carnet y teléfono', async () => {
+      const qb = filtrosFalsos();
+      orderRepo.createQueryBuilder.mockReturnValue(qb);
+
+      await service.findAllAdmin({ q: '85042312345' });
+
+      const [condition] = qb.andWhere.mock.calls[0] as [string];
+      expect(condition).toContain("contact_snapshot->>'recipientName'");
+      expect(condition).toContain("contact_snapshot->>'idCard'");
+      expect(condition).toContain("contact_snapshot->>'contactPhone'");
+    });
+
     // «Hasta el 24» tiene que incluir los pedidos de esa tarde. Cortar a
     // medianoche del 23 deja fuera un día entero sin que nadie lo note, y el
     // reporte cuadra mal justo el día que se saca.
