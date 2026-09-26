@@ -51,6 +51,12 @@ export interface OrderMailData {
   storeUrl: string | null;
   /** La ficha del pedido en la tienda, para pagarlo y seguirlo. */
   orderUrl: string | null;
+  /**
+   * Quién recibe el pedido, si se registró. En una recogida es con quien el
+   * mostrador contrasta el carnet, así que el correo tiene que decirlo: quien
+   * va a buscarlo suele no ser el que compró.
+   */
+  recipient?: { name: string; idCard: string | null } | null;
 }
 
 /**
@@ -350,6 +356,16 @@ export const paymentReceived = (order: OrderMailData): RenderedEmail => {
         ? ([['Se recoge en', esc(order.pickupAddress)]] as Array<
             [string, string]
           >)
+        : []),
+      ...(order.recipient
+        ? ([
+            [
+              'Lo recoge',
+              order.recipient.idCard
+                ? `${esc(order.recipient.name)} (CI ${esc(order.recipient.idCard)})`
+                : esc(order.recipient.name),
+            ],
+          ] as Array<[string, string]>)
         : []),
       ['Lo guardamos', `${PICKUP_CUSTODY_DAYS} días desde hoy`],
     ]),

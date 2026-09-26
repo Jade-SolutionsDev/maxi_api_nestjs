@@ -80,11 +80,16 @@ const cartLine = {
 const contacto = {
   recipientName: 'Ana Rodríguez',
   idCard: '90051512345',
-  contactPhone: '55512345',
+  contactPhone: '+53 5251 9414',
 };
 
 describe('OrdersService', () => {
   let service: OrdersService;
+  // Expuesto para que un describe puntual pueda sustituir, solo para sus
+  // propias pruebas, el repositorio que `manager.getRepository(Order)`
+  // entrega dentro de la transacción — así se puede distinguir un guardado
+  // hecho DENTRO de la transacción de uno hecho con `this.orderRepository`.
+  let dataSource: { transaction: jest.Mock };
   let orderRepo: {
     findOne: jest.Mock;
     findAndCount: jest.Mock;
@@ -105,7 +110,9 @@ describe('OrdersService', () => {
   let productsService: {
     coveringLocationIds: jest.Mock;
     findOne: jest.Mock;
+    availableForArea: jest.Mock;
   };
+  let clientRepo: { findOne: jest.Mock };
   let paymentsService: {
     createChargeForOrder: jest.Mock;
     latestChargeDto: jest.Mock;
@@ -182,7 +189,9 @@ describe('OrdersService', () => {
         isActive: true,
         deletedAt: null,
       }),
+      availableForArea: jest.fn().mockResolvedValue(new Map()),
     };
+    clientRepo = { findOne: jest.fn() };
     paymentsService = {
       createChargeForOrder: jest.fn().mockResolvedValue({ id: 'charge-1' }),
       latestChargeDto: jest.fn().mockResolvedValue(undefined),
@@ -246,7 +255,7 @@ describe('OrdersService', () => {
         return null;
       },
     };
-    const dataSource = {
+    dataSource = {
       transaction: jest.fn((cb: (m: unknown) => unknown) => cb(manager)),
     };
 
@@ -254,6 +263,7 @@ describe('OrdersService', () => {
       providers: [
         OrdersService,
         { provide: getRepositoryToken(Order), useValue: orderRepo },
+        { provide: getRepositoryToken(Client), useValue: clientRepo },
         { provide: CartService, useValue: cartService },
         { provide: InventoryService, useValue: inventoryService },
         { provide: PaymentsService, useValue: paymentsService },
@@ -310,6 +320,43 @@ describe('OrdersService', () => {
       expect(paymentsService.createChargeForOrder).toHaveBeenCalled();
       expect(result.status).toBe(OrderStatus.PENDING);
       expect(result.paymentStatus).toBe(PaymentStatus.PENDING);
+    });
+
+    it('el pedido nace en pending, tanto el estado como el pago', async () => {
+      await service.checkout(makeClient(), {});
+
+      // Campo a campo, no con objectContaining: es justo lo que la mutación
+      // de status: OrderStatus.PENDING -> OrderStatus.CONFIRMED en
+      // crearPedido() no rompía antes de esta prueba.
+      const pedidoGuardado = orderRepo.save.mock.calls[0][0];
+      expect(pedidoGuardado.status).toBe(OrderStatus.PENDING);
+      expect(pedidoGuardado.paymentStatus).toBe(PaymentStatus.PENDING);
+    });
+
+    it('el subtotal de la cabecera es la suma de los lineTotal de sus líneas', async () => {
+      // Dos líneas, no una: si el subtotal viniera de otro lado (por ejemplo,
+      // un total pasado por parámetro) y no de sumar estas mismas líneas,
+      // aquí divergirían.
+      cartService.getCart.mockResolvedValue({
+        items: [
+          { ...cartLine, productId: 'prod-1', quantity: 3, unitPrice: 0.1 },
+          { ...cartLine, productId: 'prod-2', quantity: 1, unitPrice: 2.005 },
+        ],
+        totalItems: 4,
+        subtotal: 2.31,
+      });
+
+      await service.checkout(makeClient(), {});
+
+      const pedidoGuardado = orderRepo.save.mock.calls[0][0];
+      const centavosDeLasLineas = orderItemRepo.save.mock.calls.reduce(
+        (centavos: number, [item]: [{ lineTotal: string }]) =>
+          centavos + Math.round(Number(item.lineTotal) * 100),
+        0,
+      );
+      expect(pedidoGuardado.subtotal).toBe(
+        (centavosDeLasLineas / 100).toFixed(2),
+      );
     });
 
     it('holds pickup stock in the storage the customer collects from', async () => {
@@ -661,6 +708,26 @@ describe('OrdersService', () => {
       );
       expect(condition).toContain('client.phone');
       expect(parameters).toEqual({ q: '%Aurelio García%' });
+    });
+
+    // Al mostrador llega quien va a recoger, no quien compró: si solo se busca
+    // por los datos del titular, el empleado tiene delante a una persona con su
+    // carnet en la mano y no puede encontrar su pedido.
+    it('busca también por el beneficiario: nombre, carnet y teléfono', async () => {
+      const qb = filtrosFalsos();
+      orderRepo.createQueryBuilder.mockReturnValue(qb);
+
+      await service.findAllAdmin({ q: '85042312345' });
+
+      const [condition] = qb.andWhere.mock.calls[0] as [string];
+      // Con los paréntesis, y no es un detalle de estilo: sin ellos TypeORM no
+      // reconoce la columna, no la escapa, y Postgres revienta con un 500
+      // porque `order` es palabra reservada. Pasó en staging el 26-sep.
+      expect(condition).toContain("(order.contact_snapshot)->>'recipientName'");
+      expect(condition).toContain("(order.contact_snapshot)->>'idCard'");
+      expect(condition).toContain("(order.contact_snapshot)->>'contactPhone'");
+      // Y nunca la columna suelta: esa es exactamente la forma que falla.
+      expect(condition).not.toMatch(/[^(]order\.contact_snapshot/);
     });
 
     // «Hasta el 24» tiene que incluir los pedidos de esa tarde. Cortar a
@@ -2163,6 +2230,436 @@ describe('OrdersService', () => {
         service.cancelByClient('client-1', 'order-1'),
       ).rejects.toBeInstanceOf(ConflictException);
       expect(inventoryService.releaseReservations).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('crearParaCliente', () => {
+    const dtoBase = {
+      clientId: 'client-1',
+      items: [{ productId: 'prod-2', quantity: 3 }],
+    };
+
+    beforeEach(() => {
+      orderRepo.findOne.mockResolvedValue(makeOrder({ items: [] }));
+      productsService.availableForArea = jest
+        .fn()
+        .mockResolvedValue(new Map([['prod-2', 10]]));
+      clientRepo.findOne.mockResolvedValue({
+        id: 'client-1',
+        defaultMunicipalityId: 'mun-1',
+        isActive: true,
+      });
+    });
+
+    it('crea el pedido a nombre del cliente y aparta su stock', async () => {
+      await service.crearParaCliente(makeUser(Role.ADMIN), dtoBase);
+
+      expect(inventoryService.reserve).toHaveBeenCalledWith(
+        expect.anything(),
+        'order-1',
+        'prod-2',
+        3,
+        expect.anything(),
+      );
+      expect(orderRepo.save).toHaveBeenCalledWith(
+        expect.objectContaining({ clientId: 'client-1' }),
+      );
+    });
+
+    it('NO toca el carrito del cliente', async () => {
+      await service.crearParaCliente(makeUser(Role.ADMIN), dtoBase);
+
+      // Es la razón de ser del refactor: el empleado no puede borrarle al
+      // cliente lo que tenga dentro de su carrito.
+      expect(cartItemRepo.delete).not.toHaveBeenCalled();
+      expect(cartService.getCart).not.toHaveBeenCalled();
+    });
+
+    it('deja en el historial al empleado, no al cliente', async () => {
+      await service.crearParaCliente(makeUser(Role.ADMIN), dtoBase);
+
+      expect(orderEvents.record).toHaveBeenCalledWith(
+        expect.anything(),
+        expect.objectContaining({
+          kind: OrderEventKind.CREATED,
+          actor: { userId: 'user-1' },
+          meta: expect.objectContaining({ canal: 'back-office' }),
+        }),
+      );
+    });
+
+    it('no abre ningún intento de pago: eso lo hace el cliente', async () => {
+      await service.crearParaCliente(makeUser(Role.ADMIN), dtoBase);
+
+      expect(paymentsService.createChargeForOrder).not.toHaveBeenCalled();
+    });
+
+    it('manda el correo de «tenemos tu pedido»', async () => {
+      await service.crearParaCliente(makeUser(Role.ADMIN), dtoBase);
+
+      expect(mailer.orderReceived).toHaveBeenCalledWith('order-1');
+      expect(mailer.paymentReceived).not.toHaveBeenCalled();
+    });
+
+    it('sin cobro nace pendiente y sin sellar: el barrido lo cogerá', async () => {
+      await service.crearParaCliente(makeUser(Role.ADMIN), dtoBase);
+
+      const guardado = orderRepo.save.mock.calls.at(-1)?.[0];
+      expect(guardado.status).toBe(OrderStatus.PENDING);
+      expect(guardado.paymentStatus).toBe(PaymentStatus.PENDING);
+      // Sin `paidAt` no hay cobro que proteja la reserva: caduca como
+      // cualquier otra, que es lo que se decidió.
+      expect(guardado.paidAt ?? null).toBeNull();
+    });
+
+    it('404 si el cliente no existe', async () => {
+      clientRepo.findOne.mockResolvedValue(null);
+
+      await expect(
+        service.crearParaCliente(makeUser(Role.ADMIN), dtoBase),
+      ).rejects.toBeInstanceOf(NotFoundException);
+      expect(orderRepo.save).not.toHaveBeenCalled();
+      expect(inventoryService.reserve).not.toHaveBeenCalled();
+    });
+
+    it('409 si el cliente está desactivado', async () => {
+      clientRepo.findOne.mockResolvedValue({
+        id: 'client-1',
+        defaultMunicipalityId: 'mun-1',
+        isActive: false,
+      });
+
+      await expect(
+        service.crearParaCliente(makeUser(Role.ADMIN), dtoBase),
+      ).rejects.toBeInstanceOf(ConflictException);
+      expect(orderRepo.save).not.toHaveBeenCalled();
+      expect(inventoryService.reserve).not.toHaveBeenCalled();
+    });
+
+    it('409 con el detalle por línea si no hay stock en la zona', async () => {
+      productsService.availableForArea.mockResolvedValue(
+        new Map([['prod-2', 1]]),
+      );
+
+      await expect(
+        service.crearParaCliente(makeUser(Role.ADMIN), dtoBase),
+      ).rejects.toBeInstanceOf(ConflictException);
+      expect(inventoryService.reserve).not.toHaveBeenCalled();
+    });
+
+    it('409 con el detalle por línea si el producto no está a la venta, no un string pelado', async () => {
+      // Antes de esta corrección, resolveLines() corría primero y lanzaba un
+      // ConflictException con un string suelto, sin `details`: el panel
+      // esperaba siempre la misma forma que el 409 de stock.
+      productsService.findOne.mockResolvedValue({
+        id: 'prod-2',
+        name: 'Malta 355ml',
+        basePrice: '2.00',
+        discount: '0',
+        isActive: false,
+        deletedAt: null,
+      });
+
+      const error: unknown = await service
+        .crearParaCliente(makeUser(Role.ADMIN), dtoBase)
+        .catch((e: unknown) => e);
+
+      expect(error).toBeInstanceOf(ConflictException);
+      expect((error as ConflictException).getResponse()).toMatchObject({
+        message: 'Some cart items are no longer available',
+        details: [expect.objectContaining({ field: 'prod-2' })],
+      });
+      expect(inventoryService.reserve).not.toHaveBeenCalled();
+    });
+
+    it('400 si la dirección contradice el municipio con el que se arma el pedido', async () => {
+      await expect(
+        service.crearParaCliente(makeUser(Role.ADMIN), {
+          ...dtoBase,
+          deliveryAddress: { municipalityId: 'mun-2' },
+        }),
+      ).rejects.toBeInstanceOf(BadRequestException);
+      expect(orderRepo.save).not.toHaveBeenCalled();
+    });
+
+    it('usa snapshotContact para el contacto, con el mismo trim que checkout', async () => {
+      await service.crearParaCliente(makeUser(Role.ADMIN), {
+        ...dtoBase,
+        contact: {
+          recipientName: '  Ana  ',
+          idCard: ' 1 ',
+          contactPhone: ' 555 ',
+        },
+      });
+
+      const guardado = orderRepo.save.mock.calls.at(-1)?.[0];
+      expect(guardado.contactSnapshot).toEqual({
+        recipientName: 'Ana',
+        idCard: '1',
+        contactPhone: '555',
+      });
+    });
+
+    it('sin contact explícito, saca el destinatario de deliveryAddress: igual que el checkout', async () => {
+      // Es el caso que hoy pierde el destinatario: checkout() hace
+      // `snapshotContact(dto.contact ?? address)`, y esa `address` es un
+      // CreateClientAddressDto con recipientName/idCard/contactPhone los TRES
+      // opcionales — la tienda no exige carné en entrega a domicilio. Sin
+      // este arreglo, el panel no tiene de dónde sacar el destinatario y se
+      // ve obligado a exigir `contact`, que sí exige carné cubano válido.
+      await service.crearParaCliente(makeUser(Role.ADMIN), {
+        ...dtoBase,
+        deliveryAddress: {
+          municipalityId: 'mun-1',
+          street: 'Calle 23 #456',
+          recipientName: 'Ana Pérez',
+          contactPhone: '55512345',
+        },
+      });
+
+      const guardado = orderRepo.save.mock.calls.at(-1)?.[0];
+      expect(guardado.contactSnapshot).toEqual({
+        recipientName: 'Ana Pérez',
+        idCard: null,
+        contactPhone: '55512345',
+      });
+    });
+
+    it('contact explícito gana sobre lo que traiga deliveryAddress', async () => {
+      await service.crearParaCliente(makeUser(Role.ADMIN), {
+        ...dtoBase,
+        deliveryAddress: {
+          municipalityId: 'mun-1',
+          street: 'Calle 23 #456',
+          recipientName: 'De la dirección',
+          idCard: '90010112345',
+          contactPhone: '11111111',
+        },
+        contact: {
+          recipientName: 'Del contact',
+          idCard: '85010112345',
+          contactPhone: '22222222',
+        },
+      });
+
+      const guardado = orderRepo.save.mock.calls.at(-1)?.[0];
+      expect(guardado.contactSnapshot).toEqual({
+        recipientName: 'Del contact',
+        idCard: '85010112345',
+        contactPhone: '22222222',
+      });
+    });
+
+    it('deliveryAddress sin ningún dato de destinatario deja el snapshot en null', async () => {
+      await service.crearParaCliente(makeUser(Role.ADMIN), {
+        ...dtoBase,
+        deliveryAddress: {
+          municipalityId: 'mun-1',
+          street: 'Calle 23 #456',
+        },
+      });
+
+      const guardado = orderRepo.save.mock.calls.at(-1)?.[0];
+      expect(guardado.contactSnapshot).toBeNull();
+    });
+
+    it('anota en el historial qué líneas trajeron un precio pactado a mano', async () => {
+      await service.crearParaCliente(makeUser(Role.ADMIN), {
+        clientId: 'client-1',
+        items: [{ productId: 'prod-2', quantity: 3, unitPrice: 1.5 }],
+      });
+
+      expect(orderEvents.record).toHaveBeenCalledWith(
+        expect.anything(),
+        expect.objectContaining({
+          meta: expect.objectContaining({
+            lineasConPrecioPactado: ['prod-2'],
+          }),
+        }),
+      );
+    });
+
+    it('un correo que falla no tumba el alta, y queda anotado', async () => {
+      const anotado = jest
+        .spyOn(Logger.prototype, 'error')
+        .mockImplementation(() => undefined);
+      mailer.orderReceived.mockRejectedValue(new Error('resend caído'));
+
+      await expect(
+        service.crearParaCliente(makeUser(Role.ADMIN), dtoBase),
+      ).resolves.toBeDefined();
+      await new Promise((sigue) => setImmediate(sigue));
+
+      expect(mailer.orderReceived).toHaveBeenCalled();
+      expect(anotado).toHaveBeenCalledWith(
+        expect.stringContaining('No se pudo avisar por correo'),
+        expect.anything(),
+      );
+      anotado.mockRestore();
+    });
+
+    describe('cuando ya se cobró por fuera', () => {
+      const conCobro = {
+        ...dtoBase,
+        cobro: { paymentMethod: 'manual', reference: 'TRF-9912' },
+      };
+
+      // El repositorio que entrega manager.getRepository(Order) DENTRO de la
+      // transacción, distinto a propósito del `orderRepo` inyectado
+      // (`this.orderRepository`): si fueran el mismo objeto, sellar el cobro
+      // dentro o fuera de la transacción sería indistinguible para una
+      // prueba, y esa distinción es la razón de ser de toda la tarea.
+      //
+      // `save` registra una COPIA (`{ ...o }`) de cada llamada en un array
+      // aparte, en vez de dejar que se lea de `mock.calls`: el propio
+      // `crearPedido` reutiliza el mismo objeto `order` entre su segundo
+      // guardado (con el número y el tracking) y el que hace el hook al
+      // sellar el cobro, y Jest guarda los argumentos por REFERENCIA. Sin la
+      // copia, mutar `order` a PAID en el hook "repinta" retroactivamente la
+      // llamada anterior en `mock.calls`, y una prueba que compare contra eso
+      // pasaría aunque el hook nunca llegase a guardar nada.
+      let txOrderRepo: { create: jest.Mock; save: jest.Mock };
+      let txSaveSnapshots: Partial<Order>[];
+
+      beforeEach(() => {
+        txSaveSnapshots = [];
+        txOrderRepo = {
+          create: jest.fn().mockImplementation((o: unknown) => o),
+          save: jest.fn().mockImplementation((o: Partial<Order>) => {
+            txSaveSnapshots.push({ ...o });
+            return Promise.resolve({ id: 'order-1', seq: 1, ...o });
+          }),
+        };
+        dataSource.transaction.mockImplementation(
+          (cb: (m: unknown) => unknown) =>
+            cb({
+              getRepository: (entity: unknown) => {
+                if (entity === Order) return txOrderRepo;
+                if (entity === OrderItem) return orderItemRepo;
+                if (entity === CartItem) return cartItemRepo;
+                return null;
+              },
+            }),
+        );
+      });
+
+      it('el pedido nace pagado y con su plazo contando', async () => {
+        await service.crearParaCliente(makeUser(Role.ADMIN), conCobro);
+
+        const guardado = txSaveSnapshots.find(
+          (o) => o.paymentStatus === PaymentStatus.PAID,
+        );
+        expect(guardado).toBeDefined();
+        expect(guardado?.paidAt).toBeInstanceOf(Date);
+      });
+
+      it('sella el cobro en el repositorio DE LA TRANSACCIÓN, no aparte', async () => {
+        await service.crearParaCliente(makeUser(Role.ADMIN), conCobro);
+
+        // Si el sellado ocurriera después de crearPedido, con
+        // this.orderRepository en vez del manager de la transacción, el hueco
+        // entre crear y cobrar existiría de verdad: no habría ninguna copia
+        // en PAID dentro de txSaveSnapshots, y en cambio orderRepo.save sí se
+        // habría llamado. (Se mira la copia, no `toHaveBeenCalledWith`: por
+        // la misma razón que arriba, `txOrderRepo.save` también recibe el
+        // `order` que reutiliza `crearPedido`.)
+        expect(orderRepo.save).not.toHaveBeenCalled();
+        const selladoEnLaTransaccion = txSaveSnapshots.some(
+          (o) => o.paymentStatus === PaymentStatus.PAID,
+        );
+        expect(selladoEnLaTransaccion).toBe(true);
+      });
+
+      it('deja el cobro en el historial, aparte de la creación', async () => {
+        await service.crearParaCliente(makeUser(Role.ADMIN), conCobro);
+
+        expect(orderEvents.record).toHaveBeenCalledWith(
+          expect.anything(),
+          expect.objectContaining({
+            kind: OrderEventKind.PAYMENT_STATUS_CHANGED,
+            actor: { userId: 'user-1' },
+            nextValue: PaymentStatus.PAID,
+          }),
+        );
+      });
+
+      it('manda «hemos recibido tu pago», no «falta el pago»', async () => {
+        await service.crearParaCliente(makeUser(Role.ADMIN), conCobro);
+
+        // orderReceived dice literalmente «Todavía falta el pago» y enseña un
+        // botón de pagar: en un pedido ya cobrado sería mentira.
+        expect(mailer.paymentReceived).toHaveBeenCalledWith('order-1');
+        expect(mailer.orderReceived).not.toHaveBeenCalled();
+      });
+
+      it('403 y NINGUNA escritura si no tiene el permiso de cobros', async () => {
+        permissionsService.hasPermission.mockImplementation(
+          (_u: string, _r: Role, _m: string, action: string) =>
+            Promise.resolve(action !== 'update-payment-status'),
+        );
+
+        const error: unknown = await service
+          .crearParaCliente(makeUser(Role.STAFF), conCobro)
+          .catch((e: unknown) => e);
+
+        expect(error).toBeInstanceOf(ForbiddenException);
+        // No cualquier ForbiddenException: el mensaje concreto, para que no
+        // la satisfaga uno que aparezca mañana por otro motivo.
+        expect((error as ForbiddenException).message).toBe(
+          'No puedes marcar un pedido como cobrado; créalo pendiente',
+        );
+        // La comprobación va ANTES de abrir la transacción.
+        expect(orderRepo.save).not.toHaveBeenCalled();
+        expect(txOrderRepo.save).not.toHaveBeenCalled();
+        expect(inventoryService.reserve).not.toHaveBeenCalled();
+      });
+
+      it('sin cobro no exige el permiso de cobros', async () => {
+        permissionsService.hasPermission.mockResolvedValue(false);
+
+        await expect(
+          service.crearParaCliente(makeUser(Role.STAFF), dtoBase),
+        ).resolves.toBeDefined();
+      });
+
+      it('el método del cobro pasa por el mismo catálogo: 400 si no existe', async () => {
+        paymentMethodsService.resolve.mockImplementation(
+          (code?: string): Promise<{ code: string }> =>
+            code === 'manual'
+              ? Promise.resolve({ code: 'manual' })
+              : Promise.reject(
+                  new BadRequestException(
+                    `Payment method "${String(code)}" is not available`,
+                  ),
+                ),
+        );
+
+        await expect(
+          service.crearParaCliente(makeUser(Role.ADMIN), {
+            ...dtoBase,
+            cobro: { paymentMethod: 'inventado' },
+          }),
+        ).rejects.toBeInstanceOf(BadRequestException);
+        expect(orderRepo.save).not.toHaveBeenCalled();
+        expect(txOrderRepo.save).not.toHaveBeenCalled();
+      });
+
+      it('sin método de pago propio, el evento de creación anota el del cobro', async () => {
+        // Antes de esta corrección, `paymentMethodCode` salía siempre de
+        // `dto.paymentMethod`: si solo llegaba `cobro`, el evento de creación
+        // anotaba `null` mientras el de PAYMENT_STATUS_CHANGED, un renglón
+        // más abajo, decía «manual» — dos eventos de la misma alta contando
+        // cosas distintas.
+        await service.crearParaCliente(makeUser(Role.ADMIN), conCobro);
+
+        expect(orderEvents.record).toHaveBeenCalledWith(
+          expect.anything(),
+          expect.objectContaining({
+            kind: OrderEventKind.CREATED,
+            meta: expect.objectContaining({ paymentMethod: 'manual' }),
+          }),
+        );
+      });
     });
   });
 });

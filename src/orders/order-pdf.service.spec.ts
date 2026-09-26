@@ -5,7 +5,7 @@ import { getRepositoryToken } from '@nestjs/typeorm';
 import { CmsService } from '../cms/cms.service';
 import { Order } from './entities/order.entity';
 import { OrderItem } from './entities/order-item.entity';
-import { OrderPdfService } from './order-pdf.service';
+import { lineasDeEntrega, OrderPdfService } from './order-pdf.service';
 
 describe('OrderPdfService', () => {
   let service: OrderPdfService;
@@ -119,12 +119,66 @@ describe('OrderPdfService', () => {
           locationName: 'Mostrador Cárdenas',
           address: 'Calle 23 esq. 43',
         },
-        contactSnapshot: { fullName: 'Ana Pérez', idCard: '85042312345' },
+        contactSnapshot: {
+          recipientName: 'Ana Pérez',
+          idCard: '85042312345',
+          contactPhone: '+53 5251 9414',
+        },
       } as Partial<Order>),
     );
 
     const pdf = await service.generate('o-1');
 
     expect(pdf.subarray(0, 5).toString()).toBe('%PDF-');
+  });
+});
+
+describe('lineasDeEntrega', () => {
+  it('en recogida dice quién retira, con su carnet y su teléfono', () => {
+    const lineas = lineasDeEntrega({
+      fulfillmentType: 'pickup',
+      pickupAddressSnapshot: {
+        locationName: 'Mostrador Cárdenas',
+        address: 'Calle 23 esq. 43',
+      },
+      contactSnapshot: {
+        recipientName: 'Ana Pérez',
+        idCard: '85042312345',
+        contactPhone: '+53 5251 9414',
+      },
+    } as unknown as Order);
+
+    expect(lineas).toContain('Recoge: Ana Pérez (85042312345)');
+    expect(lineas).toContain('Teléfono: +53 5251 9414');
+  });
+
+  it('en entrega dice a quién se entrega y en qué municipio', () => {
+    const lineas = lineasDeEntrega({
+      fulfillmentType: 'delivery',
+      deliveryOptionLabel: 'Mensajería 24h',
+      deliveryAddress: {
+        street: 'Calle 12 #345',
+        municipalityName: 'Cárdenas',
+        provinceName: 'Matanzas',
+      },
+      contactSnapshot: {
+        recipientName: 'Ana Pérez',
+        contactPhone: '+53 5251 9414',
+      },
+    } as unknown as Order);
+
+    expect(lineas).toContain('Recibe: Ana Pérez');
+    expect(lineas).toContain('Cárdenas, Matanzas');
+  });
+
+  it('un pedido viejo sin destinatario no deja huecos con etiqueta', () => {
+    const lineas = lineasDeEntrega({
+      fulfillmentType: 'pickup',
+      pickupAddressSnapshot: { locationName: 'Mostrador Cárdenas' },
+      contactSnapshot: null,
+    } as unknown as Order);
+
+    expect(lineas.some((l) => l.startsWith('Recoge:'))).toBe(false);
+    expect(lineas).toContain('Recogida en mostrador');
   });
 });

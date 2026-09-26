@@ -18,6 +18,7 @@ import {
 import {
   ApiBearerAuth,
   ApiConflictResponse,
+  ApiCreatedResponse,
   ApiOkResponse,
   ApiOperation,
   ApiTags,
@@ -28,6 +29,7 @@ import { Roles } from '../common/decorators/roles.decorator';
 import { RequirePermission } from '../permissions/decorators/require-permission.decorator';
 import { Role } from '../users/entities/user.entity';
 import { AdminOrdersQueryDto } from './dto/admin-orders-query.dto';
+import { CreateOrderForClientDto } from './dto/create-order-for-client.dto';
 import { SendReportDto } from './dto/send-report.dto';
 import { OrderEventResponseDto } from '../order-events/dto/order-event-response.dto';
 import { OrderResponseDto } from './dto/order-response.dto';
@@ -78,6 +80,27 @@ export class OrdersController {
     @Query() query: AdminOrdersQueryDto,
   ): Promise<PaginatedResponse<OrderResponseDto>> {
     return this.ordersService.findAllAdmin(query);
+  }
+
+  @Post()
+  @RequirePermission({ module: 'orders', action: 'create' })
+  @ApiOperation({
+    summary: 'Create an order on behalf of a client',
+    description:
+      'For customers who buy over WhatsApp or by phone. The order is born ' +
+      'exactly like a storefront one — same reservations, same expiry — but ' +
+      'the client cart is untouched and no payment attempt is opened: the ' +
+      'customer starts it from their own order page. Pass `cobro` to record ' +
+      'a payment already taken outside the system; that also requires ' +
+      '`orders:update-payment-status`.',
+  })
+  @ApiCreatedResponse({ type: OrderResponseDto })
+  @ApiConflictResponse({ description: 'Not enough stock in the client area.' })
+  crearParaCliente(
+    @Req() req: AuthenticatedUserRequest,
+    @Body() dto: CreateOrderForClientDto,
+  ): Promise<OrderResponseDto> {
+    return this.ordersService.crearParaCliente(req.user, dto);
   }
 
   @Get(':id')

@@ -59,6 +59,64 @@ const fecha = (valor: Date | null | undefined): string =>
  * de donde venga —la administración hoy, un correo adjunto mañana— y no
  * depende del navegador de quien lo pide.
  */
+/**
+ * El recuadro de entrega del comprobante, línea a línea.
+ *
+ * Función aparte y exportada para que se pueda comprobar lo que dice: dentro
+ * del servicio solo se podía verificar que el PDF era un PDF, y así se coló
+ * durante meses que leyera `fullName`, `phone` y `city` —tres nombres de campo
+ * que nadie escribe— y saliera sin destinatario ni municipio.
+ *
+ * Los nombres buenos son los que escriben `snapshotContact` y
+ * `snapshotAddress` en `orders.service.ts`.
+ */
+export const lineasDeEntrega = (order: Order): string[] => {
+  const esRecogida = order.fulfillmentType === FulfillmentType.PICKUP;
+  const contacto = order.contactSnapshot as {
+    recipientName?: string;
+    idCard?: string;
+    contactPhone?: string;
+  } | null;
+  const quienRecibe = contacto?.recipientName
+    ? `${contacto.recipientName}${contacto.idCard ? ` (${contacto.idCard})` : ''}`
+    : '';
+  const telefono = contacto?.contactPhone
+    ? `Teléfono: ${contacto.contactPhone}`
+    : '';
+
+  if (esRecogida) {
+    const recogida = order.pickupAddressSnapshot as {
+      locationName?: string;
+      label?: string;
+      address?: string;
+    } | null;
+    return [
+      'Recogida en mostrador',
+      [recogida?.locationName, recogida?.label].filter(Boolean).join(' · '),
+      recogida?.address ?? '',
+      quienRecibe ? `Recoge: ${quienRecibe}` : '',
+      telefono,
+    ];
+  }
+
+  const entrega = order.deliveryAddress as {
+    street?: string;
+    municipalityName?: string;
+    provinceName?: string;
+    reference?: string;
+  } | null;
+  const lugar = [entrega?.municipalityName, entrega?.provinceName]
+    .filter(Boolean)
+    .join(', ');
+  return [
+    order.deliveryOptionLabel ?? 'Entrega a domicilio',
+    entrega?.street ?? '',
+    lugar,
+    quienRecibe ? `Recibe: ${quienRecibe}` : '',
+    telefono,
+  ];
+};
+
 @Injectable()
 export class OrderPdfService {
   private readonly logger = new Logger(OrderPdfService.name);
@@ -277,48 +335,18 @@ export class OrderPdfService {
     const cliente = order.client;
     const nombre =
       [cliente?.firstName, cliente?.lastName].filter(Boolean).join(' ') || '—';
-    this.recuadro(doc, 'Cliente', MARGEN, y, anchoCol, [
-      nombre,
-      cliente?.email ?? '',
-      cliente?.phone ?? '',
-    ]);
-
+    const lineasCliente = [nombre, cliente?.email ?? '', cliente?.phone ?? ''];
     const esRecogida = order.fulfillmentType === FulfillmentType.PICKUP;
-    const contacto = order.contactSnapshot as {
-      fullName?: string;
-      name?: string;
-      idCard?: string;
-      phone?: string;
-    } | null;
-    const recogida = order.pickupAddressSnapshot as {
-      locationName?: string;
-      label?: string;
-      address?: string;
-    } | null;
-    const entrega = order.deliveryAddress as {
-      street?: string;
-      city?: string;
-      reference?: string;
-    } | null;
+    const lineasEntrega = lineasDeEntrega(order);
 
-    const lineasEntrega = esRecogida
-      ? [
-          'Recogida en mostrador',
-          [recogida?.locationName, recogida?.label].filter(Boolean).join(' · '),
-          recogida?.address ?? '',
-          contacto?.fullName || contacto?.name
-            ? `Recoge: ${contacto.fullName ?? contacto.name}${
-                contacto.idCard ? ` (${contacto.idCard})` : ''
-              }`
-            : '',
-        ]
-      : [
-          order.deliveryOptionLabel ?? 'Entrega a domicilio',
-          entrega?.street ?? '',
-          entrega?.city ?? '',
-          contacto?.phone ? `Teléfono: ${contacto.phone}` : '',
-        ];
+    // Los dos con el mismo alto, el del que más lleve: dos tarjetas desiguales
+    // lado a lado se leen como un descuadre, no como un diseño.
+    const alto = Math.max(
+      this.altoDelRecuadro(doc, anchoCol, lineasCliente),
+      this.altoDelRecuadro(doc, anchoCol, lineasEntrega),
+    );
 
+    this.recuadro(doc, 'Cliente', MARGEN, y, anchoCol, lineasCliente, alto);
     this.recuadro(
       doc,
       esRecogida ? 'Recogida' : 'Entrega',
@@ -326,9 +354,39 @@ export class OrderPdfService {
       y,
       anchoCol,
       lineasEntrega,
+      alto,
     );
 
-    doc.y = y + 92;
+    doc.y = y + alto + 18;
+  }
+
+  /**
+   * Un recuadro de datos, alto según lo que lleve dentro.
+   *
+   * Antes era de 82 puntos fijos y cada línea se truncaba con puntos
+   * suspensivos: una recogida con destinatario lleva cinco líneas, necesita 89
+   * y se salía del borde, con el nombre cortado a media palabra. Un nombre
+   * cubano completo no cabe en una línea de media página, así que aquí se
+   * envuelve en vez de recortarse: en el mostrador hay que leerlo entero.
+   *
+   * Devuelve el alto que ocupó, para que quien dibuje dos en paralelo sepa por
+   * dónde seguir.
+   */
+  /** Lo que ocuparía el recuadro, para poder igualar dos que van en paralelo. */
+  private altoDelRecuadro(
+    doc: PDFKit.PDFDocument,
+    ancho: number,
+    lineas: string[],
+  ): number {
+    doc.font('Helvetica').fontSize(9.5);
+    const altos = lineas
+      .filter(Boolean)
+      .map((linea) => doc.heightOfString(linea, { width: ancho - 24 }));
+    return Math.max(
+      82,
+      // 24 hasta la primera línea, 3 de aire entre líneas, 14 de respiro abajo.
+      24 + altos.reduce((suma, a) => suma + a + 3, 0) + 14,
+    );
   }
 
   private recuadro(
@@ -338,9 +396,18 @@ export class OrderPdfService {
     y: number,
     ancho: number,
     lineas: string[],
+    alto: number,
   ): void {
+    const anchoTexto = ancho - 24;
+    const visibles = lineas.filter(Boolean);
+
+    doc.font('Helvetica').fontSize(9.5);
+    const altos = visibles.map((linea) =>
+      doc.heightOfString(linea, { width: anchoTexto }),
+    );
+
     doc
-      .roundedRect(x, y, ancho, 82, 6)
+      .roundedRect(x, y, ancho, alto, 6)
       .lineWidth(1)
       .strokeColor(LINEA)
       .stroke();
@@ -349,19 +416,16 @@ export class OrderPdfService {
       .fontSize(8)
       .fillColor(VERDE)
       .text(titulo.toUpperCase(), x + 12, y + 10, {
-        width: ancho - 24,
+        width: anchoTexto,
         characterSpacing: 0.6,
       });
+
     doc.font('Helvetica').fontSize(9.5).fillColor(TINTA);
     let cursor = y + 24;
-    for (const linea of lineas.filter(Boolean)) {
-      doc.text(linea, x + 12, cursor, {
-        width: ancho - 24,
-        ellipsis: true,
-        height: 12,
-      });
-      cursor += 13;
-    }
+    visibles.forEach((linea, i) => {
+      doc.text(linea, x + 12, cursor, { width: anchoTexto });
+      cursor += altos[i] + 3;
+    });
   }
 
   private tablaDeProductos(doc: PDFKit.PDFDocument, items: OrderItem[]): void {
