@@ -2,6 +2,7 @@ import {
   BadRequestException,
   ConflictException,
   NotFoundException,
+  ServiceUnavailableException,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { Test, TestingModule } from '@nestjs/testing';
@@ -322,6 +323,94 @@ describe('InvitationsService', () => {
 
       expect(result.status).toBe(InvitationStatus.ACCEPTED);
       expect(result.acceptedAt).toBeInstanceOf(Date);
+    });
+  });
+
+  /**
+   * El 26-sep-2026 se borró un usuario y al reinvitarlo el panel solo dijo
+   * «error inesperado»: un 500 sin rastro, ni siquiera en los registros del
+   * servidor. La causa —Clerk conserva la cuenta y no admite otra invitación
+   * para ese correo— no llegaba a ninguna parte. Estas pruebas fijan que el
+   * motivo viaje hasta quien pulsa el botón.
+   */
+  describe('cuando Clerk rechaza la invitación', () => {
+    const dto: InviteUserDto = {
+      email: 'borrado@example.com',
+      role: Role.STAFF,
+    };
+
+    const clerkFalla = (error: unknown) => {
+      createClerkClientMock.mockReturnValue({
+        invitations: {
+          createInvitation: jest.fn().mockRejectedValue(error),
+          revokeInvitation,
+        },
+        organizations: {
+          createOrganizationInvitation: jest.fn().mockRejectedValue(error),
+        },
+      } as unknown as ReturnType<typeof createClerkClient>);
+      userRepository.findOne.mockResolvedValue(null);
+      invitationRepository.findOne.mockResolvedValue(null);
+    };
+
+    it('un correo que ya tiene cuenta es un conflicto, no un error inesperado', async () => {
+      clerkFalla({
+        status: 422,
+        errors: [
+          {
+            code: 'duplicate_record',
+            message: 'duplicate record',
+            longMessage: 'The email address is taken.',
+          },
+        ],
+      });
+
+      await expect(
+        service.createAndSendInvitation(dto, inviter),
+      ).rejects.toBeInstanceOf(ConflictException);
+    });
+
+    it('y el mensaje dice qué hacer: restaurar en vez de reinvitar', async () => {
+      clerkFalla({
+        status: 422,
+        errors: [{ code: 'form_identifier_exists', message: 'taken' }],
+      });
+
+      await expect(
+        service.createAndSendInvitation(dto, inviter),
+      ).rejects.toThrow(/restáurala/i);
+    });
+
+    it('cualquier otro fallo de Clerk sale como 503 con su motivo', async () => {
+      clerkFalla({
+        status: 500,
+        errors: [{ code: 'internal_error', longMessage: 'Clerk se cayó' }],
+      });
+
+      await expect(
+        service.createAndSendInvitation(dto, inviter),
+      ).rejects.toBeInstanceOf(ServiceUnavailableException);
+      await expect(
+        service.createAndSendInvitation(dto, inviter),
+      ).rejects.toThrow(/Clerk se cayó/);
+    });
+
+    /** Un error que no tiene la forma del SDK no puede tumbar el traductor. */
+    it('aguanta un error que no viene de Clerk', async () => {
+      clerkFalla(new Error('se cayó la red'));
+
+      await expect(
+        service.createAndSendInvitation(dto, inviter),
+      ).rejects.toThrow(/se cayó la red/);
+    });
+
+    it('no guarda la invitación si Clerk la rechazó', async () => {
+      clerkFalla({ status: 422, errors: [{ code: 'duplicate_record' }] });
+
+      await expect(
+        service.createAndSendInvitation(dto, inviter),
+      ).rejects.toBeInstanceOf(ConflictException);
+      expect(invitationRepository.save).not.toHaveBeenCalled();
     });
   });
 });
