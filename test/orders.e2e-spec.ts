@@ -190,6 +190,40 @@ describe('Orders (e2e)', () => {
     expect(overCart.body.error.details[0].available).toBe(2);
   });
 
+  // Esta es la única prueba que habla con Postgres de verdad, y es la que
+  // habría cazado el 500 del 26-sep: la búsqueda por el beneficiario generaba
+  // SQL inválido y las unitarias, con el constructor de consultas simulado, lo
+  // daban por bueno.
+  it('el listado se puede buscar por el beneficiario, no solo por el titular', async () => {
+    // Checkout propio, con `contact`: el ayudante compartido no lo manda y sin
+    // él no hay beneficiario que buscar.
+    await request(app.getHttpServer())
+      .post('/api/cart/items')
+      .set(clientAuth)
+      .send({ productId, quantity: 1 })
+      .expect(201);
+    await request(app.getHttpServer())
+      .post('/api/storefront/orders')
+      .set(clientAuth)
+      .send({ contact: CONTACTO_RECOGIDA })
+      .expect(201);
+
+    const porNombre = await request(app.getHttpServer())
+      .get('/api/orders')
+      .query({ q: CONTACTO_RECOGIDA.recipientName })
+      .set(adminAuth)
+      .expect(200);
+
+    const porCarnet = await request(app.getHttpServer())
+      .get('/api/orders')
+      .query({ q: CONTACTO_RECOGIDA.idCard })
+      .set(adminAuth)
+      .expect(200);
+
+    expect(porNombre.body.data.items.length).toBeGreaterThan(0);
+    expect(porCarnet.body.data.items.length).toBeGreaterThan(0);
+  });
+
   it('admin confirmation physically decrements the reserved stock', async () => {
     const order = await addToCartAndCheckout(3);
 

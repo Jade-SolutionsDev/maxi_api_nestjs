@@ -673,9 +673,14 @@ describe('OrdersService', () => {
       await service.findAllAdmin({ q: '85042312345' });
 
       const [condition] = qb.andWhere.mock.calls[0] as [string];
-      expect(condition).toContain("contact_snapshot->>'recipientName'");
-      expect(condition).toContain("contact_snapshot->>'idCard'");
-      expect(condition).toContain("contact_snapshot->>'contactPhone'");
+      // Con los paréntesis, y no es un detalle de estilo: sin ellos TypeORM no
+      // reconoce la columna, no la escapa, y Postgres revienta con un 500
+      // porque `order` es palabra reservada. Pasó en staging el 26-sep.
+      expect(condition).toContain("(order.contact_snapshot)->>'recipientName'");
+      expect(condition).toContain("(order.contact_snapshot)->>'idCard'");
+      expect(condition).toContain("(order.contact_snapshot)->>'contactPhone'");
+      // Y nunca la columna suelta: esa es exactamente la forma que falla.
+      expect(condition).not.toMatch(/[^(]order\.contact_snapshot/);
     });
 
     // «Hasta el 24» tiene que incluir los pedidos de esa tarde. Cortar a
