@@ -24,8 +24,8 @@ process.env.CRON_SECRET = CRON_SECRET;
 
 // Obligatorio en toda recogida desde MxH-0104: quién pasa a buscar el pedido.
 const CONTACTO_RECOGIDA = {
-  recipientName: 'Daniel Smith',
-  idCard: '91031512345',
+  recipientName: 'Ana Rodríguez',
+  idCard: '90051512345',
   contactPhone: '55512345',
 };
 
