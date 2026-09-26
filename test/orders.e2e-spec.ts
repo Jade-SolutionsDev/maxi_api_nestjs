@@ -26,7 +26,7 @@ process.env.CRON_SECRET = CRON_SECRET;
 const CONTACTO_RECOGIDA = {
   recipientName: 'Ana Rodríguez',
   idCard: '90051512345',
-  contactPhone: '55512345',
+  contactPhone: '+53 5251 9414',
 };
 
 describe('Orders (e2e)', () => {
@@ -37,9 +37,13 @@ describe('Orders (e2e)', () => {
   let categories: Repository<Category>;
   let inventory: Repository<Inventory>;
   let productId: string;
+  let clientId: string;
 
   const clientAuth = { Authorization: 'Bearer mock:clerk_client_1' };
   const adminAuth = { Authorization: 'Bearer mock:clerk_admin_1' };
+  // Personal sin ningún permiso concedido: default-deny, igual que en
+  // rbac.e2e-spec.ts — no hace falta sembrar roles para probar el 403.
+  const staffAuth = { Authorization: 'Bearer mock:clerk_staff_1' };
   const locationId = '00000000-0000-4000-8000-000000000002';
 
   beforeAll(async () => {
@@ -61,14 +65,23 @@ describe('Orders (e2e)', () => {
 
   beforeEach(async () => {
     await clients.query(`TRUNCATE TABLE ${TABLES} CASCADE`);
-    await clients.save(
+    const client = await clients.save(
       clients.create({ clerkId: 'clerk_client_1', email: 'c1@example.com' }),
     );
+    clientId = client.id;
     await users.save(
       users.create({
         clerkId: 'clerk_admin_1',
         email: 'admin@example.com',
         role: Role.ADMIN,
+        isActive: true,
+      }),
+    );
+    await users.save(
+      users.create({
+        clerkId: 'clerk_staff_1',
+        email: 'staff@example.com',
+        role: Role.STAFF,
         isActive: true,
       }),
     );
@@ -158,6 +171,28 @@ describe('Orders (e2e)', () => {
     await request(app.getHttpServer()).get('/api/orders').expect(401);
   });
 
+  it('POST /api/orders crea un pedido a nombre de un cliente', async () => {
+    const res = await request(app.getHttpServer())
+      .post('/api/orders')
+      .set(adminAuth)
+      .send({
+        clientId,
+        items: [{ productId, quantity: 2 }],
+      })
+      .expect(201);
+
+    expect(res.body.data.clientId).toBe(clientId);
+    expect(res.body.data.status).toBe('pending');
+  });
+
+  it('POST /api/orders sin el permiso responde 403', async () => {
+    await request(app.getHttpServer())
+      .post('/api/orders')
+      .set(staffAuth)
+      .send({ clientId, items: [{ productId, quantity: 1 }] })
+      .expect(403);
+  });
+
   it('checkout reserves stock: public availability drops, physical stock does not', async () => {
     const order = await addToCartAndCheckout(3);
 
@@ -188,6 +223,40 @@ describe('Orders (e2e)', () => {
       .send({ productId, quantity: 3 })
       .expect(409);
     expect(overCart.body.error.details[0].available).toBe(2);
+  });
+
+  // Esta es la única prueba que habla con Postgres de verdad, y es la que
+  // habría cazado el 500 del 26-sep: la búsqueda por el beneficiario generaba
+  // SQL inválido y las unitarias, con el constructor de consultas simulado, lo
+  // daban por bueno.
+  it('el listado se puede buscar por el beneficiario, no solo por el titular', async () => {
+    // Checkout propio, con `contact`: el ayudante compartido no lo manda y sin
+    // él no hay beneficiario que buscar.
+    await request(app.getHttpServer())
+      .post('/api/cart/items')
+      .set(clientAuth)
+      .send({ productId, quantity: 1 })
+      .expect(201);
+    await request(app.getHttpServer())
+      .post('/api/storefront/orders')
+      .set(clientAuth)
+      .send({ contact: CONTACTO_RECOGIDA })
+      .expect(201);
+
+    const porNombre = await request(app.getHttpServer())
+      .get('/api/orders')
+      .query({ q: CONTACTO_RECOGIDA.recipientName })
+      .set(adminAuth)
+      .expect(200);
+
+    const porCarnet = await request(app.getHttpServer())
+      .get('/api/orders')
+      .query({ q: CONTACTO_RECOGIDA.idCard })
+      .set(adminAuth)
+      .expect(200);
+
+    expect(porNombre.body.data.items.length).toBeGreaterThan(0);
+    expect(porCarnet.body.data.items.length).toBeGreaterThan(0);
   });
 
   it('admin confirmation physically decrements the reserved stock', async () => {

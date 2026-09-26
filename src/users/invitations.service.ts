@@ -4,6 +4,7 @@ import {
   Injectable,
   Logger,
   NotFoundException,
+  ServiceUnavailableException,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { InjectRepository } from '@nestjs/typeorm';
@@ -16,6 +17,24 @@ import {
 import { InviteUserDto } from './dto/invite-user.dto';
 import { Invitation, InvitationStatus } from './entities/invitation.entity';
 import { Role, User } from './entities/user.entity';
+
+/**
+ * Forma de un error del SDK de Clerk. No se importa su tipo a propósito: el
+ * SDK cambia de versión y aquí solo hacen falta tres campos, leídos a la
+ * defensiva. Si algún día llega otra cosa, el traductor cae en el caso
+ * general en vez de romperse.
+ */
+interface ErrorDeClerk {
+  status?: number;
+  errors?: Array<{ code?: string; message?: string; longMessage?: string }>;
+}
+
+/** Códigos con los que Clerk dice «ese correo ya está cogido». */
+const YA_EXISTE = new Set([
+  'duplicate_record',
+  'form_identifier_exists',
+  'identifier_already_signed_up',
+]);
 
 @Injectable()
 export class InvitationsService {
@@ -68,12 +87,9 @@ export class InvitationsService {
       );
     }
 
+    // Si Clerk falla, `sendClerkInvitation` lanza con el motivo traducido: no
+    // se llega aquí con las manos vacías, y por eso no hay que comprobarlo.
     const clerkInvitation = await this.sendClerkInvitation(dto, inviter);
-
-    if (!clerkInvitation)
-      throw new Error(
-        `Failed to send invitation to ${normalizedEmail} via Clerk.`,
-      );
 
     const invitation = this.invitationRepository.create({
       email: normalizedEmail,
@@ -93,7 +109,7 @@ export class InvitationsService {
   private async sendClerkInvitation(
     dto: InviteUserDto,
     inviter: User,
-  ): Promise<{ id: string } | undefined> {
+  ): Promise<{ id: string }> {
     const secretKey = this.configService.get<string>(
       'clerk.backofficeSecretKey',
     );
@@ -125,15 +141,21 @@ export class InvitationsService {
       this.logger.log(
         `Sending organization invitation to ${dto.email} for org ${dto.organizationId} with role ${role}`,
       );
-      const invitation =
-        await clerkClient.organizations.createOrganizationInvitation({
-          organizationId: dto.organizationId,
-          emailAddress: dto.email,
-          role,
-          inviterUserId: inviter.clerkId ?? undefined,
-          publicMetadata,
-        });
-      return { id: invitation.id };
+      try {
+        const invitation =
+          await clerkClient.organizations.createOrganizationInvitation({
+            organizationId: dto.organizationId,
+            emailAddress: dto.email,
+            role,
+            inviterUserId: inviter.clerkId ?? undefined,
+            publicMetadata,
+          });
+        return { id: invitation.id };
+      } catch (e) {
+        // El mismo trato que la invitación normal: por aquí pasan las
+        // invitaciones a una organización, y fallaban igual de mudas.
+        throw this.traducirFalloDeClerk(e, dto.email);
+      }
     }
 
     // Clerk sends the invitation email itself via `notify`; the flag is off in
@@ -155,8 +177,45 @@ export class InvitationsService {
 
       return { id: invitation.id };
     } catch (e) {
-      this.logger.error(`Failed to send invitation to ${dto.email}: ${e}`);
+      throw this.traducirFalloDeClerk(e, dto.email);
     }
+  }
+
+  /**
+   * Convierte un fallo de Clerk en algo que el panel pueda enseñar.
+   *
+   * Antes este error se registraba y se descartaba: la función devolvía vacío,
+   * quien llamaba lanzaba un `Error` pelado y al usuario le llegaba un 500 con
+   * «error inesperado». Pasó de verdad el 26-sep-2026: se borró un usuario, se
+   * intentó invitarlo otra vez y el panel solo dijo que algo había fallado. La
+   * causa real —su cuenta seguía viva en Clerk— no aparecía por ninguna parte,
+   * ni siquiera en los registros del servidor.
+   *
+   * El correo repetido tiene mensaje propio porque es el caso frecuente y
+   * tiene salida conocida: restaurar al usuario en vez de reinvitarlo. Lo
+   * demás sale como 503, que es lo honesto cuando el que falla es un tercero.
+   */
+  private traducirFalloDeClerk(e: unknown, email: string): Error {
+    const clerk = e as ErrorDeClerk;
+    const primero = clerk?.errors?.[0];
+    const detalle = primero?.longMessage ?? primero?.message ?? String(e);
+
+    this.logger.error(
+      `Clerk rechazó la invitación de ${email}: ${primero?.code ?? 'sin código'} · ${detalle}`,
+      e instanceof Error ? e.stack : undefined,
+    );
+
+    if (primero?.code && YA_EXISTE.has(primero.code)) {
+      return new ConflictException(
+        `Clerk ya tiene una cuenta con el correo ${email}, así que no admite una invitación nueva. ` +
+          'Si borraste a esa persona, actívale «Mostrar eliminados» en la lista de usuarios y restáurala: ' +
+          'su cuenta sigue existiendo y no necesita invitación.',
+      );
+    }
+
+    return new ServiceUnavailableException(
+      `Clerk no pudo enviar la invitación a ${email}: ${detalle}`,
+    );
   }
 
   private buildInvitationRedirectUrl(
@@ -290,10 +349,6 @@ export class InvitationsService {
       },
       inviter,
     );
-
-    if (!clerkInvitation) {
-      throw new Error(`Failed to resend invitation to ${invitation.email}.`);
-    }
 
     invitation.clerkInvitationId = clerkInvitation.id;
     invitation.status = InvitationStatus.PENDING;

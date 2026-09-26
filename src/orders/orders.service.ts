@@ -40,6 +40,7 @@ import {
 } from './dto/admin-orders-query.dto';
 import { CheckoutDto } from './dto/checkout.dto';
 import { CorrectOrderDto } from './dto/correct-order.dto';
+import { CreateOrderForClientDto } from './dto/create-order-for-client.dto';
 import { OrderResponseDto } from './dto/order-response.dto';
 import { PickedUpByDto } from './dto/update-order-status.dto';
 import {
@@ -58,7 +59,10 @@ import {
 } from './entities/order.entity';
 import { ClientAddressesService } from '../client-addresses/client-addresses.service';
 import { ClientAddress } from '../client-addresses/entities/client-address.entity';
-import { FulfillmentService } from '../fulfillment/fulfillment.service';
+import {
+  FulfillmentChoice,
+  FulfillmentService,
+} from '../fulfillment/fulfillment.service';
 import { GeographyService } from '../geography/geography.service';
 import {
   PaymentMethodsService,
@@ -152,6 +156,69 @@ const snapshotContact = (
   return { recipientName, idCard, contactPhone };
 };
 
+// Un valor que no sea texto (u otro `Record` anidado, un número, …) se trata
+// como ausente, igual que si el campo no existiera: `deliveryAddress` es de
+// forma libre y no se valida su estructura (ver create-order-for-client.dto).
+const comoTextoOAusente = (value: unknown): string | null | undefined =>
+  typeof value === 'string' || value === null ? value : undefined;
+
+/**
+ * Lee el destinatario de una dirección de entrega de forma libre
+ * (`Record<string, unknown>`), con el mismo contrato que espera
+ * `snapshotContact` — sin ensanchar su firma ni recurrir a `any`.
+ *
+ * Existe para que `crearParaCliente` haga lo mismo que `checkout()`: si no
+ * llega `contact`, el destinatario sale de la dirección. Sin esto, el panel
+ * no tiene de dónde sacarlo y se ve obligado a exigir `contact` —con carné
+ * cubano obligatorio— para una entrega a domicilio que la tienda resuelve
+ * sin pedir carné nunca (`CreateClientAddressDto.idCard` es opcional).
+ */
+const contactoDesdeDireccion = (
+  address: Record<string, unknown> | null | undefined,
+): {
+  recipientName?: string | null;
+  idCard?: string | null;
+  contactPhone?: string | null;
+} | null => {
+  if (!address) return null;
+  return {
+    recipientName: comoTextoOAusente(address.recipientName),
+    idCard: comoTextoOAusente(address.idCard),
+    contactPhone: comoTextoOAusente(address.contactPhone),
+  };
+};
+
+/** Una línea ya valorada: el núcleo no vuelve a mirar el catálogo. */
+interface LineaResuelta {
+  productId: string;
+  name: string;
+  quantity: number;
+  unitPrice: number;
+}
+
+interface CrearPedidoParams {
+  clientId: string;
+  lineas: LineaResuelta[];
+  fulfillment: FulfillmentChoice;
+  deliveryMunicipalityId?: string;
+  deliveryAddress: Record<string, unknown> | null;
+  contactSnapshot: Record<string, unknown> | null;
+  customerNotes: string | null;
+  allowedLocationIds?: string[];
+  /** Quién crea el pedido: el propio cliente, o un empleado por él. */
+  actor: { clientId: string } | { userId: string };
+  /** Código del método de pago, solo para el `meta` del evento. */
+  paymentMethodCode: string | null;
+  /** Lo que cada llamador quiera dejar en el `meta` del evento de creación. */
+  metaExtra?: Record<string, unknown>;
+  /**
+   * Trabajo extra que tiene que caber en la MISMA transacción. La tienda vacía
+   * aquí el carrito; el panel sella aquí el cobro. El núcleo no sabe de
+   * carritos ni de cobros.
+   */
+  alFinalizar?: (manager: EntityManager, order: Order) => Promise<void>;
+}
+
 @Injectable()
 export class OrdersService {
   private readonly logger = new Logger(OrdersService.name);
@@ -159,6 +226,8 @@ export class OrdersService {
   constructor(
     @InjectRepository(Order)
     private readonly orderRepository: Repository<Order>,
+    @InjectRepository(Client)
+    private readonly clientRepository: Repository<Client>,
     private readonly cartService: CartService,
     private readonly inventoryService: InventoryService,
     private readonly paymentsService: PaymentsService,
@@ -273,102 +342,37 @@ export class OrdersService {
       dto.paymentMethod,
     );
 
-    const total = (cart.subtotal + Number(fulfillment.fee)).toFixed(2);
-
     // Reservations stay within the storages covering the municipality; without
     // a municipality (pickup-only client with no location) any active storage
     // may hold the stock, as before.
-    const coveringIds = deliveryMunicipalityId
-      ? await this.productsService.coveringLocationIds({
-          municipalityId: deliveryMunicipalityId,
-        })
-      : undefined;
-    const allowedLocationIds =
-      coveringIds && fulfillment.pickupLocationId
-        ? [...new Set([...coveringIds, fulfillment.pickupLocationId])]
-        : coveringIds;
+    const allowedLocationIds = await this.resolveAllowedLocationIds(
+      deliveryMunicipalityId,
+      fulfillment,
+    );
 
-    const orderId = await this.dataSource.transaction(async (manager) => {
-      const orderRepo = manager.getRepository(Order);
-      const order = await orderRepo.save(
-        orderRepo.create({
-          clientId: client.id,
-          status: OrderStatus.PENDING,
-          paymentStatus: PaymentStatus.PENDING,
-          subtotal: cart.subtotal.toFixed(2),
-          deliveryFee: fulfillment.fee,
-          total,
-          fulfillmentType: fulfillment.type,
-          deliveryOptionId: fulfillment.deliveryOptionId,
-          deliveryOptionLabel: fulfillment.deliveryOptionLabel,
-          pickupLocationId: fulfillment.pickupLocationId,
-          pickupAddressId: fulfillment.pickupAddressId,
-          pickupAddressSnapshot: fulfillment.pickupAddressSnapshot,
-          // El plazo se congela aquí, como la etiqueta y la tarifa: cambiar
-          // la opción de entrega mañana no reescribe lo prometido hoy.
-          promiseDays: fulfillment.promiseDays,
-          deliveryMunicipalityId: deliveryMunicipalityId ?? null,
-          // A snapshot: the saved address may be edited or deleted later, the
-          // order must still say where it was going.
-          deliveryAddress: address
-            ? snapshotAddress(address, place)
-            : (dto.deliveryAddress ?? null),
-          // `contact` manda sobre la dirección: es lo que el cliente acaba de
-          // escribir en este checkout, mientras que la dirección guardada
-          // puede llevar meses ahí con otro destinatario.
-          contactSnapshot: snapshotContact(dto.contact ?? address),
-          customerNotes: dto.customerNotes ?? null,
-        }),
-      );
-      order.orderNumber = `ORD-${new Date().getFullYear()}${String(order.seq).padStart(4, '0')}`;
-      // El enlace de seguimiento se reparte por fuera (WhatsApp, correo), así
-      // que su identificador no puede deducirse del número de pedido, que es
-      // correlativo. 32 bytes aleatorios, y no cambia en toda la vida del pedido.
-      order.trackingId = randomBytes(32).toString('hex');
-      await orderRepo.save(order);
-
-      const itemRepo = manager.getRepository(OrderItem);
-      for (const line of cart.items) {
-        // reserve() re-checks availability under lock — a concurrent checkout
-        // of the same stock loses with the same 409 shape as the cart.
-        await this.inventoryService.reserve(
-          manager,
-          order.id,
-          line.productId,
-          line.quantity,
-          {
-            allowedLocationIds,
-            // Pickup drains the customer's counter first; overflow lands at
-            // sibling covering storages and flags the order for a transfer.
-            preferredLocationId: fulfillment.pickupLocationId ?? undefined,
-          },
-        );
-        await itemRepo.save(
-          itemRepo.create({
-            orderId: order.id,
-            productId: line.productId,
-            productNameSnapshot: line.name,
-            unitPrice: line.unitPrice.toFixed(2),
-            quantity: line.quantity,
-            lineTotal: line.lineTotal.toFixed(2),
-          }),
-        );
-      }
-
-      await manager.getRepository(CartItem).delete({ clientId: client.id });
-      await this.orderEvents.record(manager, {
-        orderId: order.id,
-        kind: OrderEventKind.CREATED,
-        actor: { clientId: client.id },
-        field: 'status',
-        nextValue: OrderStatus.PENDING,
-        meta: {
-          total,
-          fulfillmentType: fulfillment.type,
-          paymentMethod: dto.paymentMethod ?? null,
-        },
-      });
-      return order.id;
+    const orderId = await this.crearPedido({
+      clientId: client.id,
+      lineas: cart.items.map((line) => ({
+        productId: line.productId,
+        name: line.name,
+        quantity: line.quantity,
+        unitPrice: line.unitPrice,
+      })),
+      fulfillment,
+      deliveryMunicipalityId,
+      deliveryAddress: address
+        ? snapshotAddress(address, place)
+        : (dto.deliveryAddress ?? null),
+      contactSnapshot: snapshotContact(dto.contact ?? address),
+      customerNotes: dto.customerNotes ?? null,
+      allowedLocationIds,
+      actor: { clientId: client.id },
+      paymentMethodCode: dto.paymentMethod ?? null,
+      // El carrito se vacía DENTRO de la transacción, como hasta ahora: si la
+      // reserva falla, el cliente conserva su carrito.
+      alFinalizar: async (manager) => {
+        await manager.getRepository(CartItem).delete({ clientId: client.id });
+      },
     });
 
     // Deliberately NOT awaited. Creating the attempt is a live call to the
@@ -406,6 +410,367 @@ export class OrdersService {
     });
 
     return this.findOneForClient(client.id, orderId);
+  }
+
+  /**
+   * Un pedido que hace un empleado en nombre de un cliente: quien compra por
+   * WhatsApp o por teléfono y no pasa por la tienda.
+   *
+   * Nace igual que uno de la tienda —mismo núcleo, mismas reservas, mismo
+   * plazo de caducidad— con dos diferencias: el carrito del cliente no se
+   * toca, y no se abre ningún intento de pago, porque un intento es una sesión
+   * de cobro a nombre del comprador y un empleado no puede abrirla por él.
+   */
+  async crearParaCliente(
+    user: User,
+    dto: CreateOrderForClientDto,
+  ): Promise<OrderResponseDto> {
+    // Antes de resolver o escribir nada: un 403 no puede dejar rastro. Se
+    // captura `cobro` aparte porque TypeScript no arrastra el estrechamiento
+    // de `dto.cobro` dentro del closure de `alFinalizar`, más abajo.
+    const cobro = dto.cobro;
+    if (cobro) {
+      const puedeCobrar = await this.permissionsService.hasPermission(
+        user.id,
+        user.role,
+        'orders',
+        'update-payment-status',
+      );
+      if (!puedeCobrar) {
+        throw new ForbiddenException(
+          'No puedes marcar un pedido como cobrado; créalo pendiente',
+        );
+      }
+    }
+
+    const client = await this.clientRepository.findOne({
+      where: { id: dto.clientId },
+    });
+    if (!client) {
+      throw new NotFoundException(`No existe el cliente "${dto.clientId}"`);
+    }
+    // Mismo criterio que auth/client-auth.service.ts: dado de baja o gateado,
+    // el panel no puede abrirle un pedido a alguien a quien la tienda ya le
+    // cerró la puerta.
+    if (!client.isActive) {
+      throw new ConflictException(
+        `El cliente "${client.id}" está desactivado; no se le puede crear un pedido`,
+      );
+    }
+
+    const productIds = dto.items.map((line) => line.productId);
+    if (new Set(productIds).size !== productIds.length) {
+      throw new BadRequestException(
+        'Un producto no puede aparecer dos veces; súmalo en una sola línea',
+      );
+    }
+
+    // Se cargan una sola vez: la misma ficha sirve para juzgar si están a la
+    // venta (más abajo) y, después, para el nombre y el precio de
+    // resolveLines(). `findOne` ya 404 si algún id no existe.
+    const productos = new Map(
+      await Promise.all(
+        productIds.map(
+          async (id) => [id, await this.productsService.findOne(id)] as const,
+        ),
+      ),
+    );
+
+    const deliveryMunicipalityId =
+      dto.deliveryMunicipalityId ?? client.defaultMunicipalityId ?? undefined;
+
+    // La dirección es de forma libre y no se valida su estructura (ver el
+    // DTO), pero si trae un municipio que contradice el efectivo, algo está
+    // mal armado: sin este corte se entregaría con la tarifa y la cobertura
+    // de un municipio distinto al que dice la dirección, en silencio.
+    const municipioEnDireccion =
+      dto.deliveryAddress &&
+      typeof dto.deliveryAddress.municipalityId === 'string'
+        ? dto.deliveryAddress.municipalityId
+        : undefined;
+    if (
+      municipioEnDireccion &&
+      municipioEnDireccion !== deliveryMunicipalityId
+    ) {
+      throw new BadRequestException(
+        `La dirección dice el municipio "${municipioEnDireccion}", pero el pedido se está armando para "${deliveryMunicipalityId}"`,
+      );
+    }
+
+    const fulfillment = await this.fulfillmentService.resolveChoice({
+      fulfillmentType: dto.fulfillmentType,
+      deliveryOptionId: dto.deliveryOptionId,
+      pickupAddressId: dto.pickupAddressId,
+      municipalityId: deliveryMunicipalityId,
+    });
+
+    if (fulfillment.type === FulfillmentType.PICKUP && !dto.contact) {
+      throw new BadRequestException(
+        'Faltan los datos de quien recoge el pedido',
+      );
+    }
+
+    // La disponibilidad se mira ANTES de abrir la transacción para poder decir
+    // qué falta y cuánto hay, igual que el carrito de la tienda. La red final
+    // sigue siendo `reserve`, que la re-comprueba bajo bloqueo.
+    const disponible = await this.productsService.availableForArea(productIds, {
+      municipalityId: deliveryMunicipalityId,
+    });
+
+    // "A la venta" y "con stock" se juzgan JUNTOS, igual que el carrito
+    // (CartItemResponseDto.fromEntity: isActive && !deletedAt && stock): un
+    // único 409 con detalle por línea, para que no gane la condición que se
+    // compruebe primero. `resolveLines()`, más abajo, ya no tendrá nada que
+    // rechazar por su cuenta.
+    const faltan = dto.items
+      .map((item) => {
+        const product = productos.get(item.productId)!;
+        const available = disponible.get(item.productId) ?? 0;
+        const vendible =
+          product.isActive && !product.deletedAt && available >= item.quantity;
+        return { item, product, available, vendible };
+      })
+      .filter((linea) => !linea.vendible);
+
+    if (faltan.length > 0) {
+      throw new ConflictException({
+        message: 'Some cart items are no longer available',
+        details: faltan.map(({ item, product, available }) => ({
+          field: item.productId,
+          message: `"${product.name}": only ${available} available`,
+          available,
+        })),
+      });
+    }
+
+    // Mismo valorador que usa la corrección de líneas: precio del catálogo con
+    // su descuento, o el que escriba quien atiende si pactó otro por teléfono.
+    // El mapa vacío hace que resolveLines() trate todas las líneas como
+    // nuevas, que es justo lo que hace falta aquí: no hay pedido previo del
+    // que heredar nombre o precio.
+    const lineas = await this.resolveLines(dto.items, new Map());
+
+    // Resuelto para que un método de pago inexistente dé 400 ANTES de
+    // escribir nada. No se usa después a propósito: este alta no abre ningún
+    // intento de cobro (ver el porqué en el comentario del método).
+    const resolvedPayment = dto.paymentMethod
+      ? await this.paymentMethodsService.resolve(dto.paymentMethod)
+      : null;
+    void resolvedPayment;
+
+    // El código del cobro pasa por el mismo catálogo que dto.paymentMethod:
+    // sin esto, un código inventado entraría tal cual al historial.
+    if (cobro) {
+      await this.paymentMethodsService.resolve(cobro.paymentMethod);
+    }
+
+    const allowedLocationIds = await this.resolveAllowedLocationIds(
+      deliveryMunicipalityId,
+      fulfillment,
+    );
+
+    // Rastro de quién pactó qué: un precio a mano es dinero tecleado por una
+    // persona, y sin esto el pedido no dice quién lo decidió ni cuál línea.
+    const lineasConPrecioPactado = dto.items
+      .filter((item) => item.unitPrice !== undefined && item.unitPrice !== null)
+      .map((item) => item.productId);
+
+    const orderId = await this.crearPedido({
+      clientId: client.id,
+      lineas,
+      fulfillment,
+      deliveryMunicipalityId,
+      deliveryAddress: dto.deliveryAddress ?? null,
+      // Mismo `trim` y mismo criterio de «tres nulos = nada» que checkout, y
+      // el mismo fallback a la dirección cuando no llega `contact`: en
+      // recogida sigue siendo obligatorio (comprobado más arriba, no hay
+      // dirección de la que sacarlo), pero en entrega el panel no puede
+      // exigir más datos que la tienda.
+      contactSnapshot: snapshotContact(
+        dto.contact ?? contactoDesdeDireccion(dto.deliveryAddress),
+      ),
+      customerNotes: dto.customerNotes ?? null,
+      allowedLocationIds,
+      actor: { userId: user.id },
+      // Si no viene un método de pago propio (no se abre ningún intento), el
+      // del cobro ya hecho manda: sin esto, el evento de creación decía
+      // `null` mientras el de cobro, un renglón más abajo, decía el método
+      // real — dos eventos de la misma alta contando cosas distintas.
+      paymentMethodCode: dto.paymentMethod ?? cobro?.paymentMethod ?? null,
+      metaExtra: {
+        canal: 'back-office',
+        ...(lineasConPrecioPactado.length > 0
+          ? { lineasConPrecioPactado }
+          : {}),
+      },
+      // Dentro de la MISMA transacción que crea el pedido, a propósito: entre
+      // crear y cobrar habría un hueco con el pedido pendiente, y el barrido
+      // de caducidad puede pasar por ahí y cancelar una venta ya cobrada.
+      alFinalizar: cobro
+        ? async (manager, order) => {
+            order.paymentStatus = PaymentStatus.PAID;
+            order.paymentRef = cobro.reference ?? null;
+            sellarCobro(order);
+            await manager.getRepository(Order).save(order);
+            await this.orderEvents.record(manager, {
+              orderId: order.id,
+              kind: OrderEventKind.PAYMENT_STATUS_CHANGED,
+              actor: { userId: user.id },
+              field: 'paymentStatus',
+              previousValue: PaymentStatus.PENDING,
+              nextValue: PaymentStatus.PAID,
+              meta: {
+                canal: 'back-office',
+                paymentMethod: cobro.paymentMethod,
+                reference: cobro.reference ?? null,
+              },
+            });
+          }
+        : undefined,
+    });
+
+    const aviso = cobro
+      ? this.orderMailer.paymentReceived(orderId)
+      : this.orderMailer.orderReceived(orderId);
+    void aviso.catch((err) => {
+      this.logger.error(
+        `No se pudo avisar por correo del pedido ${orderId}`,
+        err instanceof Error ? err.stack : String(err),
+      );
+    });
+
+    return this.findOneAdmin(orderId);
+  }
+
+  /**
+   * Los almacenes donde puede vivir la reserva: los que cubren el municipio
+   * de entrega, más el propio mostrador de recogida si el catálogo no lo
+   * contaba (una recogida puede salir de un local sin cobertura de reparto).
+   * Compartido por `checkout()` y `crearParaCliente()` — es el único cálculo
+   * de zona que existe, para que las dos vías no puedan divergir.
+   */
+  private async resolveAllowedLocationIds(
+    deliveryMunicipalityId: string | undefined,
+    fulfillment: FulfillmentChoice,
+  ): Promise<string[] | undefined> {
+    const coveringIds = deliveryMunicipalityId
+      ? await this.productsService.coveringLocationIds({
+          municipalityId: deliveryMunicipalityId,
+        })
+      : undefined;
+    return coveringIds && fulfillment.pickupLocationId
+      ? [...new Set([...coveringIds, fulfillment.pickupLocationId])]
+      : coveringIds;
+  }
+
+  /**
+   * Crea el pedido y aparta su stock, en una sola transacción.
+   *
+   * Es el único sitio donde nace un pedido. Recibe las líneas **ya valoradas**
+   * y no sabe de dónde salieron: del carrito del cliente en la tienda, o de lo
+   * que escribió un empleado en el panel. Así las dos vías no pueden acabar
+   * contando el stock o los totales de maneras distintas.
+   *
+   * No toca carritos y no manda correos: eso lo decide cada llamador.
+   */
+  private async crearPedido(params: CrearPedidoParams): Promise<string> {
+    return this.dataSource.transaction(async (manager) => {
+      // En céntimos y dividiendo al final: la misma cuenta que hace cada
+      // lineTotal más abajo, para que la cabecera nunca pueda descuadrar de
+      // sus líneas por redondeo. El carrito ya sumaba lo mismo
+      // (cart-response.dto.ts) pero aquí el núcleo lo impone, no lo hereda.
+      const subtotal =
+        params.lineas.reduce(
+          (c, l) => c + Math.round(l.unitPrice * l.quantity * 100),
+          0,
+        ) / 100;
+      const total = (subtotal + Number(params.fulfillment.fee)).toFixed(2);
+
+      const orderRepo = manager.getRepository(Order);
+      const order = await orderRepo.save(
+        orderRepo.create({
+          clientId: params.clientId,
+          status: OrderStatus.PENDING,
+          paymentStatus: PaymentStatus.PENDING,
+          subtotal: subtotal.toFixed(2),
+          deliveryFee: params.fulfillment.fee,
+          total,
+          fulfillmentType: params.fulfillment.type,
+          deliveryOptionId: params.fulfillment.deliveryOptionId,
+          deliveryOptionLabel: params.fulfillment.deliveryOptionLabel,
+          pickupLocationId: params.fulfillment.pickupLocationId,
+          pickupAddressId: params.fulfillment.pickupAddressId,
+          pickupAddressSnapshot: params.fulfillment.pickupAddressSnapshot,
+          // El plazo se congela aquí, como la etiqueta y la tarifa: cambiar
+          // la opción de entrega mañana no reescribe lo prometido hoy.
+          promiseDays: params.fulfillment.promiseDays,
+          deliveryMunicipalityId: params.deliveryMunicipalityId ?? null,
+          // A snapshot: the saved address may be edited or deleted later, the
+          // order must still say where it was going.
+          deliveryAddress: params.deliveryAddress,
+          // `contact` manda sobre la dirección: es lo que el cliente acaba de
+          // escribir en este checkout, mientras que la dirección guardada
+          // puede llevar meses ahí con otro destinatario.
+          contactSnapshot: params.contactSnapshot,
+          customerNotes: params.customerNotes,
+        }),
+      );
+      order.orderNumber = `ORD-${new Date().getFullYear()}${String(order.seq).padStart(4, '0')}`;
+      // El enlace de seguimiento se reparte por fuera (WhatsApp, correo), así
+      // que su identificador no puede deducirse del número de pedido, que es
+      // correlativo. 32 bytes aleatorios, y no cambia en toda la vida del pedido.
+      order.trackingId = randomBytes(32).toString('hex');
+      await orderRepo.save(order);
+
+      const itemRepo = manager.getRepository(OrderItem);
+      for (const line of params.lineas) {
+        // reserve() re-checks availability under lock — a concurrent checkout
+        // of the same stock loses with the same 409 shape as the cart.
+        await this.inventoryService.reserve(
+          manager,
+          order.id,
+          line.productId,
+          line.quantity,
+          {
+            allowedLocationIds: params.allowedLocationIds,
+            // Pickup drains the customer's counter first; overflow lands at
+            // sibling covering storages and flags the order for a transfer.
+            preferredLocationId:
+              params.fulfillment.pickupLocationId ?? undefined,
+          },
+        );
+        const lineTotal = (
+          Math.round(line.unitPrice * line.quantity * 100) / 100
+        ).toFixed(2);
+        await itemRepo.save(
+          itemRepo.create({
+            orderId: order.id,
+            productId: line.productId,
+            productNameSnapshot: line.name,
+            unitPrice: line.unitPrice.toFixed(2),
+            quantity: line.quantity,
+            lineTotal,
+          }),
+        );
+      }
+
+      await this.orderEvents.record(manager, {
+        orderId: order.id,
+        kind: OrderEventKind.CREATED,
+        actor: params.actor,
+        field: 'status',
+        nextValue: OrderStatus.PENDING,
+        meta: {
+          ...params.metaExtra,
+          total,
+          fulfillmentType: params.fulfillment.type,
+          paymentMethod: params.paymentMethodCode,
+        },
+      });
+
+      await params.alFinalizar?.(manager, order);
+      return order.id;
+    });
   }
 
   /**
@@ -574,10 +939,26 @@ export class OrdersService {
     }
     if (query.q) {
       qb.andWhere(
+        // También por el beneficiario, no solo por el titular: al mostrador
+        // llega quien va a recoger, con su carnet en la mano, y hasta ahora no
+        // había forma de encontrar su pedido con ninguno de sus datos.
+        // `contact_snapshot` es jsonb y puede ser null: `->>` devuelve NULL y
+        // el ILIKE no casa, que es lo que se quiere.
+        //
+        // Los paréntesis alrededor de la columna NO son decorativos. TypeORM
+        // sustituye `alias.columna` por su forma escapada con un regex que
+        // captura «todo hasta un espacio, = ( ) o coma»: sin los paréntesis se
+        // lleva también el `->>'campo'`, no encuentra esa clave, y deja
+        // `order.contact_snapshot` tal cual. Y `order` sin comillas es palabra
+        // reservada en Postgres, así que la consulta entera revienta con un
+        // 500. Pasó en staging el 26-sep.
         `(${sinTildes('order.orderNumber')} OR ${sinTildes('client.email')}
           OR ${sinTildes('client.firstName')} OR ${sinTildes('client.lastName')}
           OR ${sinTildes("concat_ws(' ', client.firstName, client.lastName)")}
-          OR ${sinTildes('client.phone')})`,
+          OR ${sinTildes('client.phone')}
+          OR ${sinTildes("(order.contact_snapshot)->>'recipientName'")}
+          OR ${sinTildes("(order.contact_snapshot)->>'idCard'")}
+          OR ${sinTildes("(order.contact_snapshot)->>'contactPhone'")})`,
         { q: `%${query.q}%` },
       );
     }

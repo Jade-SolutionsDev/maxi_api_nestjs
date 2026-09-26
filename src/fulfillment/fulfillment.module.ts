@@ -9,6 +9,7 @@ import { DeliveryOptionZone } from './entities/delivery-option-zone.entity';
 import { DeliveryOption } from './entities/delivery-option.entity';
 import { FulfillmentSettings } from './entities/fulfillment-settings.entity';
 import { FulfillmentSettingsController } from './fulfillment-settings.controller';
+import { FulfillmentController } from './fulfillment.controller';
 import { FulfillmentService } from './fulfillment.service';
 import { StorefrontFulfillmentController } from './storefront-fulfillment.controller';
 
@@ -26,6 +27,7 @@ import { StorefrontFulfillmentController } from './storefront-fulfillment.contro
   ],
   controllers: [
     DeliveryOptionsController,
+    FulfillmentController,
     FulfillmentSettingsController,
     StorefrontFulfillmentController,
   ],
