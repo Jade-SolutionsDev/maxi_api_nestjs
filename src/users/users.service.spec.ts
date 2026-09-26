@@ -352,7 +352,7 @@ describe('UsersService', () => {
       email: 'JANE@EXAMPLE.COM',
       firstName: 'Jane',
       lastName: 'Doe',
-      phone: '+1234567890',
+      phone: '+53 5251 9414',
       role: Role.ADMIN,
     };
 

@@ -26,7 +26,7 @@ process.env.CRON_SECRET = CRON_SECRET;
 const CONTACTO_RECOGIDA = {
   recipientName: 'Ana Rodríguez',
   idCard: '90051512345',
-  contactPhone: '55512345',
+  contactPhone: '+53 5251 9414',
 };
 
 describe('Orders (e2e)', () => {

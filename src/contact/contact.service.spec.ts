@@ -189,7 +189,7 @@ describe('ContactService', () => {
         firstName: 'Pedro',
         lastName: 'Gómez',
         email: 'pedro@example.com',
-        phone: '+53 5 111 2233',
+        phone: '+53 5251 9414',
       } as Client;
 
       await service.submitMessage(
@@ -202,7 +202,7 @@ describe('ContactService', () => {
           clientId: 'cli-1',
           name: 'Pedro',
           email: 'pedro@example.com',
-          phone: '+53 5 111 2233',
+          phone: '+53 5251 9414',
         }),
       );
     });
