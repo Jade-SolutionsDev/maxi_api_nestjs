@@ -335,15 +335,18 @@ export class OrderPdfService {
     const cliente = order.client;
     const nombre =
       [cliente?.firstName, cliente?.lastName].filter(Boolean).join(' ') || '—';
-    this.recuadro(doc, 'Cliente', MARGEN, y, anchoCol, [
-      nombre,
-      cliente?.email ?? '',
-      cliente?.phone ?? '',
-    ]);
-
+    const lineasCliente = [nombre, cliente?.email ?? '', cliente?.phone ?? ''];
     const esRecogida = order.fulfillmentType === FulfillmentType.PICKUP;
     const lineasEntrega = lineasDeEntrega(order);
 
+    // Los dos con el mismo alto, el del que más lleve: dos tarjetas desiguales
+    // lado a lado se leen como un descuadre, no como un diseño.
+    const alto = Math.max(
+      this.altoDelRecuadro(doc, anchoCol, lineasCliente),
+      this.altoDelRecuadro(doc, anchoCol, lineasEntrega),
+    );
+
+    this.recuadro(doc, 'Cliente', MARGEN, y, anchoCol, lineasCliente, alto);
     this.recuadro(
       doc,
       esRecogida ? 'Recogida' : 'Entrega',
@@ -351,9 +354,39 @@ export class OrderPdfService {
       y,
       anchoCol,
       lineasEntrega,
+      alto,
     );
 
-    doc.y = y + 92;
+    doc.y = y + alto + 18;
+  }
+
+  /**
+   * Un recuadro de datos, alto según lo que lleve dentro.
+   *
+   * Antes era de 82 puntos fijos y cada línea se truncaba con puntos
+   * suspensivos: una recogida con destinatario lleva cinco líneas, necesita 89
+   * y se salía del borde, con el nombre cortado a media palabra. Un nombre
+   * cubano completo no cabe en una línea de media página, así que aquí se
+   * envuelve en vez de recortarse: en el mostrador hay que leerlo entero.
+   *
+   * Devuelve el alto que ocupó, para que quien dibuje dos en paralelo sepa por
+   * dónde seguir.
+   */
+  /** Lo que ocuparía el recuadro, para poder igualar dos que van en paralelo. */
+  private altoDelRecuadro(
+    doc: PDFKit.PDFDocument,
+    ancho: number,
+    lineas: string[],
+  ): number {
+    doc.font('Helvetica').fontSize(9.5);
+    const altos = lineas
+      .filter(Boolean)
+      .map((linea) => doc.heightOfString(linea, { width: ancho - 24 }));
+    return Math.max(
+      82,
+      // 24 hasta la primera línea, 3 de aire entre líneas, 14 de respiro abajo.
+      24 + altos.reduce((suma, a) => suma + a + 3, 0) + 14,
+    );
   }
 
   private recuadro(
@@ -363,9 +396,18 @@ export class OrderPdfService {
     y: number,
     ancho: number,
     lineas: string[],
+    alto: number,
   ): void {
+    const anchoTexto = ancho - 24;
+    const visibles = lineas.filter(Boolean);
+
+    doc.font('Helvetica').fontSize(9.5);
+    const altos = visibles.map((linea) =>
+      doc.heightOfString(linea, { width: anchoTexto }),
+    );
+
     doc
-      .roundedRect(x, y, ancho, 82, 6)
+      .roundedRect(x, y, ancho, alto, 6)
       .lineWidth(1)
       .strokeColor(LINEA)
       .stroke();
@@ -374,19 +416,16 @@ export class OrderPdfService {
       .fontSize(8)
       .fillColor(VERDE)
       .text(titulo.toUpperCase(), x + 12, y + 10, {
-        width: ancho - 24,
+        width: anchoTexto,
         characterSpacing: 0.6,
       });
+
     doc.font('Helvetica').fontSize(9.5).fillColor(TINTA);
     let cursor = y + 24;
-    for (const linea of lineas.filter(Boolean)) {
-      doc.text(linea, x + 12, cursor, {
-        width: ancho - 24,
-        ellipsis: true,
-        height: 12,
-      });
-      cursor += 13;
-    }
+    visibles.forEach((linea, i) => {
+      doc.text(linea, x + 12, cursor, { width: anchoTexto });
+      cursor += altos[i] + 3;
+    });
   }
 
   private tablaDeProductos(doc: PDFKit.PDFDocument, items: OrderItem[]): void {
