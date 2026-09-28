@@ -16,7 +16,15 @@
  */
 export const ZONA_CUBA = 'America/Havana';
 
-/** Día y hora para una persona: `23/09/2026, 11:10 p. m.` */
+/**
+ * Día y hora, en 24 horas y con segundos: `23/09/2026, 15:10:23`.
+ *
+ * En 24 horas a propósito, y no porque `es-CU` prefiera «11:10 p. m.»: es el
+ * formato que ya enseña la tabla de pedidos del panel, y ver el mismo pedido
+ * con dos relojes distintos hace dudar de si son la misma hora. Los segundos
+ * vienen de ahí mismo: sirven para casar un pedido con su fila cuando dos
+ * entran en el mismo minuto.
+ */
 export const fechaHoraEnCuba = (
   valor: Date | string | null | undefined,
 ): string =>
@@ -28,6 +36,29 @@ export const fechaHoraEnCuba = (
         year: 'numeric',
         hour: '2-digit',
         minute: '2-digit',
+        second: '2-digit',
+        hour12: false,
+      })
+    : '—';
+
+/**
+ * Lo mismo sin segundos, para las tablas: `23/09/2026, 15:10`.
+ *
+ * La columna «CREADO» del reporte tiene 102 puntos de ancho y los segundos la
+ * desbordan.
+ */
+export const fechaHoraCortaEnCuba = (
+  valor: Date | string | null | undefined,
+): string =>
+  valor
+    ? new Date(valor).toLocaleString('es-CU', {
+        timeZone: ZONA_CUBA,
+        day: '2-digit',
+        month: '2-digit',
+        year: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit',
+        hour12: false,
       })
     : '—';
 

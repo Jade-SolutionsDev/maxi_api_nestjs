@@ -1,5 +1,5 @@
 import { Injectable } from '@nestjs/common';
-import { fechaEnCuba, fechaHoraEnCuba } from '../common/zona';
+import { fechaEnCuba, fechaHoraCortaEnCuba } from '../common/zona';
 import { ConfigService } from '@nestjs/config';
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -65,7 +65,7 @@ const dinero = (valor: string | number | null | undefined): string =>
         maximumFractionDigits: 2,
       })}`;
 
-const fechaCorta = fechaHoraEnCuba;
+const fechaCorta = fechaHoraCortaEnCuba;
 
 const fechaLarga = fechaEnCuba;
 

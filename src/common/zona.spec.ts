@@ -1,4 +1,9 @@
-import { fechaEnCuba, fechaHoraEnCuba, mesEnCuba } from './zona';
+import {
+  fechaEnCuba,
+  fechaHoraCortaEnCuba,
+  fechaHoraEnCuba,
+  mesEnCuba,
+} from './zona';
 
 describe('fechas en hora de Cuba', () => {
   // El proceso corre en UTC (main.ts), así que sin decir la zona todo sale
@@ -23,6 +28,22 @@ describe('fechas en hora de Cuba', () => {
 
     expect(texto).toContain('28/09/2026');
     expect(texto).toMatch(/11:41/);
+  });
+
+  // El panel enseña 15:26:55 y el comprobante decía «3:26 p. m.». Son la
+  // misma hora, pero puestas una al lado de la otra nadie lo diría.
+  it('va en 24 horas y con segundos, como la tabla del panel', () => {
+    const texto = fechaHoraEnCuba('2026-09-28T19:26:55.000Z');
+
+    expect(texto).toContain('15:26:55');
+    expect(texto).not.toMatch(/[ap]\.?\s?m/i);
+  });
+
+  it('la versión de tabla va sin segundos, que no caben en la columna', () => {
+    const texto = fechaHoraCortaEnCuba('2026-09-28T19:26:55.000Z');
+
+    expect(texto).toContain('15:26');
+    expect(texto).not.toContain(':55');
   });
 
   it('sin fecha no inventa una', () => {
