@@ -1,4 +1,5 @@
 import { Injectable } from '@nestjs/common';
+import { fechaEnCuba, fechaHoraEnCuba } from '../common/zona';
 import { ConfigService } from '@nestjs/config';
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -64,23 +65,9 @@ const dinero = (valor: string | number | null | undefined): string =>
         maximumFractionDigits: 2,
       })}`;
 
-const fechaCorta = (valor: Date | string | null | undefined): string => {
-  if (!valor) return '—';
-  const d = new Date(valor);
-  return `${String(d.getDate()).padStart(2, '0')}/${String(
-    d.getMonth() + 1,
-  ).padStart(2, '0')}/${d.getFullYear()} ${String(d.getHours()).padStart(
-    2,
-    '0',
-  )}:${String(d.getMinutes()).padStart(2, '0')}`;
-};
+const fechaCorta = fechaHoraEnCuba;
 
-const fechaLarga = (valor: string): string => {
-  const d = new Date(valor);
-  return `${String(d.getDate()).padStart(2, '0')}/${String(
-    d.getMonth() + 1,
-  ).padStart(2, '0')}/${d.getFullYear()}`;
-};
+const fechaLarga = fechaEnCuba;
 
 export interface FiltrosDelReporte {
   from?: string;
@@ -500,18 +487,43 @@ export class OrdersReportPdfService {
   }
 
   /** «03/09/2026», «Del 01 al 07 de septiembre» o «Septiembre de 2026». */
+  /**
+   * La etiqueta de cada fila del resumen.
+   *
+   * **Aquí NO se convierte a hora de Cuba, a propósito.** Los grupos los hace
+   * la base con `date_trunc` sobre una columna que guarda UTC, así que «el día
+   * 24» de este resumen es el día 24 en UTC. Traducir solo la etiqueta la
+   * desplazaría un día respecto a los números que tiene al lado.
+   *
+   * Lo que hay debajo es un descuadre de verdad: una venta de las 21:00 en
+   * Cárdenas cuenta en el día siguiente. Arreglarlo es cambiar la agrupación
+   * —`AT TIME ZONE`— y eso mueve los totales de los informes, así que es una
+   * decisión de Jade y no un retoque de formato.
+   */
   private etiquetaDelPeriodo(iso: string, periodo: Periodo): string {
     const d = new Date(iso);
-    if (periodo === 'day') return fechaLarga(iso);
+    if (periodo === 'day') {
+      // Sin la zona: este día es el que agrupó la base, en UTC.
+      const dia = new Date(iso);
+      return `${String(dia.getUTCDate()).padStart(2, '0')}/${String(
+        dia.getUTCMonth() + 1,
+      ).padStart(2, '0')}/${dia.getUTCFullYear()}`;
+    }
     if (periodo === 'month') {
-      const mes = d.toLocaleDateString('es', { month: 'long' });
-      return `${mes.charAt(0).toUpperCase()}${mes.slice(1)} de ${d.getFullYear()}`;
+      const mes = d.toLocaleDateString('es', {
+        timeZone: 'UTC',
+        month: 'long',
+      });
+      return `${mes.charAt(0).toUpperCase()}${mes.slice(1)} de ${d.getUTCFullYear()}`;
     }
     const fin = new Date(d);
-    fin.setDate(fin.getDate() + 6);
-    return `Del ${String(d.getDate()).padStart(2, '0')} al ${String(
-      fin.getDate(),
-    ).padStart(2, '0')} de ${fin.toLocaleDateString('es', { month: 'long' })}`;
+    fin.setUTCDate(fin.getUTCDate() + 6);
+    return `Del ${String(d.getUTCDate()).padStart(2, '0')} al ${String(
+      fin.getUTCDate(),
+    ).padStart(2, '0')} de ${fin.toLocaleDateString('es', {
+      timeZone: 'UTC',
+      month: 'long',
+    })}`;
   }
 
   /**
