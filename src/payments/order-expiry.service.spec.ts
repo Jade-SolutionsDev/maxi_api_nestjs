@@ -172,6 +172,24 @@ describe('OrderExpiryService', () => {
     expect(saved[0]).toMatchObject({ status: OrderStatus.CANCELLED });
   });
 
+  it('never expires cash, identified by the payment-attempt snapshot', async () => {
+    const order = makeOrder({ createdAt: ago(7 * 24 * HOUR) });
+    await sweepWith(
+      order,
+      makeCharge({
+        // Deliberately not called "cash": names and codes are editable content.
+        provider: 'pago-en-el-local',
+        createdAt: ago(7 * 24 * HOUR),
+        actionPayload: {
+          instructions: { type: 'cash', note: 'Paga en Cárdenas' },
+        },
+      }),
+    );
+
+    expect(inventory.releaseReservations).not.toHaveBeenCalled();
+    expect(saved).toHaveLength(0);
+  });
+
   // Initiation failed, so there is no attempt to measure from; the order's own
   // age gets the forgiving window.
   it('falls back to the manual window when the order has no attempt', async () => {

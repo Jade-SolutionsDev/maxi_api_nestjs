@@ -366,6 +366,28 @@ describe('payment webhooks (e2e)', () => {
       const order = await orders.findOneByOrFail({ id: orderId });
       expect(order.status).toBe(OrderStatus.PENDING);
     });
+
+    it('never expires cash, even when its catalog method no longer exists', async () => {
+      const aWeekAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
+      await orders.update({ id: orderId }, { createdAt: aWeekAgo });
+      await charges.update(
+        { orderId },
+        {
+          provider: 'pago-en-el-local',
+          createdAt: aWeekAgo,
+          actionPayload: {
+            instructions: { type: 'cash', note: 'Paga en Cárdenas' },
+          },
+        },
+      );
+
+      const res = await expire(CRON_SECRET).expect(200);
+
+      expect(res.body.data.cancelled).toBe(0);
+      expect((await orders.findOneByOrFail({ id: orderId })).status).toBe(
+        OrderStatus.PENDING,
+      );
+    });
   });
 
   describe('the wallet option', () => {

@@ -9,6 +9,7 @@ import {
 
 /** Cómo se le dice al cliente dónde pagar, según el tipo de método manual. */
 export type PaymentInstructions =
+  | { type: 'cash'; note?: string | null }
   | {
       type: 'bank';
       bankName: string;
@@ -35,6 +36,18 @@ export type PaymentInstructions =
       memo?: string | null;
       note?: string | null;
     };
+
+/**
+ * El efectivo presencial no caduca. Se reconoce por la capacidad que quedó
+ * congelada en el cobro, nunca por una etiqueta o un código editorial.
+ */
+export const isCashPaymentInstructions = (
+  value: unknown,
+): value is Extract<PaymentInstructions, { type: 'cash' }> =>
+  typeof value === 'object' &&
+  value !== null &&
+  'type' in value &&
+  value.type === 'cash';
 
 /**
  * Admin-facing catalog of payment platforms. One row per registered gateway,
