@@ -247,6 +247,24 @@ describe('PaymentMethodsService', () => {
       );
     });
 
+    it('acepta efectivo presencial sin inventar datos de otra clase de pago', async () => {
+      repo.findOne.mockResolvedValue(null);
+
+      await service.create({
+        label: 'Pago en el local',
+        instructions: { type: 'cash', note: 'Cárdenas, de lunes a viernes' },
+      });
+
+      expect(repo.save).toHaveBeenCalledWith(
+        expect.objectContaining({
+          instructions: {
+            type: 'cash',
+            note: 'Cárdenas, de lunes a viernes',
+          },
+        }),
+      );
+    });
+
     it('exige cuenta o tarjeta en una transferencia', async () => {
       repo.findOne.mockResolvedValue(null);
 
@@ -294,6 +312,25 @@ describe('PaymentMethodsService', () => {
           code: 'manual',
           kind: 'manual',
           holdMinutes: EXPIRY.manualHours * 60,
+        }),
+      ]);
+    });
+
+    it('dice que el efectivo presencial no caduca', async () => {
+      repo.find.mockResolvedValue([
+        method('pago-en-el-local', {
+          instructions: {
+            type: 'cash',
+            note: 'Cárdenas, de lunes a viernes',
+          },
+        }),
+      ]);
+
+      expect(await service.findAvailableForStorefront()).toEqual([
+        expect.objectContaining({
+          code: 'pago-en-el-local',
+          kind: 'manual',
+          holdMinutes: null,
         }),
       ]);
     });
