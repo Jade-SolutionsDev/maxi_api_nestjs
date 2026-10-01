@@ -32,6 +32,7 @@ export interface ProductFilters {
    */
   priceField?: 'basePrice' | 'finalPrice';
   featured?: boolean;
+  ids?: string[];
   /**
    * `true` → only discounted products, `false` → only products at list price.
    * Omitted → no discount filter.
@@ -135,6 +136,9 @@ export class ProductsService {
       qb.andWhere('product.isFeatured = :featured', {
         featured: filters.featured,
       });
+    }
+    if (filters.ids?.length) {
+      qb.andWhere('product.id IN (:...ids)', { ids: filters.ids });
     }
     if (filters.onSale != null) {
       // A product is "on sale" when it carries a discount percentage.
