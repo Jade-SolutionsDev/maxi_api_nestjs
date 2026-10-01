@@ -58,6 +58,10 @@ const MODULOS_DE_APOYO: Record<string, readonly string[]> = {
   products: ['categories', 'departments'],
   categories: ['departments'],
   inventory: ['categories', 'departments', 'stock-locations'],
+  // El selector de destino de un banner lista productos, categorías y
+  // departamentos; la portada elige destacados y enseña los banners.
+  'cms-banners': ['products', 'categories', 'departments'],
+  'cms-home': ['products', 'departments', 'cms-banners'],
 };
 
 /**
@@ -107,6 +111,9 @@ export const MODULE_ACTIONS: Record<string, readonly string[]> = {
   refunds: ['list', 'read', 'request', 'complete', 'reject'],
   inventory: ['list', 'read', 'aggregate', 'history', 'create-operation'],
   'cms-settings': ['read', 'update'],
+  // `update` toca el borrador; `publish` lo lleva a la tienda. Van por
+  // separado para que alguien pueda preparar la portada y otro darla por buena.
+  'cms-home': ['read', 'update', 'publish'],
   'fulfillment-settings': ['read', 'update'],
   dashboard: ['view'],
   uploads: ['create'],
@@ -162,6 +169,23 @@ const BASE_ROLES: ReadonlyArray<{
       departments: ['list', 'read'],
       inventory: ['read', 'aggregate', 'history'],
       uploads: ['create'],
+    },
+  },
+  {
+    systemKey: 'WEB_MANAGER',
+    name: 'Responsable de la web — base',
+    description:
+      'Prepara, revisa y publica la portada de la tienda. Ajusta sus permisos según lo que necesite tu equipo.',
+    // La portada entera y sus banners, más las lecturas que piden sus
+    // selectores. El catálogo solo lo consulta: destacar un producto no es
+    // editarlo.
+    grants: {
+      'cms-home': ['read', 'update', 'publish'],
+      'cms-banners': CRUD,
+      uploads: ['create'],
+      products: ['list', 'read'],
+      categories: ['list', 'read'],
+      departments: ['list', 'read'],
     },
   },
 ];

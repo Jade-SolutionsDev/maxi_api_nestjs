@@ -5,6 +5,7 @@ import {
 } from '@nestjs/common';
 import { Test, TestingModule } from '@nestjs/testing';
 import { getRepositoryToken } from '@nestjs/typeorm';
+import { In } from 'typeorm';
 import { Role, User } from '../users/entities/user.entity';
 import { Permission } from './entities/permission.entity';
 import { ManagedRole } from './entities/role.entity';
@@ -90,7 +91,7 @@ describe('PermissionsService', () => {
   });
 
   describe('onModuleInit seeding', () => {
-    it('seeds the full catalog and both base roles on a fresh DB', async () => {
+    it('seeds the full catalog and every base role on a fresh DB', async () => {
       // seedPermissions sees an empty table; later reads see the catalog.
       permissionRepo.find
         .mockResolvedValueOnce([])
@@ -110,8 +111,8 @@ describe('PermissionsService', () => {
         catalogRows.length,
       );
 
-      // Both base roles created as EDITABLE (isSystem: false).
-      expect(roleRepo.save).toHaveBeenCalledTimes(2);
+      // Every base role created as EDITABLE (isSystem: false).
+      expect(roleRepo.save).toHaveBeenCalledTimes(3);
       expect(roleRepo.save).toHaveBeenCalledWith(
         expect.objectContaining({
           systemKey: 'GROCER',
@@ -121,6 +122,9 @@ describe('PermissionsService', () => {
       );
       expect(roleRepo.save).toHaveBeenCalledWith(
         expect.objectContaining({ systemKey: 'KARDIST', isSystem: false }),
+      );
+      expect(roleRepo.save).toHaveBeenCalledWith(
+        expect.objectContaining({ systemKey: 'WEB_MANAGER', isSystem: false }),
       );
 
       // El Almacenero nace con lo que MxH-0036 define: 12 permisos para GROCER,
@@ -183,6 +187,56 @@ describe('PermissionsService', () => {
       }
       // Los pedidos son de otro rol: ni uno solo.
       expect(concedidos.filter((p) => p.startsWith('orders:'))).toHaveLength(0);
+    });
+
+    it('el responsable de la web nace editando y publicando la portada, sin tocar catálogo ni pedidos', async () => {
+      permissionRepo.find
+        .mockResolvedValueOnce([])
+        .mockResolvedValue(catalogRows);
+      permissionRepo.save.mockResolvedValue([]);
+      roleRepo.findOne.mockResolvedValue(null);
+      roleRepo.save.mockImplementation((r: { systemKey: string }) =>
+        Promise.resolve({ ...r, id: `role-${r.systemKey}` }),
+      );
+      rolePermissionRepo.save.mockResolvedValue([]);
+
+      await service.onModuleInit();
+
+      const concedidos = (
+        rolePermissionRepo.save.mock.calls[2][0] as {
+          roleId: string;
+          permissionId: string;
+        }[]
+      ).map((g) => g.permissionId);
+
+      expect(concedidos).toEqual(
+        expect.arrayContaining([
+          'cms-home:read',
+          'cms-home:update',
+          'cms-home:publish',
+          'cms-banners:create',
+          'cms-banners:update',
+          'cms-banners:delete',
+          'uploads:create',
+          'products:list',
+          'departments:list',
+          'categories:list',
+        ]),
+      );
+      expect(concedidos).toHaveLength(15);
+      expect(
+        concedidos.filter(
+          (p) =>
+            p.startsWith('orders:') ||
+            ['products:create', 'products:update', 'products:delete'].includes(
+              p,
+            ),
+        ),
+      ).toHaveLength(0);
+    });
+
+    it('publicar la portada es un permiso distinto de editarla', () => {
+      expect(MODULE_ACTIONS['cms-home']).toEqual(['read', 'update', 'publish']);
     });
 
     it('ofrece «create» en pedidos, separado de los cambios de estado', () => {
@@ -506,6 +560,40 @@ describe('PermissionsService', () => {
         { roleId: 'r1', permissionId: 'cat-list' },
         { roleId: 'r1', permissionId: 'dep-list' },
       ]);
+    });
+
+    it('editar la portada arrastra ver productos, departamentos y banners, que son sus selectores', async () => {
+      roleRepo.findOne.mockResolvedValue({ id: 'r1', isSystem: false });
+      permissionRepo.find
+        .mockResolvedValueOnce([
+          { id: 'home-update', module: 'cms-home', action: 'update' },
+        ])
+        .mockResolvedValueOnce([]);
+
+      await service.setRolePermissions('r1', ['home-update']);
+
+      expect(permissionRepo.find).toHaveBeenLastCalledWith({
+        where: expect.objectContaining({
+          module: In(['cms-home', 'products', 'departments', 'cms-banners']),
+        }),
+      });
+    });
+
+    it('los banners arrastran ver lo que pueden enlazar: productos, categorías y departamentos', async () => {
+      roleRepo.findOne.mockResolvedValue({ id: 'r1', isSystem: false });
+      permissionRepo.find
+        .mockResolvedValueOnce([
+          { id: 'banner-create', module: 'cms-banners', action: 'create' },
+        ])
+        .mockResolvedValueOnce([]);
+
+      await service.setRolePermissions('r1', ['banner-create']);
+
+      expect(permissionRepo.find).toHaveBeenLastCalledWith({
+        where: expect.objectContaining({
+          module: In(['cms-banners', 'products', 'categories', 'departments']),
+        }),
+      });
     });
 
     it('un rol sin ningún permiso no se guarda', async () => {
