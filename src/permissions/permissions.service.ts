@@ -84,7 +84,9 @@ export const MODULE_ACTIONS: Record<string, readonly string[]> = {
   nomenclators: CRUD,
   'delivery-options': CRUD,
   clients: CRUD,
-  'cms-pages': CRUD,
+  // Textos de la tienda (páginas legales e informativas, avisos de portada).
+  // `update` toca el borrador; `publish` lo lleva a la tienda y deja versión.
+  'cms-pages': [...CRUD, 'publish'],
   'cms-banners': CRUD,
   'cms-services': CRUD,
   'cms-staff': CRUD,
@@ -175,13 +177,14 @@ const BASE_ROLES: ReadonlyArray<{
     systemKey: 'WEB_MANAGER',
     name: 'Responsable de la web — base',
     description:
-      'Prepara, revisa y publica la portada de la tienda. Ajusta sus permisos según lo que necesite tu equipo.',
-    // La portada entera y sus banners, más las lecturas que piden sus
-    // selectores. El catálogo solo lo consulta: destacar un producto no es
-    // editarlo.
+      'Prepara, revisa y publica la portada, los textos legales y los avisos de la tienda. Ajusta sus permisos según lo que necesite tu equipo.',
+    // La portada entera y sus banners, los textos de la tienda, más las
+    // lecturas que piden sus selectores. El catálogo solo lo consulta:
+    // destacar un producto no es editarlo.
     grants: {
       'cms-home': ['read', 'update', 'publish'],
       'cms-banners': CRUD,
+      'cms-pages': [...CRUD, 'publish'],
       uploads: ['create'],
       products: ['list', 'read'],
       categories: ['list', 'read'],
