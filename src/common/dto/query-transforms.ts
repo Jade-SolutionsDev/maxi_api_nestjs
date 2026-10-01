@@ -23,6 +23,16 @@ export const toOptionalNumber = ({ value }: TransformFnParams): unknown => {
   return Number.isNaN(n) ? undefined : n;
 };
 
+/** Split `?ids=a,b` into a trimmed list, keeping order (absent/empty → undefined). */
+export const toOptionalList = ({ value }: TransformFnParams): unknown => {
+  const raw: unknown[] = Array.isArray(value) ? value : [value];
+  const items = raw
+    .flatMap((item) => (typeof item === 'string' ? item.split(',') : [item]))
+    .map((item) => (typeof item === 'string' ? item.trim() : item))
+    .filter((item) => item !== undefined && item !== null && item !== '');
+  return items.length ? items : undefined;
+};
+
 /** Lower-case a `?sortOrder=ASC` value so `@IsIn(['asc','desc'])` is case-tolerant. */
 export const toSortOrder = ({ value }: TransformFnParams): unknown =>
   typeof value === 'string' ? value.toLowerCase() : value;

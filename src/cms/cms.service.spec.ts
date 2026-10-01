@@ -13,6 +13,9 @@ import { CmsPage } from './entities/cms-page.entity';
 import { CmsService as CmsServiceEntity } from './entities/cms-service.entity';
 import { CmsSiteSettings } from './entities/cms-site-settings.entity';
 import { CmsStaffMember } from './entities/cms-staff-member.entity';
+import { CmsHomeChangesService } from './cms-home-changes.service';
+import { CmsHomeChangeAction } from './cms-home.types';
+import type { User } from '../users/entities/user.entity';
 
 const makePage = (overrides: Partial<CmsPage> = {}): CmsPage => ({
   id: 'page-1',
@@ -27,9 +30,13 @@ const makePage = (overrides: Partial<CmsPage> = {}): CmsPage => ({
   ...overrides,
 });
 
+const actor = { id: 'user-1', firstName: 'Ana', lastName: 'Pérez' } as User;
+
 const makeBanner = (overrides: Partial<CmsBanner> = {}): CmsBanner => ({
   id: '11111111-1111-4111-8111-111111111111',
   alt: 'Oferta semanal',
+  title: null,
+  subtitle: null,
   desktop: { src: '/desktop.webp', width: 1600, height: 500 },
   tablet: { src: '/tablet.webp', width: 1024, height: 420 },
   mobile: { src: '/mobile.webp', width: 640, height: 480 },
@@ -81,6 +88,7 @@ describe('CmsService', () => {
   };
   let productsService: { availableFor: jest.Mock };
   let revalidation: { notify: jest.Mock };
+  let changes: { record: jest.Mock };
 
   beforeEach(async () => {
     pageRepo = makeRepo();
@@ -96,6 +104,7 @@ describe('CmsService', () => {
       availableFor: jest.fn().mockResolvedValue(new Map()),
     };
     revalidation = { notify: jest.fn() };
+    changes = { record: jest.fn().mockResolvedValue(undefined) };
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
@@ -113,6 +122,7 @@ describe('CmsService', () => {
           useValue: settingsRepo,
         },
         { provide: RevalidationService, useValue: revalidation },
+        { provide: CmsHomeChangesService, useValue: changes },
       ],
     }).compile();
 
@@ -224,15 +234,73 @@ describe('CmsService', () => {
   });
 
   describe('banners', () => {
-    it('public list filters to active banners in display order', async () => {
-      bannerRepo.find.mockResolvedValue([]);
+    it('stores the optional headline and subtitle shown over the image', async () => {
+      await service.createBanner(
+        {
+          ...bannerInput,
+          title: 'Todo para el hogar',
+          subtitle: 'Hasta 20 % menos',
+        },
+        actor,
+      );
 
-      await service.listBannersPublic();
+      expect(bannerRepo.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          title: 'Todo para el hogar',
+          subtitle: 'Hasta 20 % menos',
+        }),
+      );
+    });
 
-      expect(bannerRepo.find).toHaveBeenCalledWith({
-        where: { isActive: true },
-        order: { sortOrder: 'ASC', createdAt: 'ASC' },
-      });
+    it('logs who created, edited and deleted each banner', async () => {
+      bannerRepo.findOne.mockImplementation(() =>
+        Promise.resolve(makeBanner()),
+      );
+
+      await service.createBanner(bannerInput, actor);
+      await service.updateBanner(makeBanner().id, { alt: 'Nueva' }, actor);
+      await service.removeBanner(makeBanner().id, actor);
+
+      expect(changes.record.mock.calls).toEqual([
+        [CmsHomeChangeAction.BANNER_CREATED, 'Oferta semanal', actor],
+        [CmsHomeChangeAction.BANNER_UPDATED, 'Nueva', actor],
+        [CmsHomeChangeAction.BANNER_DELETED, 'Oferta semanal', actor],
+      ]);
+    });
+
+    it('leaves the live store alone: banners wait for the home to be published', async () => {
+      bannerRepo.findOne.mockResolvedValue(makeBanner());
+
+      await service.createBanner(bannerInput, actor);
+      await service.updateBanner(makeBanner().id, { alt: 'Nueva' }, actor);
+      await service.removeBanner(makeBanner().id, actor);
+
+      expect(revalidation.notify).not.toHaveBeenCalled();
+    });
+
+    it('checks availability on published copies the same way as on rows', async () => {
+      const productId = '33333333-3333-4333-8333-333333333333';
+      productRepo.find.mockResolvedValue([
+        {
+          id: productId,
+          name: 'Arroz',
+          slug: 'arroz',
+          isActive: true,
+          deletedAt: null,
+        },
+      ]);
+      productsService.availableFor.mockResolvedValue(new Map([[productId, 0]]));
+
+      const visible = await service.resolveVisibleBanners([
+        { id: 'a', targetType: null, targetId: null },
+        {
+          id: 'b',
+          targetType: CmsBannerTargetType.PRODUCT,
+          targetId: productId,
+        },
+      ]);
+
+      expect(visible.map(({ banner }) => banner.id)).toEqual(['a']);
     });
 
     it('stores a stable typed department reference while allowing inactive targets', async () => {
@@ -256,10 +324,13 @@ describe('CmsService', () => {
         Promise.resolve(makeBanner(banner as Partial<CmsBanner>)),
       );
 
-      const result = await service.createBanner({
-        ...bannerInput,
-        target: { type: CmsBannerTargetType.DEPARTMENT, id: departmentId },
-      });
+      const result = await service.createBanner(
+        {
+          ...bannerInput,
+          target: { type: CmsBannerTargetType.DEPARTMENT, id: departmentId },
+        },
+        actor,
+      );
 
       expect(bannerRepo.create).toHaveBeenCalledWith(
         expect.objectContaining({
@@ -314,10 +385,10 @@ describe('CmsService', () => {
         Promise.resolve(makeBanner(value as Partial<CmsBanner>)),
       );
 
-      const result = await service.createBanner({
-        ...bannerInput,
-        target: { type, id },
-      });
+      const result = await service.createBanner(
+        { ...bannerInput, target: { type, id } },
+        actor,
+      );
 
       expect(result.target).toEqual(
         expect.objectContaining({ type, id, slug: entity.slug }),
@@ -333,10 +404,13 @@ describe('CmsService', () => {
       });
 
       await expect(
-        service.createBanner({
-          ...bannerInput,
-          target: { type: CmsBannerTargetType.CATEGORY, id: departmentId },
-        }),
+        service.createBanner(
+          {
+            ...bannerInput,
+            target: { type: CmsBannerTargetType.CATEGORY, id: departmentId },
+          },
+          actor,
+        ),
       ).rejects.toBeInstanceOf(BadRequestException);
       expect(bannerRepo.save).not.toHaveBeenCalled();
     });
@@ -345,13 +419,16 @@ describe('CmsService', () => {
       productRepo.findOne.mockResolvedValue(null);
 
       await expect(
-        service.createBanner({
-          ...bannerInput,
-          target: {
-            type: CmsBannerTargetType.PRODUCT,
-            id: '33333333-3333-4333-8333-333333333333',
+        service.createBanner(
+          {
+            ...bannerInput,
+            target: {
+              type: CmsBannerTargetType.PRODUCT,
+              id: '33333333-3333-4333-8333-333333333333',
+            },
           },
-        }),
+          actor,
+        ),
       ).rejects.toBeInstanceOf(NotFoundException);
       expect(bannerRepo.save).not.toHaveBeenCalled();
     });
@@ -374,9 +451,11 @@ describe('CmsService', () => {
         },
       ]);
 
-      const result = await service.updateBanner(makeBanner().id, {
-        alt: 'Oferta actualizada',
-      });
+      const result = await service.updateBanner(
+        makeBanner().id,
+        { alt: 'Oferta actualizada' },
+        actor,
+      );
 
       expect(bannerRepo.save).toHaveBeenCalledWith(
         expect.objectContaining({
@@ -395,9 +474,11 @@ describe('CmsService', () => {
         }),
       );
 
-      const result = await service.updateBanner(makeBanner().id, {
-        target: null,
-      });
+      const result = await service.updateBanner(
+        makeBanner().id,
+        { target: null },
+        actor,
+      );
 
       expect(bannerRepo.save).toHaveBeenCalledWith(
         expect.objectContaining({ targetType: null, targetId: null }),
@@ -407,7 +488,7 @@ describe('CmsService', () => {
 
     it('resolves the current slug in batches instead of keeping a snapshot', async () => {
       const productId = '33333333-3333-4333-8333-333333333333';
-      bannerRepo.find.mockResolvedValue([
+      const banners = [
         makeBanner({
           id: '11111111-1111-4111-8111-111111111111',
           targetType: CmsBannerTargetType.PRODUCT,
@@ -418,7 +499,7 @@ describe('CmsService', () => {
           targetType: CmsBannerTargetType.PRODUCT,
           targetId: productId,
         }),
-      ]);
+      ];
       productRepo.find.mockResolvedValue([
         {
           id: productId,
@@ -430,7 +511,7 @@ describe('CmsService', () => {
       ]);
       productsService.availableFor.mockResolvedValue(new Map([[productId, 8]]));
 
-      const result = await service.listBannersPublic();
+      const result = await service.resolveVisibleBanners(banners);
 
       expect(productRepo.find).toHaveBeenCalledTimes(1);
       expect(result.map((item) => item.target?.slug)).toEqual([
@@ -447,7 +528,6 @@ describe('CmsService', () => {
         targetType: CmsBannerTargetType.PRODUCT,
         targetId: productId,
       });
-      bannerRepo.find.mockResolvedValue([unlinked, linked]);
       productRepo.find.mockResolvedValue([
         {
           id: productId,
@@ -459,7 +539,7 @@ describe('CmsService', () => {
       ]);
       productsService.availableFor.mockResolvedValue(new Map([[productId, 0]]));
 
-      const result = await service.listBannersPublic();
+      const result = await service.resolveVisibleBanners([unlinked, linked]);
 
       expect(result.map(({ banner }) => banner.id)).toEqual([unlinked.id]);
     });
@@ -470,7 +550,6 @@ describe('CmsService', () => {
         targetType: CmsBannerTargetType.PRODUCT,
         targetId: productId,
       });
-      bannerRepo.find.mockResolvedValue([linked]);
       productRepo.find.mockResolvedValue([
         {
           id: productId,
@@ -482,7 +561,7 @@ describe('CmsService', () => {
       ]);
       productsService.availableFor.mockResolvedValue(new Map([[productId, 3]]));
 
-      const result = await service.listBannersPublic();
+      const result = await service.resolveVisibleBanners([linked]);
 
       expect(result.map(({ banner }) => banner.id)).toEqual([linked.id]);
     });
@@ -504,7 +583,7 @@ describe('CmsService', () => {
         isActive: true,
         deletedAt: null,
       };
-      bannerRepo.find.mockResolvedValue([
+      const banners = [
         makeBanner({
           targetType: CmsBannerTargetType.CATEGORY,
           targetId: category.id,
@@ -514,10 +593,10 @@ describe('CmsService', () => {
           targetType: CmsBannerTargetType.DEPARTMENT,
           targetId: department.id,
         }),
-      ]);
+      ];
       categoryRepo.find.mockResolvedValue([category, department]);
 
-      const result = await service.listBannersPublic();
+      const result = await service.resolveVisibleBanners(banners);
 
       expect(result).toHaveLength(0);
     });
@@ -539,7 +618,7 @@ describe('CmsService', () => {
         isActive: true,
         deletedAt: null,
       };
-      bannerRepo.find.mockResolvedValue([
+      const banners = [
         makeBanner({
           targetType: CmsBannerTargetType.CATEGORY,
           targetId: category.id,
@@ -549,12 +628,12 @@ describe('CmsService', () => {
           targetType: CmsBannerTargetType.DEPARTMENT,
           targetId: department.id,
         }),
-      ]);
+      ];
       categoryRepo.find.mockResolvedValue([category, department]);
       categoriesService.listPublicCategories.mockResolvedValue([category]);
       categoriesService.listPublicDepartments.mockResolvedValue([department]);
 
-      const result = await service.listBannersPublic();
+      const result = await service.resolveVisibleBanners(banners);
 
       expect(result.map(({ banner }) => banner.id)).toEqual([
         '11111111-1111-4111-8111-111111111111',

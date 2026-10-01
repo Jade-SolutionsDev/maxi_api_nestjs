@@ -227,6 +227,17 @@ describe('ProductsService', () => {
       expect(qb.andWhere).toHaveBeenCalledWith('product.discount = 0');
     });
 
+    it('restricts the list to the given ids', async () => {
+      const qb = makeFindAllQb();
+      repository.createQueryBuilder.mockReturnValue(qb as never);
+
+      await service.findAll({ ids: ['p1', 'p2'] });
+
+      expect(qb.andWhere).toHaveBeenCalledWith('product.id IN (:...ids)', {
+        ids: ['p1', 'p2'],
+      });
+    });
+
     it('omitting onSale does not filter by discount', async () => {
       const qb = makeFindAllQb();
       repository.createQueryBuilder.mockReturnValue(qb as never);

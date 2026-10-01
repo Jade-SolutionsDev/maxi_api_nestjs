@@ -81,6 +81,47 @@ describe('CMS banner DTOs', () => {
     expect(PublicCmsBannerResponseDto.fromView(view).target).toBeNull();
   });
 
+  it('accepts an optional headline and subtitle within their limits', async () => {
+    const valid = plainToInstance(CreateCmsBannerDto, {
+      ...input,
+      title: 'Todo para el hogar',
+      subtitle: 'Hasta 20 % menos esta semana',
+    });
+    const tooLong = plainToInstance(UpdateCmsBannerDto, {
+      title: 'x'.repeat(81),
+      subtitle: 'x'.repeat(161),
+    });
+    const cleared = plainToInstance(UpdateCmsBannerDto, {
+      title: null,
+      subtitle: null,
+    });
+
+    await expect(validate(valid)).resolves.toHaveLength(0);
+    await expect(validate(tooLong)).resolves.toEqual([
+      expect.objectContaining({ property: 'title' }),
+      expect.objectContaining({ property: 'subtitle' }),
+    ]);
+    await expect(validate(cleared)).resolves.toHaveLength(0);
+  });
+
+  it('gives the storefront the slide content without the row bookkeeping', () => {
+    const publicBanner = PublicCmsBannerResponseDto.fromView({
+      banner: { ...banner, title: 'Todo para el hogar', subtitle: null },
+      target: null,
+    });
+
+    expect(publicBanner).toEqual({
+      id: banner.id,
+      alt: 'Oferta semanal',
+      title: 'Todo para el hogar',
+      subtitle: null,
+      desktop: input.desktop,
+      tablet: input.tablet,
+      mobile: input.mobile,
+      target: null,
+    });
+  });
+
   it('publishes the current slug for an available target', () => {
     const view: CmsBannerView = {
       banner,

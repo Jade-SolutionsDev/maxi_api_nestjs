@@ -39,6 +39,13 @@ export class CmsBanner {
   @Column({ type: 'varchar', length: 160 })
   alt: string;
 
+  /** Optional headline drawn over the image; null when the art carries it. */
+  @Column({ type: 'varchar', length: 80, nullable: true })
+  title: string | null;
+
+  @Column({ type: 'varchar', length: 160, nullable: true })
+  subtitle: string | null;
+
   @Column({ type: 'jsonb' })
   desktop: BannerAsset;
 

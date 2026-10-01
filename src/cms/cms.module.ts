@@ -21,12 +21,19 @@ import { CmsFaqCategory } from './entities/cms-faq-category.entity';
 import { CmsFaqQuestion } from './entities/cms-faq-question.entity';
 import { CmsFaqController } from './cms-faq.controller';
 import { CmsFaqService } from './cms-faq.service';
+import { CmsHome } from './entities/cms-home.entity';
+import { CmsHomeChange } from './entities/cms-home-change.entity';
+import { CmsHomeController } from './cms-home.controller';
+import { CmsHomeService } from './cms-home.service';
+import { CmsHomeChangesService } from './cms-home-changes.service';
 
 @Module({
   imports: [
     TypeOrmModule.forFeature([
       CmsPage,
       CmsBanner,
+      CmsHome,
+      CmsHomeChange,
       CmsServiceEntity,
       CmsStaffMember,
       CmsSiteSettings,
@@ -46,9 +53,10 @@ import { CmsFaqService } from './cms-faq.service';
     CmsStaffController,
     CmsSettingsController,
     CmsFaqController,
+    CmsHomeController,
     PublicCmsController,
   ],
-  providers: [CmsService, CmsFaqService],
+  providers: [CmsService, CmsFaqService, CmsHomeService, CmsHomeChangesService],
   exports: [CmsService, CmsFaqService],
 })
 export class CmsModule {}
