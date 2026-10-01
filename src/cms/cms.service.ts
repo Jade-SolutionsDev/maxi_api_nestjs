@@ -4,10 +4,9 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { In, Not, Repository } from 'typeorm';
+import { In, Repository } from 'typeorm';
 import { CategoriesService } from '../categories/categories.service';
 import { Category } from '../categories/entities/category.entity';
-import { slugify } from '../common/utils/catalog-ownership.utils';
 import { Product } from '../products/entities/product.entity';
 import { ProductsService } from '../products/products.service';
 import {
@@ -26,7 +25,6 @@ import {
 import { CmsHomeChangesService } from './cms-home-changes.service';
 import { CmsHomeChangeAction } from './cms-home.types';
 import type { User } from '../users/entities/user.entity';
-import { CreateCmsPageDto, UpdateCmsPageDto } from './dto/cms-page.dto';
 import {
   CreateCmsServiceDto,
   UpdateCmsServiceDto,
@@ -37,7 +35,6 @@ import {
   UpdateCmsStaffMemberDto,
 } from './dto/cms-staff-member.dto';
 import { CmsBanner } from './entities/cms-banner.entity';
-import { CmsPage } from './entities/cms-page.entity';
 import { CmsService as CmsServiceEntity } from './entities/cms-service.entity';
 import {
   CmsSiteSettings,
@@ -82,8 +79,6 @@ export const DEFAULT_SITE_SETTINGS: SiteSettingsData = {
 @Injectable()
 export class CmsService {
   constructor(
-    @InjectRepository(CmsPage)
-    private readonly pageRepository: Repository<CmsPage>,
     @InjectRepository(CmsBanner)
     private readonly bannerRepository: Repository<CmsBanner>,
     @InjectRepository(Category)
@@ -101,89 +96,6 @@ export class CmsService {
     private readonly revalidationService: RevalidationService,
     private readonly homeChanges: CmsHomeChangesService,
   ) {}
-
-  // ---------------- Pages ----------------
-
-  async createPage(dto: CreateCmsPageDto): Promise<CmsPage> {
-    const slug = await this.ensureUniquePageSlug(dto.slug ?? dto.title);
-    const page = this.pageRepository.create({
-      slug,
-      title: dto.title,
-      content: dto.content,
-      sortOrder: dto.sortOrder ?? 0,
-      isActive: dto.isActive ?? true,
-    });
-    const saved = await this.pageRepository.save(page);
-    this.revalidationService.notify(CMS_REVALIDATE_TAGS);
-    return saved;
-  }
-
-  async listPagesAdmin(): Promise<CmsPage[]> {
-    return this.pageRepository.find({
-      order: { sortOrder: 'ASC', title: 'ASC' },
-    });
-  }
-
-  async getPage(id: string): Promise<CmsPage> {
-    const page = await this.pageRepository.findOne({ where: { id } });
-    if (!page) {
-      throw new NotFoundException(`Page with id "${id}" not found`);
-    }
-    return page;
-  }
-
-  async updatePage(id: string, dto: UpdateCmsPageDto): Promise<CmsPage> {
-    const page = await this.getPage(id);
-    if (dto.title !== undefined) {
-      page.title = dto.title;
-    }
-    if (dto.slug !== undefined) {
-      page.slug = await this.ensureUniquePageSlug(dto.slug, id);
-    }
-    if (dto.content !== undefined) {
-      page.content = dto.content;
-    }
-    if (dto.sortOrder !== undefined) {
-      page.sortOrder = dto.sortOrder;
-    }
-    if (dto.isActive !== undefined) {
-      page.isActive = dto.isActive;
-    }
-    const saved = await this.pageRepository.save(page);
-    this.revalidationService.notify(CMS_REVALIDATE_TAGS);
-    return saved;
-  }
-
-  /**
-   * Frees the slug before soft-deleting: slug uniqueness counts soft-deleted
-   * rows, and footer legal links reference pages BY SLUG — without this,
-   * recreating a deleted page ("terminos-y-condiciones") would land on a
-   * suffixed slug ("-2") and silently break every stored reference.
-   */
-  async removePage(id: string): Promise<void> {
-    const page = await this.getPage(id);
-    page.slug = `${page.slug}-eliminada-${Date.now()}`;
-    await this.pageRepository.save(page);
-    await this.pageRepository.softDelete(id);
-    this.revalidationService.notify(CMS_REVALIDATE_TAGS);
-  }
-
-  async listPagesPublic(): Promise<CmsPage[]> {
-    return this.pageRepository.find({
-      where: { isActive: true },
-      order: { sortOrder: 'ASC', title: 'ASC' },
-    });
-  }
-
-  async getPageBySlugPublic(slug: string): Promise<CmsPage> {
-    const page = await this.pageRepository.findOne({
-      where: { slug, isActive: true },
-    });
-    if (!page) {
-      throw new NotFoundException(`Page with slug "${slug}" not found`);
-    }
-    return page;
-  }
 
   // ---------------- Banners ----------------
   // Banner rows are the home DRAFT: writes are logged but never ping the
@@ -640,41 +552,5 @@ export class CmsService {
     const saved = await this.settingsRepository.save(row);
     this.revalidationService.notify(CMS_REVALIDATE_TAGS);
     return saved;
-  }
-
-  // ---------------- Internal helpers ----------------
-
-  // Same contract as the taxonomy slug helper: derive from the source text,
-  // then suffix -2, -3… until unique (soft-deleted rows included so a slug is
-  // never resurrected under different content).
-  private async ensureUniquePageSlug(
-    source: string,
-    excludeId?: string,
-  ): Promise<string> {
-    const base = slugify(source);
-    let candidate = base;
-    let suffix = 2;
-    for (;;) {
-      const clash = await this.pageRepository.findOne({
-        where: excludeId
-          ? { slug: candidate, id: Not(excludeId) }
-          : { slug: candidate },
-        withDeleted: true,
-      });
-      if (!clash) {
-        return candidate;
-      }
-      // A soft-deleted row is a leftover, not an owner: reclaim its slug (the
-      // same rename removePage applies) so recreating a page always lands on
-      // the canonical slug the storefront references.
-      if (clash.deletedAt) {
-        await this.pageRepository.update(clash.id, {
-          slug: `${clash.slug}-eliminada-${Date.now()}`,
-        });
-        return candidate;
-      }
-      candidate = `${base}-${suffix}`;
-      suffix += 1;
-    }
   }
 }
