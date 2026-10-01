@@ -189,7 +189,7 @@ describe('PermissionsService', () => {
       expect(concedidos.filter((p) => p.startsWith('orders:'))).toHaveLength(0);
     });
 
-    it('el responsable de la web nace editando y publicando la portada, sin tocar catálogo ni pedidos', async () => {
+    it('el responsable de la web nace editando y publicando la portada y los textos, sin tocar catálogo ni pedidos', async () => {
       permissionRepo.find
         .mockResolvedValueOnce([])
         .mockResolvedValue(catalogRows);
@@ -217,13 +217,19 @@ describe('PermissionsService', () => {
           'cms-banners:create',
           'cms-banners:update',
           'cms-banners:delete',
+          'cms-pages:list',
+          'cms-pages:read',
+          'cms-pages:create',
+          'cms-pages:update',
+          'cms-pages:delete',
+          'cms-pages:publish',
           'uploads:create',
           'products:list',
           'departments:list',
           'categories:list',
         ]),
       );
-      expect(concedidos).toHaveLength(15);
+      expect(concedidos).toHaveLength(21);
       expect(
         concedidos.filter(
           (p) =>
@@ -237,6 +243,17 @@ describe('PermissionsService', () => {
 
     it('publicar la portada es un permiso distinto de editarla', () => {
       expect(MODULE_ACTIONS['cms-home']).toEqual(['read', 'update', 'publish']);
+    });
+
+    it('publicar un texto legal es un permiso distinto de editar su borrador', () => {
+      expect(MODULE_ACTIONS['cms-pages']).toEqual([
+        'list',
+        'read',
+        'create',
+        'update',
+        'delete',
+        'publish',
+      ]);
     });
 
     it('ofrece «create» en pedidos, separado de los cambios de estado', () => {

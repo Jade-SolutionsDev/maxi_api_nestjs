@@ -9,26 +9,12 @@ import { ProductsService } from '../products/products.service';
 import { CmsService, DEFAULT_SITE_SETTINGS } from './cms.service';
 import { CmsBannerTargetType } from './cms-banner.types';
 import { CmsBanner } from './entities/cms-banner.entity';
-import { CmsPage } from './entities/cms-page.entity';
 import { CmsService as CmsServiceEntity } from './entities/cms-service.entity';
 import { CmsSiteSettings } from './entities/cms-site-settings.entity';
 import { CmsStaffMember } from './entities/cms-staff-member.entity';
 import { CmsHomeChangesService } from './cms-home-changes.service';
 import { CmsHomeChangeAction } from './cms-home.types';
 import type { User } from '../users/entities/user.entity';
-
-const makePage = (overrides: Partial<CmsPage> = {}): CmsPage => ({
-  id: 'page-1',
-  slug: 'politica-de-privacidad',
-  title: 'Política de privacidad',
-  content: '# Política',
-  sortOrder: 0,
-  isActive: true,
-  createdAt: new Date('2026-01-01'),
-  updatedAt: new Date('2026-01-01'),
-  deletedAt: null,
-  ...overrides,
-});
 
 const actor = { id: 'user-1', firstName: 'Ana', lastName: 'Pérez' } as User;
 
@@ -77,7 +63,6 @@ const makeRepo = (): RepoMock => ({
 
 describe('CmsService', () => {
   let service: CmsService;
-  let pageRepo: RepoMock;
   let bannerRepo: RepoMock;
   let categoryRepo: RepoMock;
   let productRepo: RepoMock;
@@ -91,7 +76,6 @@ describe('CmsService', () => {
   let changes: { record: jest.Mock };
 
   beforeEach(async () => {
-    pageRepo = makeRepo();
     bannerRepo = makeRepo();
     categoryRepo = makeRepo();
     productRepo = makeRepo();
@@ -109,7 +93,6 @@ describe('CmsService', () => {
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         CmsService,
-        { provide: getRepositoryToken(CmsPage), useValue: pageRepo },
         { provide: getRepositoryToken(CmsBanner), useValue: bannerRepo },
         { provide: getRepositoryToken(Category), useValue: categoryRepo },
         { provide: getRepositoryToken(Product), useValue: productRepo },
@@ -127,110 +110,6 @@ describe('CmsService', () => {
     }).compile();
 
     service = module.get<CmsService>(CmsService);
-  });
-
-  describe('pages', () => {
-    it('derives a unique slug from the title on create', async () => {
-      pageRepo.findOne.mockResolvedValue(null);
-
-      await service.createPage({
-        title: 'Política de privacidad',
-        content: 'cuerpo',
-      });
-
-      expect(pageRepo.create).toHaveBeenCalledWith(
-        expect.objectContaining({ slug: 'politica-de-privacidad' }),
-      );
-      expect(revalidation.notify).toHaveBeenCalledWith(['cms']);
-    });
-
-    it('suffixes the slug when an ACTIVE page already owns it', async () => {
-      pageRepo.findOne
-        .mockResolvedValueOnce(makePage())
-        .mockResolvedValueOnce(null);
-
-      await service.createPage({
-        title: 'Política de privacidad',
-        content: 'cuerpo',
-      });
-
-      expect(pageRepo.create).toHaveBeenCalledWith(
-        expect.objectContaining({ slug: 'politica-de-privacidad-2' }),
-      );
-      expect(pageRepo.findOne).toHaveBeenCalledWith(
-        expect.objectContaining({ withDeleted: true }),
-      );
-    });
-
-    it('reclaims a slug held by a soft-deleted leftover row', async () => {
-      pageRepo.findOne.mockResolvedValueOnce(
-        makePage({ id: 'old-1', deletedAt: new Date('2026-02-01') }),
-      );
-
-      await service.createPage({
-        title: 'Política de privacidad',
-        content: 'cuerpo',
-      });
-
-      expect(pageRepo.update).toHaveBeenCalledWith('old-1', {
-        slug: expect.stringMatching(
-          /^politica-de-privacidad-eliminada-\d+$/,
-        ) as string,
-      });
-      expect(pageRepo.create).toHaveBeenCalledWith(
-        expect.objectContaining({ slug: 'politica-de-privacidad' }),
-      );
-    });
-
-    it('public slug lookup only returns active pages', async () => {
-      pageRepo.findOne.mockResolvedValue(null);
-
-      await expect(
-        service.getPageBySlugPublic('politica-de-privacidad'),
-      ).rejects.toBeInstanceOf(NotFoundException);
-      expect(pageRepo.findOne).toHaveBeenCalledWith({
-        where: { slug: 'politica-de-privacidad', isActive: true },
-      });
-    });
-
-    it('public list filters to active pages', async () => {
-      pageRepo.find.mockResolvedValue([]);
-
-      await service.listPagesPublic();
-
-      expect(pageRepo.find).toHaveBeenCalledWith(
-        expect.objectContaining({ where: { isActive: true } }),
-      );
-    });
-
-    it('frees the slug, soft-deletes and notifies on remove', async () => {
-      pageRepo.findOne.mockResolvedValue(makePage());
-
-      await service.removePage('page-1');
-
-      expect(pageRepo.save).toHaveBeenCalledWith(
-        expect.objectContaining({
-          slug: expect.stringMatching(
-            /^politica-de-privacidad-eliminada-\d+$/,
-          ) as string,
-        }),
-      );
-      expect(pageRepo.softDelete).toHaveBeenCalledWith('page-1');
-      expect(revalidation.notify).toHaveBeenCalledWith(['cms']);
-    });
-
-    it('reuses the original slug after a delete + recreate cycle', async () => {
-      pageRepo.findOne.mockResolvedValue(null);
-
-      await service.createPage({
-        title: 'Términos y condiciones',
-        content: 'cuerpo',
-      });
-
-      expect(pageRepo.create).toHaveBeenCalledWith(
-        expect.objectContaining({ slug: 'terminos-y-condiciones' }),
-      );
-    });
   });
 
   describe('banners', () => {

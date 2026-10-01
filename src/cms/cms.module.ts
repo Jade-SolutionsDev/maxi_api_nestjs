@@ -6,13 +6,18 @@ import { Category } from '../categories/entities/category.entity';
 import { ProductsModule } from '../products/products.module';
 import { Product } from '../products/entities/product.entity';
 import { CmsBannersController } from './cms-banners.controller';
-import { CmsPagesController } from './cms-pages.controller';
+import {
+  CmsHomeNoticesController,
+  CmsPagesController,
+} from './cms-pages.controller';
+import { CmsPagesService } from './cms-pages.service';
 import { CmsService } from './cms.service';
 import { CmsServicesController } from './cms-services.controller';
 import { CmsSettingsController } from './cms-settings.controller';
 import { CmsStaffController } from './cms-staff.controller';
 import { CmsBanner } from './entities/cms-banner.entity';
 import { CmsPage } from './entities/cms-page.entity';
+import { CmsPageVersion } from './entities/cms-page-version.entity';
 import { CmsService as CmsServiceEntity } from './entities/cms-service.entity';
 import { CmsSiteSettings } from './entities/cms-site-settings.entity';
 import { CmsStaffMember } from './entities/cms-staff-member.entity';
@@ -31,6 +36,7 @@ import { CmsHomeChangesService } from './cms-home-changes.service';
   imports: [
     TypeOrmModule.forFeature([
       CmsPage,
+      CmsPageVersion,
       CmsBanner,
       CmsHome,
       CmsHomeChange,
@@ -48,6 +54,7 @@ import { CmsHomeChangesService } from './cms-home-changes.service';
   ],
   controllers: [
     CmsPagesController,
+    CmsHomeNoticesController,
     CmsBannersController,
     CmsServicesController,
     CmsStaffController,
@@ -56,7 +63,13 @@ import { CmsHomeChangesService } from './cms-home-changes.service';
     CmsHomeController,
     PublicCmsController,
   ],
-  providers: [CmsService, CmsFaqService, CmsHomeService, CmsHomeChangesService],
+  providers: [
+    CmsService,
+    CmsPagesService,
+    CmsFaqService,
+    CmsHomeService,
+    CmsHomeChangesService,
+  ],
   exports: [CmsService, CmsFaqService],
 })
 export class CmsModule {}
