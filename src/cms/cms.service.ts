@@ -16,11 +16,16 @@ import {
 } from '../revalidation/revalidation.service';
 import { CreateCmsBannerDto, UpdateCmsBannerDto } from './dto/cms-banner.dto';
 import {
+  BannerTargetSource,
+  BannerView,
   CmsBannerResolvedTarget,
   CmsBannerTargetReference,
   CmsBannerTargetType,
   CmsBannerView,
 } from './cms-banner.types';
+import { CmsHomeChangesService } from './cms-home-changes.service';
+import { CmsHomeChangeAction } from './cms-home.types';
+import type { User } from '../users/entities/user.entity';
 import { CreateCmsPageDto, UpdateCmsPageDto } from './dto/cms-page.dto';
 import {
   CreateCmsServiceDto,
@@ -94,6 +99,7 @@ export class CmsService {
     @InjectRepository(CmsSiteSettings)
     private readonly settingsRepository: Repository<CmsSiteSettings>,
     private readonly revalidationService: RevalidationService,
+    private readonly homeChanges: CmsHomeChangesService,
   ) {}
 
   // ---------------- Pages ----------------
@@ -180,13 +186,20 @@ export class CmsService {
   }
 
   // ---------------- Banners ----------------
+  // Banner rows are the home DRAFT: writes are logged but never ping the
+  // storefront, which serves the copy frozen by CmsHomeService.publish.
 
-  async createBanner(dto: CreateCmsBannerDto): Promise<CmsBannerView> {
+  async createBanner(
+    dto: CreateCmsBannerDto,
+    actor: User,
+  ): Promise<CmsBannerView> {
     if (dto.target) {
       await this.validateBannerTarget(dto.target);
     }
     const banner = this.bannerRepository.create({
       alt: dto.alt,
+      title: dto.title ?? null,
+      subtitle: dto.subtitle ?? null,
       desktop: dto.desktop,
       tablet: dto.tablet,
       mobile: dto.mobile,
@@ -196,7 +209,11 @@ export class CmsService {
       isActive: dto.isActive ?? true,
     });
     const saved = await this.bannerRepository.save(banner);
-    this.revalidationService.notify(CMS_REVALIDATE_TAGS);
+    await this.homeChanges.record(
+      CmsHomeChangeAction.BANNER_CREATED,
+      saved.alt,
+      actor,
+    );
     return (await this.resolveBannerTargets([saved]))[0];
   }
 
@@ -224,10 +241,17 @@ export class CmsService {
   async updateBanner(
     id: string,
     dto: UpdateCmsBannerDto,
+    actor: User,
   ): Promise<CmsBannerView> {
     const banner = await this.getBannerEntity(id);
     if (dto.alt !== undefined) {
       banner.alt = dto.alt;
+    }
+    if (dto.title !== undefined) {
+      banner.title = dto.title;
+    }
+    if (dto.subtitle !== undefined) {
+      banner.subtitle = dto.subtitle;
     }
     if (dto.desktop !== undefined) {
       banner.desktop = dto.desktop;
@@ -255,21 +279,32 @@ export class CmsService {
       }
     }
     const saved = await this.bannerRepository.save(banner);
-    this.revalidationService.notify(CMS_REVALIDATE_TAGS);
+    await this.homeChanges.record(
+      CmsHomeChangeAction.BANNER_UPDATED,
+      saved.alt,
+      actor,
+    );
     return (await this.resolveBannerTargets([saved]))[0];
   }
 
-  async removeBanner(id: string): Promise<void> {
-    await this.getBannerEntity(id);
+  async removeBanner(id: string, actor: User): Promise<void> {
+    const banner = await this.getBannerEntity(id);
     await this.bannerRepository.softDelete(id);
-    this.revalidationService.notify(CMS_REVALIDATE_TAGS);
+    await this.homeChanges.record(
+      CmsHomeChangeAction.BANNER_DELETED,
+      banner.alt,
+      actor,
+    );
   }
 
-  async listBannersPublic(): Promise<CmsBannerView[]> {
-    const banners = await this.bannerRepository.find({
-      where: { isActive: true },
-      order: { sortOrder: 'ASC', createdAt: 'ASC' },
-    });
+  /**
+   * Drops banners whose target left the public catalog (out of stock,
+   * inactive, deleted). Works on rows and on published copies alike, so a
+   * frozen home still hides a link that would now land on a 404.
+   */
+  async resolveVisibleBanners<T extends BannerTargetSource>(
+    banners: T[],
+  ): Promise<BannerView<T>[]> {
     const views = await this.resolveBannerTargets(banners);
     return views.filter(
       ({ banner, target }) =>
@@ -312,9 +347,9 @@ export class CmsService {
     }
   }
 
-  private async resolveBannerTargets(
-    banners: CmsBanner[],
-  ): Promise<CmsBannerView[]> {
+  private async resolveBannerTargets<T extends BannerTargetSource>(
+    banners: T[],
+  ): Promise<BannerView<T>[]> {
     const categoryIds = this.targetIdsFor(
       banners,
       CmsBannerTargetType.CATEGORY,
@@ -378,7 +413,7 @@ export class CmsService {
   }
 
   private targetIdsFor(
-    banners: CmsBanner[],
+    banners: BannerTargetSource[],
     targetType: CmsBannerTargetType,
   ): string[] {
     return [
@@ -393,7 +428,7 @@ export class CmsService {
   }
 
   private resolveBannerTarget(
-    banner: CmsBanner,
+    banner: BannerTargetSource,
     taxonomyById: Map<string, Category>,
     productsById: Map<string, Product>,
     availableProductStock: Map<string, number>,

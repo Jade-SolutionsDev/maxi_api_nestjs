@@ -11,11 +11,13 @@ import {
   ValidateNested,
 } from 'class-validator';
 import {
+  BannerView,
   CmsBannerResolvedTarget,
   CmsBannerTargetReference,
   CmsBannerTargetType,
   CmsBannerView,
 } from '../cms-banner.types';
+import type { HomeBannerSnapshot } from '../cms-home.types';
 import { BannerAsset } from '../entities/cms-banner.entity';
 
 /**
@@ -49,6 +51,16 @@ export class CreateCmsBannerDto {
   @IsString()
   @MaxLength(160)
   alt: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(80)
+  title?: string | null;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(160)
+  subtitle?: string | null;
 
   @ValidateNested()
   @Type(() => BannerAssetDto)
@@ -84,6 +96,16 @@ export class UpdateCmsBannerDto {
   alt?: string;
 
   @IsOptional()
+  @IsString()
+  @MaxLength(80)
+  title?: string | null;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(160)
+  subtitle?: string | null;
+
+  @IsOptional()
   @ValidateNested()
   @Type(() => BannerAssetDto)
   desktop?: BannerAssetDto;
@@ -116,6 +138,8 @@ export class UpdateCmsBannerDto {
 export class CmsBannerResponseDto {
   id: string;
   alt: string;
+  title: string | null;
+  subtitle: string | null;
   desktop: BannerAsset;
   tablet: BannerAsset;
   mobile: BannerAsset;
@@ -130,6 +154,8 @@ export class CmsBannerResponseDto {
     const dto = new CmsBannerResponseDto();
     dto.id = entity.id;
     dto.alt = entity.alt;
+    dto.title = entity.title;
+    dto.subtitle = entity.subtitle;
     dto.desktop = entity.desktop;
     dto.tablet = entity.tablet;
     dto.mobile = entity.mobile;
@@ -148,30 +174,32 @@ export class PublicCmsBannerTargetDto implements CmsBannerTargetReference {
   slug: string;
 }
 
+/**
+ * One storefront slide, already in display order. Built from the published
+ * home copy, so it carries content only — no row ordering or timestamps.
+ */
 export class PublicCmsBannerResponseDto {
   id: string;
   alt: string;
+  title: string | null;
+  subtitle: string | null;
   desktop: BannerAsset;
   tablet: BannerAsset;
   mobile: BannerAsset;
-  sortOrder: number;
-  isActive: boolean;
-  createdAt: Date;
-  updatedAt: Date;
   target: PublicCmsBannerTargetDto | null;
 
-  static fromView(view: CmsBannerView): PublicCmsBannerResponseDto {
+  static fromView(
+    view: BannerView<HomeBannerSnapshot>,
+  ): PublicCmsBannerResponseDto {
     const { banner } = view;
     const dto = new PublicCmsBannerResponseDto();
     dto.id = banner.id;
     dto.alt = banner.alt;
+    dto.title = banner.title;
+    dto.subtitle = banner.subtitle;
     dto.desktop = banner.desktop;
     dto.tablet = banner.tablet;
     dto.mobile = banner.mobile;
-    dto.sortOrder = banner.sortOrder;
-    dto.isActive = banner.isActive;
-    dto.createdAt = banner.createdAt;
-    dto.updatedAt = banner.updatedAt;
     dto.target =
       view.target?.isAvailable && view.target.slug
         ? {
