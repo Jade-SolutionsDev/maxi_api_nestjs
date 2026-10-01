@@ -3,6 +3,7 @@ import {
   Controller,
   Delete,
   Get,
+  HttpCode,
   Param,
   Patch,
   Post,
@@ -45,6 +46,7 @@ export class ClientsController {
       {
         q: query.q,
         isActive: query.isActive,
+        includeInvitations: query.includeInvitations,
         ids: query.id
           ? query.id
               .split(',')
@@ -56,7 +58,10 @@ export class ClientsController {
     );
 
     return {
-      data: result.data.map(ClientResponseDto.fromEntity),
+      // Una fila sin `clerkId` es una invitación pendiente, no un cliente.
+      data: result.data.map((client) =>
+        ClientResponseDto.fromEntity(client, client.clerkId === null),
+      ),
       meta: result.meta,
     };
   }
@@ -90,6 +95,14 @@ export class ClientsController {
     @Body() dto: InviteClientDto,
   ): Promise<ClientInvitationResponseDto> {
     return this.invitations.invite(dto);
+  }
+
+  @Delete('invitations/:id')
+  @HttpCode(204)
+  @RequirePermission({ module: 'clients', action: 'create' })
+  @ApiOperation({ summary: 'Retirar una invitación pendiente' })
+  async revokeInvitation(@Param('id') id: string): Promise<void> {
+    await this.invitations.revocar(id);
   }
 
   @Post()
