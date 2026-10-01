@@ -143,4 +143,76 @@ describe('ClientInvitationsService', () => {
     expect(r.emailSent).toBe(false);
     expect(r.url).toBe(ENLACE);
   });
+
+  describe('listarPendientes', () => {
+    it('devuelve cada invitación como un cliente sin cuenta', async () => {
+      clerk.invitations.getInvitationList.mockResolvedValue({
+        data: [
+          {
+            id: 'inv_1',
+            emailAddress: 'Dayana@Ejemplo.com',
+            createdAt: 1790000000000,
+            publicMetadata: { firstName: 'Dayana', lastName: 'Pérez' },
+          },
+        ],
+      });
+
+      const [pendiente] = await service.listarPendientes();
+
+      // `clerkId` en null es lo que distingue una fila sintética de un cliente
+      // de verdad, igual que en el listado de usuarios.
+      expect(pendiente.clerkId).toBeNull();
+      expect(pendiente.id).toBe('inv_1');
+      expect(pendiente.email).toBe('dayana@ejemplo.com');
+      expect(pendiente.firstName).toBe('Dayana');
+      expect(pendiente.lastName).toBe('Pérez');
+      expect(pendiente.isActive).toBe(false);
+      expect(pendiente.createdAt).toEqual(new Date(1790000000000));
+    });
+
+    it('aguanta una invitación sin nombre en los metadatos', async () => {
+      clerk.invitations.getInvitationList.mockResolvedValue({
+        data: [{ id: 'inv_2', emailAddress: 'solo@correo.com' }],
+      });
+
+      const [pendiente] = await service.listarPendientes();
+
+      expect(pendiente.firstName).toBeNull();
+      expect(pendiente.lastName).toBeNull();
+    });
+
+    it('si Clerk falla, el listado de clientes no se cae', async () => {
+      clerk.invitations.getInvitationList.mockRejectedValue(
+        new Error('Clerk no responde'),
+      );
+
+      await expect(service.listarPendientes()).resolves.toEqual([]);
+    });
+
+    it('pide solo las pendientes', async () => {
+      await service.listarPendientes();
+
+      expect(clerk.invitations.getInvitationList).toHaveBeenCalledWith({
+        status: 'pending',
+      });
+    });
+  });
+
+  describe('revocar', () => {
+    it('retira la invitación en Clerk', async () => {
+      await service.revocar('inv_7');
+
+      expect(clerk.invitations.revokeInvitation).toHaveBeenCalledWith('inv_7');
+    });
+
+    it('un fallo de Clerk sí llega al que revoca', async () => {
+      clerk.invitations.revokeInvitation.mockRejectedValue(
+        new Error('ya estaba aceptada'),
+      );
+
+      // Al contrario que en el listado: aquí el administrador pidió revocar y
+      // tiene que enterarse de que no se hizo.
+      await expect(service.revocar('inv_7')).rejects.toThrow();
+    });
+  });
 });
