@@ -5,6 +5,7 @@ import {
   OrderStatus,
   PaymentStatus,
 } from '../entities/order.entity';
+import { enlaceDeSeguimiento } from '../enlace-de-seguimiento';
 import { OrderItem } from '../entities/order-item.entity';
 import { PaymentChargeResponseDto } from '../../payments/dto/payment-charge-response.dto';
 import { OrderPaymentMethodDto } from '../../payments/dto/payment-method-response.dto';
@@ -87,6 +88,14 @@ export class OrderResponseDto {
    * datos personales.
    */
   trackingId: string | null;
+
+  /**
+   * La dirección pública del seguimiento, ya montada. Viaja hecha porque el
+   * panel no conoce la dirección de la tienda, y es lo que se copia al pulsar
+   * «Copiar enlace de seguimiento». Null si no hay enlace o si la tienda no
+   * está configurada.
+   */
+  trackingUrl: string | null;
   promiseDays: number | null;
   /** Hasta cuándo está comprometida la entrega; se sella con el pago. */
   promisedAt: Date | null;
@@ -120,7 +129,10 @@ export class OrderResponseDto {
   createdAt: Date;
   updatedAt: Date;
 
-  static fromEntity(order: Order): OrderResponseDto {
+  static fromEntity(
+    order: Order,
+    urlDeLaTienda?: string | null,
+  ): OrderResponseDto {
     const dto = new OrderResponseDto();
     dto.id = order.id;
     dto.orderNumber = order.orderNumber;
@@ -147,6 +159,7 @@ export class OrderResponseDto {
     dto.paidAt = order.paidAt;
     dto.deliveredAt = order.deliveredAt;
     dto.trackingId = order.trackingId ?? null;
+    dto.trackingUrl = enlaceDeSeguimiento(urlDeLaTienda, dto.trackingId);
     dto.promiseDays = order.promiseDays;
     dto.promisedAt = order.promisedAt;
     dto.pickedUpBy = order.pickedUpBy;

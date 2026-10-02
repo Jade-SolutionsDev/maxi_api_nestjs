@@ -5,6 +5,7 @@ import {
   Logger,
   NotFoundException,
 } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { Test, TestingModule } from '@nestjs/testing';
 import { getRepositoryToken } from '@nestjs/typeorm';
 import { DataSource } from 'typeorm';
@@ -262,6 +263,12 @@ describe('OrdersService', () => {
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         OrdersService,
+        {
+          // El servicio arma el enlace de seguimiento con la dirección de la
+          // tienda, así que necesita la configuración también en las pruebas.
+          provide: ConfigService,
+          useValue: { get: () => ({ url: 'https://staging.maxihabana.com' }) },
+        },
         { provide: getRepositoryToken(Order), useValue: orderRepo },
         { provide: getRepositoryToken(Client), useValue: clientRepo },
         { provide: CartService, useValue: cartService },
