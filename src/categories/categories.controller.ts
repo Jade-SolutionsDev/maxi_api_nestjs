@@ -35,22 +35,34 @@ export class CategoriesController {
       departmentId,
       q,
     );
-    const counts = await this.categoriesService.countProducts(
-      categories.map((c) => c.id),
+    const ids = categories.map((c) => c.id);
+    // Dos cuentas distintas y las dos hacen falta: los asociados son los que
+    // bloquean el borrado, y los disponibles los que deciden si el cliente ve
+    // la categoría en la tienda.
+    const [asociados, disponibles] = await Promise.all([
+      this.categoriesService.countProducts(ids),
+      this.categoriesService.countValidProducts(ids),
+    ]);
+    return categories.map((c) =>
+      CategoryResponseDto.fromEntity(c, {
+        productos: asociados.get(c.id) ?? 0,
+        disponibles: disponibles.get(c.id) ?? 0,
+      }),
     );
-    return categories.map((c) => {
-      const dto = CategoryResponseDto.fromEntity(c);
-      dto.productsCount = counts.get(c.id) ?? 0;
-      return dto;
-    });
   }
 
   @Get(':id')
   @RequirePermission({ module: 'categories', action: 'read' })
   async findOne(@Param('id') id: string): Promise<CategoryResponseDto> {
-    return CategoryResponseDto.fromEntity(
-      await this.categoriesService.getCategory(id),
-    );
+    const category = await this.categoriesService.getCategory(id);
+    const [asociados, disponibles] = await Promise.all([
+      this.categoriesService.countProducts([id]),
+      this.categoriesService.countValidProducts([id]),
+    ]);
+    return CategoryResponseDto.fromEntity(category, {
+      productos: asociados.get(id) ?? 0,
+      disponibles: disponibles.get(id) ?? 0,
+    });
   }
 
   @Post()
