@@ -25,6 +25,7 @@ import { CreateDepartmentDto } from './dto/create-department.dto';
 import { UpdateCategoryDto } from './dto/update-category.dto';
 import { UpdateDepartmentDto } from './dto/update-department.dto';
 import { Category } from './entities/category.entity';
+import { MENSAJES } from './mensajes';
 
 /** Storefront sort fields shared by the public department/category lists. */
 export type PublicSortField = 'name' | 'sortOrder' | 'createdAt';
@@ -56,7 +57,7 @@ export class CategoriesService {
       where: { id, parentId: IsNull() },
     });
     if (!department) {
-      throw new NotFoundException(`Department with id "${id}" not found`);
+      throw new NotFoundException(MENSAJES.departamentoNoEncontrado);
     }
     return department;
   }
@@ -130,9 +131,7 @@ export class CategoriesService {
     });
 
     if (childrenCount > 0) {
-      throw new ConflictException(
-        `Cannot delete department "${id}" because it has active categories`,
-      );
+      throw new ConflictException(MENSAJES.departamentoConCategorias);
     }
 
     await this.categoryRepository.softDelete(id);
@@ -161,7 +160,7 @@ export class CategoriesService {
       where: { id },
     });
     if (!category) {
-      throw new NotFoundException(`Category with id "${id}" not found`);
+      throw new NotFoundException(MENSAJES.categoriaNoEncontrada);
     }
     return category;
   }
@@ -233,18 +232,14 @@ export class CategoriesService {
     const category = await this.getCategory(id);
 
     if (category.parentId === null) {
-      throw new BadRequestException(
-        `Use the departments endpoint to delete department "${id}"`,
-      );
+      throw new BadRequestException(MENSAJES.esUnDepartamento);
     }
 
     const productsCount = await this.productRepository.count({
       where: { categoryId: id },
     });
     if (productsCount > 0) {
-      throw new ConflictException(
-        `Cannot delete category "${id}" because it has active products`,
-      );
+      throw new ConflictException(MENSAJES.categoriaConProductos);
     }
 
     await this.categoryRepository.softDelete(id);
@@ -412,7 +407,7 @@ export class CategoriesService {
       where: { id, parentId: IsNull(), isActive: true },
     });
     if (!department) {
-      throw new NotFoundException(`Department with id "${id}" not found`);
+      throw new NotFoundException(MENSAJES.departamentoNoEncontrado);
     }
     return department;
   }
@@ -478,7 +473,7 @@ export class CategoriesService {
       where: { id, parentId: Not(IsNull()), isActive: true },
     });
     if (!category) {
-      throw new NotFoundException(`Category with id "${id}" not found`);
+      throw new NotFoundException(MENSAJES.categoriaNoEncontrada);
     }
     return category;
   }
@@ -545,13 +540,11 @@ export class CategoriesService {
     });
 
     if (!category) {
-      throw new NotFoundException(`Category with id "${id}" not found`);
+      throw new NotFoundException(MENSAJES.categoriaNoEncontrada);
     }
 
     if (category.parentId === null) {
-      throw new BadRequestException(
-        `Category "${id}" is a department. Products must be assigned to a child category.`,
-      );
+      throw new BadRequestException(MENSAJES.productoEnDepartamento);
     }
 
     return category;
