@@ -8,6 +8,8 @@ import {
   Logger,
   NotFoundException,
 } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
+import { StorefrontConfig } from '../config/configuration';
 import { InjectRepository } from '@nestjs/typeorm';
 import {
   DataSource,
@@ -241,7 +243,17 @@ export class OrdersService {
     private readonly orderEvents: OrderEventsService,
     private readonly orderMailer: OrderMailerService,
     private readonly dataSource: DataSource,
+    private readonly configService: ConfigService,
   ) {}
+
+  /**
+   * La dirección pública de la tienda, para montar el enlace de seguimiento que
+   * el panel copia. Si no está configurada, el pedido viaja sin enlace y el
+   * botón de copiar no aparece.
+   */
+  private urlDeLaTienda(): string | null {
+    return this.configService.get<StorefrontConfig>('storefront')?.url ?? null;
+  }
 
   // List rows carry the method name and the transfer flag (not the whole
   // attempt/detail): two batched queries for the page, never one per row.
@@ -254,7 +266,7 @@ export class OrdersService {
       this.needsTransferIds(orderIds),
     ]);
     return orders.map((order) => {
-      const dto = OrderResponseDto.fromEntity(order);
+      const dto = OrderResponseDto.fromEntity(order, this.urlDeLaTienda());
       dto.paymentMethod = methods.get(order.id);
       dto.needsTransfer = transferIds.has(order.id);
       return dto;
@@ -879,7 +891,7 @@ export class OrdersService {
     if (!order || order.deletedAt) {
       throw new NotFoundException(`Order with id "${id}" not found`);
     }
-    const dto = OrderResponseDto.fromEntity(order);
+    const dto = OrderResponseDto.fromEntity(order, this.urlDeLaTienda());
     dto.payment = await this.paymentsService.latestChargeDto(order.id);
     dto.paymentMethod = (
       await this.paymentsService.latestMethodsFor([order.id])
@@ -1174,7 +1186,7 @@ export class OrdersService {
     if (!order || order.deletedAt) {
       throw new NotFoundException(`Order with id "${id}" not found`);
     }
-    const dto = OrderResponseDto.fromEntity(order);
+    const dto = OrderResponseDto.fromEntity(order, this.urlDeLaTienda());
     dto.payment = await this.paymentsService.latestChargeDto(order.id);
     dto.paymentMethod = (
       await this.paymentsService.latestMethodsFor([order.id])
