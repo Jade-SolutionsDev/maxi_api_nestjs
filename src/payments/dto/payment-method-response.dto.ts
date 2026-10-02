@@ -53,12 +53,13 @@ export class StorefrontPaymentMethodDto {
    * an `expiresAt` from — and hardcoding it in the storefront would drift the
    * day someone changes ORDER_EXPIRY_GATEWAY_MINUTES.
    */
-  holdMinutes: number;
+  /** `null` means this method keeps the order pending without an expiry. */
+  holdMinutes: number | null;
 
   static fromEntity(
     method: PaymentMethod,
     kind: PaymentActionKind,
-    holdMinutes: number,
+    holdMinutes: number | null,
   ): StorefrontPaymentMethodDto {
     const dto = new StorefrontPaymentMethodDto();
     dto.code = method.code;

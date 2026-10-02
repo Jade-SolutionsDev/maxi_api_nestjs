@@ -27,6 +27,9 @@ import {
  * Quien llama pasa solo el id: así ningún sitio tiene que acordarse de cargar
  * la relación del cliente antes de avisar.
  */
+/** De dónde nace el pedido. Decide qué aviso sale y bajo qué clave. */
+export type CanalDelPedido = 'tienda' | 'back-office';
+
 @Injectable()
 export class OrderMailerService {
   private readonly logger = new Logger(OrderMailerService.name);
@@ -50,10 +53,29 @@ export class OrderMailerService {
    * y «ya está pagado»— y este lleva el número del pedido, que es lo que le
    * piden si escribe. Quien no pague en el acto es justo quien más lo necesita.
    */
-  async orderReceived(orderId: string): Promise<SendResult | null> {
-    return this.dispatch(orderId, 'order_received', (data) =>
-      orderReceived(data),
-    );
+  /**
+   * «Tenemos tu pedido», antes de pagar.
+   *
+   * El canal entra en la clave del registro porque son dos correos con el
+   * mismo texto y distinta importancia. En la tienda, el 92% de los pedidos
+   * nacen y caducan sin pagarse (3.173 de 3.441 en el mes previo al
+   * 26-sep-2026), así que ese aviso va sobre todo a quien abandonó un
+   * carrito: en producción está apagado por volumen, ver MxH-0121.
+   *
+   * Un pedido que da de alta un empleado por teléfono es lo contrario. Esa
+   * persona no ha pasado por la web: no tiene el número del pedido, ni sabe
+   * cuánto pagar ni dónde. El correo es su única constancia, y por eso su
+   * clave —`order_received_back_office`— se apaga aparte y hoy no lo está.
+   * Son un puñado al día frente a los 115 de la tienda, así que no mueven el
+   * cupo del plan.
+   */
+  async orderReceived(
+    orderId: string,
+    canal: CanalDelPedido = 'tienda',
+  ): Promise<SendResult | null> {
+    const clave =
+      canal === 'back-office' ? 'order_received_back_office' : 'order_received';
+    return this.dispatch(orderId, clave, (data) => orderReceived(data));
   }
 
   async paymentReceived(orderId: string): Promise<SendResult | null> {

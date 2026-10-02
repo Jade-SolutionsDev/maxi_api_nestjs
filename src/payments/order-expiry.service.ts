@@ -15,6 +15,7 @@ import {
   PaymentStatus,
 } from '../orders/entities/order.entity';
 import { ChargeStatus, PaymentCharge } from './entities/payment-charge.entity';
+import { isCashPaymentInstructions } from './entities/payment-method.entity';
 import { PaymentMethodsService } from './payment-methods.service';
 import { PaymentsService } from './payments.service';
 
@@ -108,6 +109,13 @@ export class OrderExpiryService {
     charge: PaymentCharge | undefined,
     now: number,
   ): boolean {
+    // Cash is paid later at the shop and has no deadline. Read the immutable
+    // attempt snapshot: the catalog method may be renamed, edited or deleted
+    // after checkout, but that must not change this order's agreement.
+    if (isCashPaymentInstructions(charge?.actionPayload?.instructions)) {
+      return false;
+    }
+
     // Money already in flight at the gateway: cancelling underneath it is
     // exactly the race that leaves us paid with the stock sold to someone else.
     if (charge?.status === ChargeStatus.PROCESSING) return false;

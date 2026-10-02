@@ -29,6 +29,7 @@ import { Roles } from '../common/decorators/roles.decorator';
 import { RequirePermission } from '../permissions/decorators/require-permission.decorator';
 import { Role } from '../users/entities/user.entity';
 import { AdminOrdersQueryDto } from './dto/admin-orders-query.dto';
+import { type Periodo, ReportPdfQueryDto } from './dto/report-pdf-query.dto';
 import { CreateOrderForClientDto } from './dto/create-order-for-client.dto';
 import { SendReportDto } from './dto/send-report.dto';
 import { OrderEventResponseDto } from '../order-events/dto/order-event-response.dto';
@@ -42,10 +43,7 @@ import { UpdateOrderItemsDto } from './dto/update-order-items.dto';
 import { UpdateOrderStatusDto } from './dto/update-order-status.dto';
 import { UpdatePaymentStatusDto } from './dto/update-payment-status.dto';
 import { OrderPdfService } from './order-pdf.service';
-import {
-  OrdersReportPdfService,
-  type Periodo,
-} from './orders-report-pdf.service';
+import { OrdersReportPdfService } from './orders-report-pdf.service';
 import { ReportMailerService } from './report-mailer.service';
 import { ReportRecipientsService } from './report-recipients.service';
 import { OrdersService } from './orders.service';
@@ -283,21 +281,22 @@ export class OrdersController {
       'paginar: trae todos los que casen, no la página que se esté mirando.',
   })
   async reportePdf(
-    @Query() query: AdminOrdersQueryDto,
-    @Query('groupBy') groupBy: Periodo | undefined,
+    @Query() query: ReportPdfQueryDto,
     @Res({ passthrough: true }) res: Response,
   ): Promise<StreamableFile> {
     // El resumen es opcional: sin `groupBy` sale el listado y los totales, que
     // es lo que se pedía antes de que Jade viera la referencia con tendencia.
-    const periodo: Periodo | null =
-      groupBy === 'day' || groupBy === 'week' || groupBy === 'month'
-        ? groupBy
-        : null;
+    // El valor lo valida el DTO; leerlo aparte con @Query('groupBy') era lo que
+    // hacía saltar la lista blanca del validador y devolver un 400.
+    //
+    // Se separa de los filtros: al servicio le llega lo que filtra y nada más.
+    const { groupBy, ...filtros } = query;
+    const periodo: Periodo | null = groupBy ?? null;
     const [{ pedidos, recortado }, totales, filasResumen] = await Promise.all([
-      this.ordersService.findAllForReport(query),
-      this.ordersService.totalesForReport(query),
+      this.ordersService.findAllForReport(filtros),
+      this.ordersService.totalesForReport(filtros),
       periodo
-        ? this.ordersService.resumenPorPeriodo(query, periodo)
+        ? this.ordersService.resumenPorPeriodo(filtros, periodo)
         : Promise.resolve([]),
     ]);
     const pdf = await this.ordersReportPdfService.generate(

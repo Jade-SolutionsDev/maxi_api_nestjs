@@ -2,6 +2,7 @@ import { ConflictException, NotFoundException } from '@nestjs/common';
 import { Test, TestingModule } from '@nestjs/testing';
 import { getRepositoryToken } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
+import { ClientInvitationsService } from './client-invitations.service';
 import { ClientsService } from './clients.service';
 import { CreateClientDto } from './dto/create-client.dto';
 import { UpdateClientDto } from './dto/update-client.dto';
@@ -10,6 +11,7 @@ import { Client } from './entities/client.entity';
 describe('ClientsService', () => {
   let service: ClientsService;
   let repository: jest.Mocked<Repository<Client>>;
+  let invitaciones: { listarPendientes: jest.Mock };
 
   const client: Client = {
     id: '550e8400-e29b-41d4-a716-446655440000',
@@ -43,6 +45,7 @@ describe('ClientsService', () => {
   };
 
   beforeEach(async () => {
+    invitaciones = { listarPendientes: jest.fn(() => Promise.resolve([])) };
     qb = {
       andWhere: jest.fn(() => qb),
       orderBy: jest.fn(() => qb),
@@ -55,6 +58,10 @@ describe('ClientsService', () => {
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         ClientsService,
+        {
+          provide: ClientInvitationsService,
+          useValue: invitaciones,
+        },
         {
           provide: getRepositoryToken(Client),
           useValue: {
@@ -259,6 +266,87 @@ describe('ClientsService', () => {
       });
       await service.remove(client.id);
       expect(repository.softDelete).toHaveBeenCalledWith(client.id);
+    });
+  });
+
+  describe('invitaciones pendientes en el listado', () => {
+    /** Una invitación vestida de cliente: sin cuenta en Clerk todavía. */
+    const pendiente = {
+      ...client,
+      id: 'inv_1',
+      clerkId: null as unknown as string,
+      email: 'dayana@ejemplo.com',
+      firstName: 'Dayana',
+      lastName: 'Pérez',
+      isActive: false,
+    } as Client;
+
+    it('no las pide si no se las piden', async () => {
+      await service.findAll({});
+
+      expect(invitaciones.listarPendientes).not.toHaveBeenCalled();
+    });
+
+    it('las antepone al listado y las cuenta en el total', async () => {
+      invitaciones.listarPendientes.mockResolvedValue([pendiente]);
+
+      const r = await service.findAll({ includeInvitations: true });
+
+      expect(r.data[0].id).toBe('inv_1');
+      expect(r.data).toHaveLength(2);
+      expect(r.meta.total).toBe(2);
+    });
+
+    it('solo salen en la primera página', async () => {
+      invitaciones.listarPendientes.mockResolvedValue([pendiente]);
+
+      const r = await service.findAll(
+        { includeInvitations: true },
+        { page: 2 },
+      );
+
+      // Siguen contando en el total —si no, la paginación mentiría— pero no se
+      // repiten en cada página.
+      expect(r.data.map((c) => c.id)).not.toContain('inv_1');
+      expect(r.meta.total).toBe(2);
+    });
+
+    it('el buscador también filtra las invitaciones', async () => {
+      invitaciones.listarPendientes.mockResolvedValue([pendiente]);
+
+      const r = await service.findAll({
+        includeInvitations: true,
+        q: 'dayana',
+      });
+      expect(r.data.map((c) => c.id)).toContain('inv_1');
+
+      const otra = await service.findAll({
+        includeInvitations: true,
+        q: 'ramon',
+      });
+      expect(otra.data.map((c) => c.id)).not.toContain('inv_1');
+    });
+
+    it('busca sin tildes, como el SQL del listado', async () => {
+      invitaciones.listarPendientes.mockResolvedValue([pendiente]);
+
+      const r = await service.findAll({ includeInvitations: true, q: 'perez' });
+
+      expect(r.data.map((c) => c.id)).toContain('inv_1');
+    });
+
+    it('filtrar por activo o inactivo las deja fuera', async () => {
+      invitaciones.listarPendientes.mockResolvedValue([pendiente]);
+
+      // Son facetas excluyentes: quien pide «inactivos» quiere clientes
+      // desactivados, no gente que todavía no tiene cuenta.
+      const r = await service.findAll({
+        includeInvitations: true,
+        isActive: false,
+      });
+
+      expect(invitaciones.listarPendientes).not.toHaveBeenCalled();
+      expect(r.data.map((c) => c.id)).not.toContain('inv_1');
     });
   });
 });

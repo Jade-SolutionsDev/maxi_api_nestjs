@@ -10,7 +10,9 @@ import {
   Post,
 } from '@nestjs/common';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
+import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { RequirePermission } from '../permissions/decorators/require-permission.decorator';
+import { User } from '../users/entities/user.entity';
 import { CmsService } from './cms.service';
 import {
   CmsBannerResponseDto,
@@ -41,9 +43,12 @@ export class CmsBannersController {
 
   @Post()
   @RequirePermission({ module: 'cms-banners', action: 'create' })
-  async create(@Body() dto: CreateCmsBannerDto): Promise<CmsBannerResponseDto> {
+  async create(
+    @Body() dto: CreateCmsBannerDto,
+    @CurrentUser() actor: User,
+  ): Promise<CmsBannerResponseDto> {
     return CmsBannerResponseDto.fromView(
-      await this.cmsService.createBanner(dto),
+      await this.cmsService.createBanner(dto, actor),
     );
   }
 
@@ -52,16 +57,20 @@ export class CmsBannersController {
   async update(
     @Param('id', ParseUUIDPipe) id: string,
     @Body() dto: UpdateCmsBannerDto,
+    @CurrentUser() actor: User,
   ): Promise<CmsBannerResponseDto> {
     return CmsBannerResponseDto.fromView(
-      await this.cmsService.updateBanner(id, dto),
+      await this.cmsService.updateBanner(id, dto, actor),
     );
   }
 
   @Delete(':id')
   @RequirePermission({ module: 'cms-banners', action: 'delete' })
   @HttpCode(204)
-  async remove(@Param('id', ParseUUIDPipe) id: string): Promise<void> {
-    await this.cmsService.removeBanner(id);
+  async remove(
+    @Param('id', ParseUUIDPipe) id: string,
+    @CurrentUser() actor: User,
+  ): Promise<void> {
+    await this.cmsService.removeBanner(id, actor);
   }
 }

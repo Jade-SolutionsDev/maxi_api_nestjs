@@ -120,6 +120,72 @@ export class ClientInvitationsService {
     };
   }
 
+  /**
+   * Las invitaciones pendientes, como filas de cliente sin cuenta.
+   *
+   * La verdad vive en Clerk y no en nuestra base: no hay tabla de invitaciones
+   * de clientes que mantener en sincronía, ni estado que se quede viejo si
+   * alguien acepta desde el correo. El precio es una llamada a Clerk, y por eso
+   * el listado solo la pide cuando se le pasa `includeInvitations`.
+   */
+  async listarPendientes(): Promise<Client[]> {
+    try {
+      const { data } =
+        await this.storefrontClerk().invitations.getInvitationList({
+          status: 'pending',
+        });
+      return data.map((invitacion) => this.comoCliente(invitacion));
+    } catch (err) {
+      // El listado de clientes no puede caerse porque Clerk no conteste: se
+      // enseñan los clientes de siempre y se pierden solo las invitaciones.
+      this.logger.warn(
+        `No se pudieron leer las invitaciones pendientes: ${String(err)}`,
+      );
+      return [];
+    }
+  }
+
+  /**
+   * Retira una invitación. A diferencia del listado, aquí el fallo sí sube:
+   * quien pulsa «revocar» tiene que enterarse de que el enlace sigue vivo.
+   */
+  async revocar(invitationId: string): Promise<void> {
+    await this.storefrontClerk().invitations.revokeInvitation(invitationId);
+  }
+
+  /**
+   * Una invitación vestida de cliente, para que entre en el mismo listado.
+   *
+   * `clerkId` va en null porque todavía no hay cuenta en Clerk: es justo lo que
+   * distingue estas filas de un cliente de verdad, igual que en el listado de
+   * usuarios. La columna es NOT NULL, pero esta fila no se guarda nunca.
+   */
+  private comoCliente(invitacion: {
+    id: string;
+    emailAddress: string;
+    createdAt?: number;
+    publicMetadata?: unknown;
+  }): Client {
+    const metadatos = (invitacion.publicMetadata ?? {}) as {
+      firstName?: string | null;
+      lastName?: string | null;
+    };
+    const fila = new Client();
+    fila.id = invitacion.id;
+    fila.clerkId = null as unknown as string;
+    fila.email = invitacion.emailAddress.toLowerCase();
+    fila.firstName = metadatos.firstName ?? null;
+    fila.lastName = metadatos.lastName ?? null;
+    fila.phone = null;
+    fila.avatarUrl = null;
+    fila.defaultMunicipalityId = null;
+    fila.isActive = false;
+    fila.onboardingCompleted = false;
+    fila.createdAt = new Date(invitacion.createdAt ?? Date.now());
+    fila.updatedAt = fila.createdAt;
+    return fila;
+  }
+
   private async revocarPendientes(
     clerk: ReturnType<typeof createClerkClient>,
     email: string,

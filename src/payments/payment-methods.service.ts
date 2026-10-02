@@ -20,6 +20,7 @@ import {
 } from './dto/create-payment-method.dto';
 import { UpdatePaymentMethodDto } from './dto/update-payment-method.dto';
 import {
+  isCashPaymentInstructions,
   PaymentInstructions,
   PaymentMethod,
 } from './entities/payment-method.entity';
@@ -33,6 +34,7 @@ import { PaymentsConfig } from '../config/configuration';
 
 /** Icono por defecto según el tipo de instrucción. */
 const ICON_BY_TYPE: Record<string, string> = {
+  cash: 'HandCoins',
   bank: 'Landmark',
   qr: 'QrCode',
   link: 'Link',
@@ -110,7 +112,11 @@ export class PaymentMethodsService implements OnModuleInit {
    * meaning on purpose: two places deciding this would drift, and the customer
    * would be told a deadline that is not the one that cancels the order.
    */
-  private holdMinutesFor(kind: PaymentActionKind): number {
+  private holdMinutesFor(
+    method: PaymentMethod,
+    kind: PaymentActionKind,
+  ): number | null {
+    if (isCashPaymentInstructions(method.instructions)) return null;
     const { expiry } = this.configService.get<PaymentsConfig>('payments')!;
     return kind === 'manual' ? expiry.manualHours * 60 : expiry.gatewayMinutes;
   }
@@ -298,7 +304,7 @@ export class PaymentMethodsService implements OnModuleInit {
       return StorefrontPaymentMethodDto.fromEntity(
         method,
         kind,
-        this.holdMinutesFor(kind),
+        this.holdMinutesFor(method, kind),
       );
     });
   }
