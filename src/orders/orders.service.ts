@@ -38,6 +38,7 @@ import {
   AdminOrdersQueryDto,
   SIN_METODO_DE_PAGO,
 } from './dto/admin-orders-query.dto';
+import { PERIODOS, type Periodo } from './dto/report-pdf-query.dto';
 import { CheckoutDto } from './dto/checkout.dto';
 import { CorrectOrderDto } from './dto/correct-order.dto';
 import { CreateOrderForClientDto } from './dto/create-order-for-client.dto';
@@ -1138,8 +1139,14 @@ export class OrdersService {
    */
   async resumenPorPeriodo(
     query: AdminOrdersQueryDto,
-    periodo: 'day' | 'week' | 'month',
+    periodo: Periodo,
   ): Promise<{ periodo: string; pedidos: number; importe: string }[]> {
+    // El periodo se interpola en el SQL, así que se comprueba aquí también y no
+    // solo en el DTO: si mañana alguien llama a este método desde otro sitio, el
+    // `date_trunc` no puede quedar a merced de lo que le pasen.
+    if (!PERIODOS.includes(periodo)) {
+      throw new BadRequestException(`Periodo no válido: ${String(periodo)}`);
+    }
     const qb = this.orderRepository
       .createQueryBuilder('order')
       .leftJoin('order.client', 'client');

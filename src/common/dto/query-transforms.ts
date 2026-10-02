@@ -36,3 +36,14 @@ export const toOptionalList = ({ value }: TransformFnParams): unknown => {
 /** Lower-case a `?sortOrder=ASC` value so `@IsIn(['asc','desc'])` is case-tolerant. */
 export const toSortOrder = ({ value }: TransformFnParams): unknown =>
   typeof value === 'string' ? value.toLowerCase() : value;
+
+/**
+ * Una cadena vacía es «sin filtro», no un valor a validar.
+ *
+ * `@IsOptional()` solo perdona lo ausente: un formulario que manda `from: ''`
+ * —porque el campo se dejó en blanco— hacía que `@IsDateString` rechazara el
+ * cuerpo entero y la petición muriera con un 400 que nadie veía. Le pasó al
+ * envío del reporte por correo el 25-sep-2026.
+ */
+export const vacioEsNada = ({ value }: TransformFnParams): unknown =>
+  typeof value === 'string' && value.trim() === '' ? undefined : value;
