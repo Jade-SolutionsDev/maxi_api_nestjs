@@ -259,7 +259,8 @@ export class UsersService {
     return this.usersRepository.findOne({ where: { clerkId } });
   }
 
-  async create(createUserDto: CreateUserDto): Promise<User> {
+  async create(createUserDto: CreateUserDto, actor?: User): Promise<User> {
+    this.assertPuedeAsignarRol(actor, createUserDto.role);
     if (createUserDto.clerkId) {
       await this.guardDuplicateClerkId(createUserDto.clerkId);
     }
@@ -278,12 +279,53 @@ export class UsersService {
     return this.usersRepository.save(user);
   }
 
+  /**
+   * Sólo un superadministrador reparte el rol de superadministrador.
+   *
+   * Sin esto, cualquier ADMIN podía fabricarse uno: crear un usuario con
+   * `role: SUPER_ADMIN`, o ascender a otro, y entrar con esa cuenta. Y
+   * SUPER_ADMIN es lo que separa de corregir pedidos en cualquier dirección,
+   * editar sus líneas y borrar intentos de cobro, que es el dinero.
+   *
+   * OJO al montar un entorno nuevo: esta regla exige un actor que YA sea
+   * superadministrador, así que en una base sin ninguno **no hay forma de
+   * crear el primero por la API**, y es a propósito. El primero se siembra
+   * fuera: `pnpm seed:superadmin` (`scripts/seed-superadmin.ts`). Lo mismo
+   * vale si una instalación se quedara sin ninguno.
+   */
+  private assertPuedeAsignarRol(actor: User | undefined, rol?: Role): void {
+    if (rol !== Role.SUPER_ADMIN) return;
+    if (actor?.role === Role.SUPER_ADMIN) return;
+    throw new ForbiddenException(
+      'Only a super admin can grant the super admin role',
+    );
+  }
+
+  /**
+   * Una cuenta de superadministrador sólo la toca otro superadministrador.
+   *
+   * Vale para la contraseña, el rol y la baja: imponer contraseña a un
+   * superadministrador era quedarse con su cuenta sin saber la suya, y encima
+   * `signOutOfOtherSessions` echaba al titular.
+   */
+  private assertPuedeGestionar(actor: User | undefined, objetivo: User): void {
+    if (objetivo.role !== Role.SUPER_ADMIN) return;
+    if (actor?.role === Role.SUPER_ADMIN) return;
+    throw new ForbiddenException(
+      'Only a super admin can manage a super admin account',
+    );
+  }
+
   async update(
     id: string,
     updateUserDto: UpdateUserDto,
     actor?: User,
   ): Promise<User> {
     const user = await this.findOne(id);
+
+    // Quién puede tocar esta cuenta, y a qué rol puede subirla.
+    this.assertPuedeGestionar(actor, user);
+    this.assertPuedeAsignarRol(actor, updateUserDto.role);
 
     const isSelf = actor?.id === id;
     if (isSelf) {
@@ -345,6 +387,7 @@ export class UsersService {
     }
 
     const user = await this.findOne(id);
+    this.assertPuedeGestionar(actor, user);
     if (!user.clerkId) {
       throw new BadRequestException(
         'User has no Clerk account yet (pending invitation)',
@@ -372,6 +415,7 @@ export class UsersService {
     if (actor?.id === id) {
       throw new ForbiddenException('Cannot delete your own account');
     }
+    this.assertPuedeGestionar(actor, user);
     if (user.role === Role.SUPER_ADMIN) {
       await this.assertNotLastSuperAdmin();
     }
