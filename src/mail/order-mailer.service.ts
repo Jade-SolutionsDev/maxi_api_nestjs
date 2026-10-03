@@ -1,3 +1,4 @@
+import { enlaceDeSeguimiento } from '../orders/enlace-de-seguimiento';
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { InjectRepository } from '@nestjs/typeorm';
@@ -235,6 +236,10 @@ export class OrderMailerService {
       // términos no salía en ningún correo aunque el layout supiera armarlo.
       storeUrl: tienda ?? null,
       orderUrl: tienda ? `${tienda}/pedidos/${order.id}` : null,
+      // El público, que es el que llevan los correos informativos. Se arma con
+      // el mismo helper que usa el panel para copiarlo, para que no haya dos
+      // formas de escribir la misma dirección.
+      trackingUrl: enlaceDeSeguimiento(tienda, order.trackingId ?? null),
       recipient: this.quienRecibe(order),
     };
   }

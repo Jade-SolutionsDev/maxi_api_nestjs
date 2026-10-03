@@ -49,8 +49,15 @@ export interface OrderMailData {
   pickupAddress: string | null;
   whatsapp: string;
   storeUrl: string | null;
-  /** La ficha del pedido en la tienda, para pagarlo y seguirlo. */
+  /** La ficha del pedido en la tienda, para pagarlo. Exige iniciar sesión. */
   orderUrl: string | null;
+  /**
+   * El seguimiento público del pedido. Es el que va en los correos
+   * informativos: se abre sin contraseña, que es lo que hace que el cliente
+   * llegue de verdad, y no enseña ni correo, ni teléfono, ni dirección, ni
+   * importes, ni productos — solo el estado y su historial.
+   */
+  trackingUrl: string | null;
   /**
    * Quién recibe el pedido, si se registró. En una recogida es con quien el
    * mostrador contrasta el carnet, así que el correo tiene que decirlo: quien
@@ -273,11 +280,32 @@ const destacado = (rotulo: string, valor: string, nota: string): string =>
 const p = (text: string): string =>
   `<p style="margin:0 0 14px;font-size:15px;line-height:1.6;">${text}</p>`;
 
+/**
+ * Un párrafo que solo se ve en el correo HTML.
+ *
+ * Lo quita `strip()` al armar la versión de texto, donde no hay botones que
+ * pulsar ni direcciones que copiar a mano: ahí el enlace ya sale escrito.
+ */
+const soloHtml = (text: string): string =>
+  `<p data-solo-html style="margin:0 0 14px;font-size:15px;line-height:1.6;">${text}</p>`;
+
 const box = (text: string): string =>
   `<div style="margin:0 0 16px;padding:14px 16px;background:#fef3c7;border-radius:8px;font-size:15px;line-height:1.6;">${text}</div>`;
 
 const strip = (html: string): string =>
   html
+    // Lo que solo tiene sentido viéndolo: el respaldo de «si el botón no te
+    // funciona» habla de un botón que en texto plano no existe, y repetiría la
+    // dirección que la línea de abajo ya deja escrita.
+    .replace(/<[^>]+data-solo-html[^>]*>[\s\S]*?<\/[a-z]+>/g, '')
+    // El enlace, antes de quitar etiquetas: si no, en la versión de texto
+    // quedaba «Pagar mi pedido» a secas y quien lee así no tenía cómo llegar.
+    // Se escribe como lo leería una persona: el texto y detrás la dirección.
+    .replace(
+      /<a\b[^>]*href="([^"]+)"[^>]*>([\s\S]*?)<\/a>/g,
+      (_todo, url: string, texto: string) =>
+        `${texto.replace(/<[^>]+>/g, '').trim()}: ${url}`,
+    )
     .replace(/<br\s*\/?>/g, '\n')
     .replace(/<\/p>|<\/div>/g, '\n\n')
     // Las tablas de `datos()` salían pegadas —«PedidoORD-20260199Se recoge
@@ -375,6 +403,9 @@ export const paymentReceived = (order: OrderMailData): RenderedEmail => {
     p(
       `Te avisaremos a los ${PICKUP_REMINDER_DAYS[0]} y a los ${PICKUP_REMINDER_DAYS[1]} días si todavía no lo has recogido.`,
     ),
+    ...(order.trackingUrl
+      ? [button(order.trackingUrl, 'Seguir mi pedido')]
+      : []),
   ].join('\n');
   const { html, text } = render({
     title: 'Tu pedido está listo para recoger',
@@ -410,6 +441,9 @@ export const pickupReminder = (
     p(
       `Si no puedes ir tú, puede recogerlo otra persona: solo necesita su carné y el número del pedido.`,
     ),
+    ...(order.trackingUrl
+      ? [button(order.trackingUrl, 'Seguir mi pedido')]
+      : []),
   ].join('\n');
   const { html, text } = render({
     title: `Tu pedido ${esc(order.orderNumber)} te espera`,
@@ -568,7 +602,7 @@ export const clientInvitation = (
       `Solo falta que elijas tu contraseña. El enlace es personal: no lo compartas.`,
     ),
     button(data.invitationUrl, 'Elegir mi contraseña'),
-    p(
+    soloHtml(
       `Si el botón no te funciona, copia esta dirección en tu navegador:<br><span style="word-break:break-all;color:#5d6c65;font-size:13px;">${esc(data.invitationUrl)}</span>`,
     ),
     box(
@@ -634,6 +668,9 @@ export const orderShipped = (order: OrderMailData): RenderedEmail => {
     p(
       `Quien lo reciba debe llevar su carné de identidad y el número del pedido.`,
     ),
+    ...(order.trackingUrl
+      ? [button(order.trackingUrl, 'Seguir mi pedido')]
+      : []),
   ].join('\n');
   return {
     subject: `Pedido ${order.orderNumber}: va en camino`,
@@ -657,6 +694,9 @@ export const orderDelivered = (order: OrderMailData): RenderedEmail => {
     p(
       `Si algo no está como esperabas, escríbenos y lo miramos: guardamos el registro de cada pedido.`,
     ),
+    ...(order.trackingUrl
+      ? [button(order.trackingUrl, 'Ver el historial del pedido')]
+      : []),
   ].join('\n');
   return {
     subject: `Pedido ${order.orderNumber}: entregado`,
@@ -709,6 +749,9 @@ export const orderCancelled = (
       ),
       p(`No se te cobró nada, y lo que tenías apartado volvió a la venta.`),
       p(`Si no fuiste tú quien lo canceló, escríbenos y lo revisamos.`),
+      ...(order.trackingUrl
+        ? [button(order.trackingUrl, 'Ver el historial del pedido')]
+        : []),
     ],
   }[motivo ?? 'ordinaria'].join('\n');
 
