@@ -97,8 +97,10 @@ describe('UsersController', () => {
       role: Role.ADMIN,
     };
     service.create.mockResolvedValue(user as unknown as never);
-    const result = await controller.create(createDto);
+    const result = await controller.create(createDto, user as unknown as User);
     expect(result.email).toBe(createDto.email);
+    // El actor viaja al servicio: es quien decide si puede repartir el rol.
+    expect(service.create).toHaveBeenCalledWith(createDto, user);
   });
 
   it('should update a user, forwarding the acting user', async () => {

@@ -69,9 +69,12 @@ export class UsersController {
   }
 
   @Post()
-  async create(@Body() createUserDto: CreateUserDto): Promise<UserResponseDto> {
+  async create(
+    @Body() createUserDto: CreateUserDto,
+    @CurrentUser() actor: User,
+  ): Promise<UserResponseDto> {
     return UserResponseDto.fromEntity(
-      await this.usersService.create(createUserDto),
+      await this.usersService.create(createUserDto, actor),
     );
   }
 
