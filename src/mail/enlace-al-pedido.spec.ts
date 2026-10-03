@@ -6,6 +6,7 @@ import {
   orderShipped,
   paymentReceived,
   pickupReminder,
+  clientInvitation,
 } from './templates';
 
 /**
@@ -73,5 +74,25 @@ describe('MxH-0050 · los correos llevan al pedido', () => {
     const { html } = orderReceived(base);
     expect(html).toContain(base.orderUrl);
     expect(html).toContain('Pagar mi pedido');
+  });
+});
+
+describe('la invitación no repite la dirección en texto plano', () => {
+  it('en HTML mantiene el respaldo copiable; en texto, no', () => {
+    const { html, text } = clientInvitation({
+      customerName: 'Merly',
+      invitationUrl: 'https://maxihabana.com/invitacion/TOKEN123',
+      storeUrl: 'https://maxihabana.com',
+      whatsapp: '+53 5251 9414',
+    });
+
+    // En HTML el respaldo tiene sentido: el botón arriba y la dirección
+    // copiable debajo, para quien no pueda pulsar.
+    expect(html).toContain('Si el botón no te funciona');
+
+    // En texto plano no hay botón que pulsar, así que la frase no significa
+    // nada y la dirección saldría dos veces seguidas.
+    expect(text).not.toContain('Si el botón no te funciona');
+    expect(text.match(/TOKEN123/g)).toHaveLength(1);
   });
 });

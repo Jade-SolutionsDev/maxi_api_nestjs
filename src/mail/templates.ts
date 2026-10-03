@@ -280,11 +280,24 @@ const destacado = (rotulo: string, valor: string, nota: string): string =>
 const p = (text: string): string =>
   `<p style="margin:0 0 14px;font-size:15px;line-height:1.6;">${text}</p>`;
 
+/**
+ * Un párrafo que solo se ve en el correo HTML.
+ *
+ * Lo quita `strip()` al armar la versión de texto, donde no hay botones que
+ * pulsar ni direcciones que copiar a mano: ahí el enlace ya sale escrito.
+ */
+const soloHtml = (text: string): string =>
+  `<p data-solo-html style="margin:0 0 14px;font-size:15px;line-height:1.6;">${text}</p>`;
+
 const box = (text: string): string =>
   `<div style="margin:0 0 16px;padding:14px 16px;background:#fef3c7;border-radius:8px;font-size:15px;line-height:1.6;">${text}</div>`;
 
 const strip = (html: string): string =>
   html
+    // Lo que solo tiene sentido viéndolo: el respaldo de «si el botón no te
+    // funciona» habla de un botón que en texto plano no existe, y repetiría la
+    // dirección que la línea de abajo ya deja escrita.
+    .replace(/<[^>]+data-solo-html[^>]*>[\s\S]*?<\/[a-z]+>/g, '')
     // El enlace, antes de quitar etiquetas: si no, en la versión de texto
     // quedaba «Pagar mi pedido» a secas y quien lee así no tenía cómo llegar.
     // Se escribe como lo leería una persona: el texto y detrás la dirección.
@@ -589,7 +602,7 @@ export const clientInvitation = (
       `Solo falta que elijas tu contraseña. El enlace es personal: no lo compartas.`,
     ),
     button(data.invitationUrl, 'Elegir mi contraseña'),
-    p(
+    soloHtml(
       `Si el botón no te funciona, copia esta dirección en tu navegador:<br><span style="word-break:break-all;color:#5d6c65;font-size:13px;">${esc(data.invitationUrl)}</span>`,
     ),
     box(
