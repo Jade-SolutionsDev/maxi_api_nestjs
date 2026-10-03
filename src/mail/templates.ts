@@ -49,8 +49,15 @@ export interface OrderMailData {
   pickupAddress: string | null;
   whatsapp: string;
   storeUrl: string | null;
-  /** La ficha del pedido en la tienda, para pagarlo y seguirlo. */
+  /** La ficha del pedido en la tienda, para pagarlo. Exige iniciar sesión. */
   orderUrl: string | null;
+  /**
+   * El seguimiento público del pedido. Es el que va en los correos
+   * informativos: se abre sin contraseña, que es lo que hace que el cliente
+   * llegue de verdad, y no enseña ni correo, ni teléfono, ni dirección, ni
+   * importes, ni productos — solo el estado y su historial.
+   */
+  trackingUrl: string | null;
   /**
    * Quién recibe el pedido, si se registró. En una recogida es con quien el
    * mostrador contrasta el carnet, así que el correo tiene que decirlo: quien
@@ -278,6 +285,14 @@ const box = (text: string): string =>
 
 const strip = (html: string): string =>
   html
+    // El enlace, antes de quitar etiquetas: si no, en la versión de texto
+    // quedaba «Pagar mi pedido» a secas y quien lee así no tenía cómo llegar.
+    // Se escribe como lo leería una persona: el texto y detrás la dirección.
+    .replace(
+      /<a\b[^>]*href="([^"]+)"[^>]*>([\s\S]*?)<\/a>/g,
+      (_todo, url: string, texto: string) =>
+        `${texto.replace(/<[^>]+>/g, '').trim()}: ${url}`,
+    )
     .replace(/<br\s*\/?>/g, '\n')
     .replace(/<\/p>|<\/div>/g, '\n\n')
     // Las tablas de `datos()` salían pegadas —«PedidoORD-20260199Se recoge
@@ -375,6 +390,9 @@ export const paymentReceived = (order: OrderMailData): RenderedEmail => {
     p(
       `Te avisaremos a los ${PICKUP_REMINDER_DAYS[0]} y a los ${PICKUP_REMINDER_DAYS[1]} días si todavía no lo has recogido.`,
     ),
+    ...(order.trackingUrl
+      ? [button(order.trackingUrl, 'Seguir mi pedido')]
+      : []),
   ].join('\n');
   const { html, text } = render({
     title: 'Tu pedido está listo para recoger',
@@ -410,6 +428,9 @@ export const pickupReminder = (
     p(
       `Si no puedes ir tú, puede recogerlo otra persona: solo necesita su carné y el número del pedido.`,
     ),
+    ...(order.trackingUrl
+      ? [button(order.trackingUrl, 'Seguir mi pedido')]
+      : []),
   ].join('\n');
   const { html, text } = render({
     title: `Tu pedido ${esc(order.orderNumber)} te espera`,
@@ -634,6 +655,9 @@ export const orderShipped = (order: OrderMailData): RenderedEmail => {
     p(
       `Quien lo reciba debe llevar su carné de identidad y el número del pedido.`,
     ),
+    ...(order.trackingUrl
+      ? [button(order.trackingUrl, 'Seguir mi pedido')]
+      : []),
   ].join('\n');
   return {
     subject: `Pedido ${order.orderNumber}: va en camino`,
@@ -657,6 +681,9 @@ export const orderDelivered = (order: OrderMailData): RenderedEmail => {
     p(
       `Si algo no está como esperabas, escríbenos y lo miramos: guardamos el registro de cada pedido.`,
     ),
+    ...(order.trackingUrl
+      ? [button(order.trackingUrl, 'Ver el historial del pedido')]
+      : []),
   ].join('\n');
   return {
     subject: `Pedido ${order.orderNumber}: entregado`,
@@ -709,6 +736,9 @@ export const orderCancelled = (
       ),
       p(`No se te cobró nada, y lo que tenías apartado volvió a la venta.`),
       p(`Si no fuiste tú quien lo canceló, escríbenos y lo revisamos.`),
+      ...(order.trackingUrl
+        ? [button(order.trackingUrl, 'Ver el historial del pedido')]
+        : []),
     ],
   }[motivo ?? 'ordinaria'].join('\n');
 
