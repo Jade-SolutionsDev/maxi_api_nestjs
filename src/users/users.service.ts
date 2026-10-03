@@ -286,6 +286,12 @@ export class UsersService {
    * `role: SUPER_ADMIN`, o ascender a otro, y entrar con esa cuenta. Y
    * SUPER_ADMIN es lo que separa de corregir pedidos en cualquier dirección,
    * editar sus líneas y borrar intentos de cobro, que es el dinero.
+   *
+   * OJO al montar un entorno nuevo: esta regla exige un actor que YA sea
+   * superadministrador, así que en una base sin ninguno **no hay forma de
+   * crear el primero por la API**, y es a propósito. El primero se siembra
+   * fuera: `pnpm seed:superadmin` (`scripts/seed-superadmin.ts`). Lo mismo
+   * vale si una instalación se quedara sin ninguno.
    */
   private assertPuedeAsignarRol(actor: User | undefined, rol?: Role): void {
     if (rol !== Role.SUPER_ADMIN) return;

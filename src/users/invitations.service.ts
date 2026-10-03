@@ -55,7 +55,7 @@ export class InvitationsService {
     inviter: User,
   ): Promise<Invitation> {
     // Una invitación es una cuenta futura: vale la misma regla que crearla.
-    if (dto.role === Role.SUPER_ADMIN && inviter?.role !== Role.SUPER_ADMIN) {
+    if (dto.role === Role.SUPER_ADMIN && inviter.role !== Role.SUPER_ADMIN) {
       throw new ForbiddenException(
         'Only a super admin can invite a super admin',
       );
