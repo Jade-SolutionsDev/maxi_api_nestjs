@@ -1,3 +1,4 @@
+import { Order } from '../orders/entities/order.entity';
 import { BadRequestException, ConflictException } from '@nestjs/common';
 import { Test, TestingModule } from '@nestjs/testing';
 import { getRepositoryToken } from '@nestjs/typeorm';
@@ -29,6 +30,8 @@ type MockRepo = {
 };
 
 describe('InventoryService', () => {
+  // Solo traduce id de pedido -> número; cada prueba le dice qué devolver.
+  const orderRepo = { find: jest.fn().mockResolvedValue([]) };
   let service: InventoryService;
   let inventoryRepo: MockRepo;
   let operationRepo: MockRepo;
@@ -95,6 +98,11 @@ describe('InventoryService', () => {
           useValue: itemRepo,
         },
         { provide: getRepositoryToken(Product), useValue: productRepo },
+        {
+          // Solo se usa para traducir el id del pedido a su número.
+          provide: getRepositoryToken(Order),
+          useValue: orderRepo,
+        },
         { provide: StockLocationsService, useValue: stockLocations },
         { provide: DataSource, useValue: dataSource },
       ],
@@ -752,6 +760,59 @@ describe('InventoryService', () => {
       expect(op?.orderId).toBeNull(); // manual op, not order-driven
       const reserved = events.find((e) => e.type === 'reserved');
       expect(reserved?.orderId).toBe('ord-9');
+    });
+
+    // MxH-0083: el libro enseñaba el identificador interno recortado a ocho
+    // caracteres. Quien lo lee espera el número que ve en el pedido.
+    it('traduce el id del pedido al número que se ve en pantalla', async () => {
+      inventoryRepo.manager.query
+        .mockResolvedValueOnce([
+          {
+            type: 'OUT',
+            product_id: 'p-1',
+            product_name: 'Arroz',
+            quantity: 5,
+            location_id: 'loc-A',
+            location_name: 'A',
+            target_location_id: null,
+            target_location_name: null,
+            note: null,
+            order_id: 'ord-9',
+            created_by: 'u-1',
+            first_name: 'Ana',
+            last_name: 'Pérez',
+            created_at: new Date('2026-07-22T09:00:00Z'),
+          },
+        ])
+        .mockResolvedValueOnce([
+          {
+            product_id: 'p-1',
+            product_name: 'Arroz',
+            quantity: 2,
+            location_id: 'loc-A',
+            location_name: 'A',
+            order_id: 'ord-9',
+            created_at: new Date('2026-07-22T08:00:00Z'),
+          },
+        ]);
+      // El contador se comparte con las demás pruebas del fichero: se pone a
+      // cero aquí para que «una sola vez» signifique «en esta llamada».
+      orderRepo.find.mockClear();
+      orderRepo.find.mockResolvedValue([
+        { id: 'ord-9', orderNumber: 'ORD-20260199' },
+      ]);
+
+      const events = await service.history({ productId: 'p-1' });
+
+      // Tanto la salida como la reserva dicen de qué pedido vienen.
+      expect(events.find((e) => e.type === 'OUT')?.orderNumber).toBe(
+        'ORD-20260199',
+      );
+      expect(events.find((e) => e.type === 'reserved')?.orderNumber).toBe(
+        'ORD-20260199',
+      );
+      // Y se pide una sola vez, no una por línea.
+      expect(orderRepo.find).toHaveBeenCalledTimes(1);
     });
 
     it('maps order_id onto sale operations (order-driven OUT)', async () => {
