@@ -31,10 +31,7 @@ describe('UsersService · nadie se fabrica un superadministrador', () => {
   describe('lo que un ADMIN no puede', () => {
     it('crear un usuario con rol de superadministrador', async () => {
       await expect(
-        servicio(otroAdmin).create(
-          { role: Role.SUPER_ADMIN } as never,
-          ADMIN,
-        ),
+        servicio(otroAdmin).create({ role: Role.SUPER_ADMIN }, ADMIN),
       ).rejects.toBeInstanceOf(ForbiddenException);
     });
 
@@ -85,7 +82,7 @@ describe('UsersService · nadie se fabrica un superadministrador', () => {
 
     it('un ADMIN crea usuarios de rol normal', async () => {
       await expect(
-        servicio(otroAdmin).create({ role: Role.ADMIN } as never, ADMIN),
+        servicio(otroAdmin).create({ role: Role.ADMIN }, ADMIN),
       ).rejects.not.toBeInstanceOf(ForbiddenException);
     });
 

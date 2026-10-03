@@ -487,7 +487,11 @@ describe('UsersService', () => {
       repository.findOne.mockResolvedValue({ ...superAdmin });
       repository.count.mockResolvedValue(2);
       repository.save.mockImplementation((u) => Promise.resolve(u as User));
-      const result = await service.update('sa-1', { role: Role.ADMIN }, otroSuper);
+      const result = await service.update(
+        'sa-1',
+        { role: Role.ADMIN },
+        otroSuper,
+      );
       expect(result.role).toBe(Role.ADMIN);
     });
   });
