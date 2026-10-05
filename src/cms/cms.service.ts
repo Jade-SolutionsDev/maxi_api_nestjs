@@ -4,10 +4,9 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { In, Not, Repository } from 'typeorm';
+import { In, Repository } from 'typeorm';
 import { CategoriesService } from '../categories/categories.service';
 import { Category } from '../categories/entities/category.entity';
-import { slugify } from '../common/utils/catalog-ownership.utils';
 import { Product } from '../products/entities/product.entity';
 import { ProductsService } from '../products/products.service';
 import {
@@ -16,23 +15,26 @@ import {
 } from '../revalidation/revalidation.service';
 import { CreateCmsBannerDto, UpdateCmsBannerDto } from './dto/cms-banner.dto';
 import {
+  BannerTargetSource,
+  BannerView,
   CmsBannerResolvedTarget,
   CmsBannerTargetReference,
   CmsBannerTargetType,
   CmsBannerView,
 } from './cms-banner.types';
-import { CreateCmsPageDto, UpdateCmsPageDto } from './dto/cms-page.dto';
+import { CmsHomeChangesService } from './cms-home-changes.service';
+import { CmsHomeChangeAction } from './cms-home.types';
+import type { User } from '../users/entities/user.entity';
 import {
   CreateCmsServiceDto,
   UpdateCmsServiceDto,
 } from './dto/cms-service.dto';
-import { UpdateSiteSettingsDto } from './dto/cms-site-settings.dto';
+import { conRedes, UpdateSiteSettingsDto } from './dto/cms-site-settings.dto';
 import {
   CreateCmsStaffMemberDto,
   UpdateCmsStaffMemberDto,
 } from './dto/cms-staff-member.dto';
 import { CmsBanner } from './entities/cms-banner.entity';
-import { CmsPage } from './entities/cms-page.entity';
 import { CmsService as CmsServiceEntity } from './entities/cms-service.entity';
 import {
   CmsSiteSettings,
@@ -64,6 +66,18 @@ export const DEFAULT_SITE_SETTINGS: SiteSettingsData = {
     mastercard: true,
     mibilletera: false,
   },
+  // Los mismos enlaces que vivían en código, para que el día que esto se
+  // despliegue no cambie nada sin que nadie haya tocado el panel. El de
+  // Facebook es el canónico —el que se comparte desde la app redirige aquí— y
+  // el de Instagram va sin el `?stkn=`, que es un token de sesión de quien
+  // copió el enlace y no debe publicarse.
+  social: [
+    {
+      label: 'Facebook',
+      url: 'https://www.facebook.com/profile.php?id=61550740714835',
+    },
+    { label: 'Instagram', url: 'https://www.instagram.com/maxihabana' },
+  ],
   services: {
     heading: 'Nuestros servicios',
     subheading:
@@ -77,8 +91,6 @@ export const DEFAULT_SITE_SETTINGS: SiteSettingsData = {
 @Injectable()
 export class CmsService {
   constructor(
-    @InjectRepository(CmsPage)
-    private readonly pageRepository: Repository<CmsPage>,
     @InjectRepository(CmsBanner)
     private readonly bannerRepository: Repository<CmsBanner>,
     @InjectRepository(Category)
@@ -94,99 +106,24 @@ export class CmsService {
     @InjectRepository(CmsSiteSettings)
     private readonly settingsRepository: Repository<CmsSiteSettings>,
     private readonly revalidationService: RevalidationService,
+    private readonly homeChanges: CmsHomeChangesService,
   ) {}
 
-  // ---------------- Pages ----------------
-
-  async createPage(dto: CreateCmsPageDto): Promise<CmsPage> {
-    const slug = await this.ensureUniquePageSlug(dto.slug ?? dto.title);
-    const page = this.pageRepository.create({
-      slug,
-      title: dto.title,
-      content: dto.content,
-      sortOrder: dto.sortOrder ?? 0,
-      isActive: dto.isActive ?? true,
-    });
-    const saved = await this.pageRepository.save(page);
-    this.revalidationService.notify(CMS_REVALIDATE_TAGS);
-    return saved;
-  }
-
-  async listPagesAdmin(): Promise<CmsPage[]> {
-    return this.pageRepository.find({
-      order: { sortOrder: 'ASC', title: 'ASC' },
-    });
-  }
-
-  async getPage(id: string): Promise<CmsPage> {
-    const page = await this.pageRepository.findOne({ where: { id } });
-    if (!page) {
-      throw new NotFoundException(`Page with id "${id}" not found`);
-    }
-    return page;
-  }
-
-  async updatePage(id: string, dto: UpdateCmsPageDto): Promise<CmsPage> {
-    const page = await this.getPage(id);
-    if (dto.title !== undefined) {
-      page.title = dto.title;
-    }
-    if (dto.slug !== undefined) {
-      page.slug = await this.ensureUniquePageSlug(dto.slug, id);
-    }
-    if (dto.content !== undefined) {
-      page.content = dto.content;
-    }
-    if (dto.sortOrder !== undefined) {
-      page.sortOrder = dto.sortOrder;
-    }
-    if (dto.isActive !== undefined) {
-      page.isActive = dto.isActive;
-    }
-    const saved = await this.pageRepository.save(page);
-    this.revalidationService.notify(CMS_REVALIDATE_TAGS);
-    return saved;
-  }
-
-  /**
-   * Frees the slug before soft-deleting: slug uniqueness counts soft-deleted
-   * rows, and footer legal links reference pages BY SLUG — without this,
-   * recreating a deleted page ("terminos-y-condiciones") would land on a
-   * suffixed slug ("-2") and silently break every stored reference.
-   */
-  async removePage(id: string): Promise<void> {
-    const page = await this.getPage(id);
-    page.slug = `${page.slug}-eliminada-${Date.now()}`;
-    await this.pageRepository.save(page);
-    await this.pageRepository.softDelete(id);
-    this.revalidationService.notify(CMS_REVALIDATE_TAGS);
-  }
-
-  async listPagesPublic(): Promise<CmsPage[]> {
-    return this.pageRepository.find({
-      where: { isActive: true },
-      order: { sortOrder: 'ASC', title: 'ASC' },
-    });
-  }
-
-  async getPageBySlugPublic(slug: string): Promise<CmsPage> {
-    const page = await this.pageRepository.findOne({
-      where: { slug, isActive: true },
-    });
-    if (!page) {
-      throw new NotFoundException(`Page with slug "${slug}" not found`);
-    }
-    return page;
-  }
-
   // ---------------- Banners ----------------
+  // Banner rows are the home DRAFT: writes are logged but never ping the
+  // storefront, which serves the copy frozen by CmsHomeService.publish.
 
-  async createBanner(dto: CreateCmsBannerDto): Promise<CmsBannerView> {
+  async createBanner(
+    dto: CreateCmsBannerDto,
+    actor: User,
+  ): Promise<CmsBannerView> {
     if (dto.target) {
       await this.validateBannerTarget(dto.target);
     }
     const banner = this.bannerRepository.create({
       alt: dto.alt,
+      title: dto.title ?? null,
+      subtitle: dto.subtitle ?? null,
       desktop: dto.desktop,
       tablet: dto.tablet,
       mobile: dto.mobile,
@@ -196,7 +133,11 @@ export class CmsService {
       isActive: dto.isActive ?? true,
     });
     const saved = await this.bannerRepository.save(banner);
-    this.revalidationService.notify(CMS_REVALIDATE_TAGS);
+    await this.homeChanges.record(
+      CmsHomeChangeAction.BANNER_CREATED,
+      saved.alt,
+      actor,
+    );
     return (await this.resolveBannerTargets([saved]))[0];
   }
 
@@ -224,10 +165,17 @@ export class CmsService {
   async updateBanner(
     id: string,
     dto: UpdateCmsBannerDto,
+    actor: User,
   ): Promise<CmsBannerView> {
     const banner = await this.getBannerEntity(id);
     if (dto.alt !== undefined) {
       banner.alt = dto.alt;
+    }
+    if (dto.title !== undefined) {
+      banner.title = dto.title;
+    }
+    if (dto.subtitle !== undefined) {
+      banner.subtitle = dto.subtitle;
     }
     if (dto.desktop !== undefined) {
       banner.desktop = dto.desktop;
@@ -255,21 +203,32 @@ export class CmsService {
       }
     }
     const saved = await this.bannerRepository.save(banner);
-    this.revalidationService.notify(CMS_REVALIDATE_TAGS);
+    await this.homeChanges.record(
+      CmsHomeChangeAction.BANNER_UPDATED,
+      saved.alt,
+      actor,
+    );
     return (await this.resolveBannerTargets([saved]))[0];
   }
 
-  async removeBanner(id: string): Promise<void> {
-    await this.getBannerEntity(id);
+  async removeBanner(id: string, actor: User): Promise<void> {
+    const banner = await this.getBannerEntity(id);
     await this.bannerRepository.softDelete(id);
-    this.revalidationService.notify(CMS_REVALIDATE_TAGS);
+    await this.homeChanges.record(
+      CmsHomeChangeAction.BANNER_DELETED,
+      banner.alt,
+      actor,
+    );
   }
 
-  async listBannersPublic(): Promise<CmsBannerView[]> {
-    const banners = await this.bannerRepository.find({
-      where: { isActive: true },
-      order: { sortOrder: 'ASC', createdAt: 'ASC' },
-    });
+  /**
+   * Drops banners whose target left the public catalog (out of stock,
+   * inactive, deleted). Works on rows and on published copies alike, so a
+   * frozen home still hides a link that would now land on a 404.
+   */
+  async resolveVisibleBanners<T extends BannerTargetSource>(
+    banners: T[],
+  ): Promise<BannerView<T>[]> {
     const views = await this.resolveBannerTargets(banners);
     return views.filter(
       ({ banner, target }) =>
@@ -312,9 +271,9 @@ export class CmsService {
     }
   }
 
-  private async resolveBannerTargets(
-    banners: CmsBanner[],
-  ): Promise<CmsBannerView[]> {
+  private async resolveBannerTargets<T extends BannerTargetSource>(
+    banners: T[],
+  ): Promise<BannerView<T>[]> {
     const categoryIds = this.targetIdsFor(
       banners,
       CmsBannerTargetType.CATEGORY,
@@ -378,7 +337,7 @@ export class CmsService {
   }
 
   private targetIdsFor(
-    banners: CmsBanner[],
+    banners: BannerTargetSource[],
     targetType: CmsBannerTargetType,
   ): string[] {
     return [
@@ -393,7 +352,7 @@ export class CmsService {
   }
 
   private resolveBannerTarget(
-    banner: CmsBanner,
+    banner: BannerTargetSource,
     taxonomyById: Map<string, Category>,
     productsById: Map<string, Product>,
     availableProductStock: Map<string, number>,
@@ -595,7 +554,7 @@ export class CmsService {
 
   async getSettings(): Promise<SiteSettingsData> {
     const row = await this.getSettingsRow();
-    return row?.data ?? DEFAULT_SITE_SETTINGS;
+    return conRedes(row?.data ?? DEFAULT_SITE_SETTINGS, DEFAULT_SITE_SETTINGS);
   }
 
   async updateSettings(dto: UpdateSiteSettingsDto): Promise<CmsSiteSettings> {
@@ -605,41 +564,5 @@ export class CmsService {
     const saved = await this.settingsRepository.save(row);
     this.revalidationService.notify(CMS_REVALIDATE_TAGS);
     return saved;
-  }
-
-  // ---------------- Internal helpers ----------------
-
-  // Same contract as the taxonomy slug helper: derive from the source text,
-  // then suffix -2, -3… until unique (soft-deleted rows included so a slug is
-  // never resurrected under different content).
-  private async ensureUniquePageSlug(
-    source: string,
-    excludeId?: string,
-  ): Promise<string> {
-    const base = slugify(source);
-    let candidate = base;
-    let suffix = 2;
-    for (;;) {
-      const clash = await this.pageRepository.findOne({
-        where: excludeId
-          ? { slug: candidate, id: Not(excludeId) }
-          : { slug: candidate },
-        withDeleted: true,
-      });
-      if (!clash) {
-        return candidate;
-      }
-      // A soft-deleted row is a leftover, not an owner: reclaim its slug (the
-      // same rename removePage applies) so recreating a page always lands on
-      // the canonical slug the storefront references.
-      if (clash.deletedAt) {
-        await this.pageRepository.update(clash.id, {
-          slug: `${clash.slug}-eliminada-${Date.now()}`,
-        });
-        return candidate;
-      }
-      candidate = `${base}-${suffix}`;
-      suffix += 1;
-    }
   }
 }

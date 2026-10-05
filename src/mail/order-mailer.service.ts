@@ -1,3 +1,6 @@
+import { CmsService } from '../cms/cms.service';
+import { OrderPdfService } from '../orders/order-pdf.service';
+import { enlaceDeSeguimiento } from '../orders/enlace-de-seguimiento';
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { InjectRepository } from '@nestjs/typeorm';
@@ -18,6 +21,7 @@ import {
   pickupReminder,
   refundCompleted,
   refundRequested,
+  type FooterLink,
 } from './templates';
 
 /**
@@ -27,6 +31,9 @@ import {
  * Quien llama pasa solo el id: así ningún sitio tiene que acordarse de cargar
  * la relación del cliente antes de avisar.
  */
+/** De dónde nace el pedido. Decide qué aviso sale y bajo qué clave. */
+export type CanalDelPedido = 'tienda' | 'back-office';
+
 @Injectable()
 export class OrderMailerService {
   private readonly logger = new Logger(OrderMailerService.name);
@@ -34,6 +41,13 @@ export class OrderMailerService {
   constructor(
     private readonly configService: ConfigService,
     private readonly mail: MailService,
+    // El comprobante que viaja con el aviso de pago. Vive en su propio módulo
+    // justo para poder llegar hasta aquí sin cerrar un círculo de módulos.
+    private readonly orderPdf: OrderPdfService,
+    // Las redes del pie salen de los ajustes del sitio, que es donde se editan
+    // desde el panel. Antes estaban en una constante aquí y otra en la tienda:
+    // cambiar un perfil obligaba a tocar dos repos y publicar los dos.
+    private readonly cms: CmsService,
     @InjectRepository(Order)
     private readonly orderRepository: Repository<Order>,
   ) {}
@@ -50,15 +64,37 @@ export class OrderMailerService {
    * y «ya está pagado»— y este lleva el número del pedido, que es lo que le
    * piden si escribe. Quien no pague en el acto es justo quien más lo necesita.
    */
-  async orderReceived(orderId: string): Promise<SendResult | null> {
-    return this.dispatch(orderId, 'order_received', (data) =>
-      orderReceived(data),
-    );
+  /**
+   * «Tenemos tu pedido», antes de pagar.
+   *
+   * El canal entra en la clave del registro porque son dos correos con el
+   * mismo texto y distinta importancia. En la tienda, el 92% de los pedidos
+   * nacen y caducan sin pagarse (3.173 de 3.441 en el mes previo al
+   * 26-sep-2026), así que ese aviso va sobre todo a quien abandonó un
+   * carrito: en producción está apagado por volumen, ver MxH-0121.
+   *
+   * Un pedido que da de alta un empleado por teléfono es lo contrario. Esa
+   * persona no ha pasado por la web: no tiene el número del pedido, ni sabe
+   * cuánto pagar ni dónde. El correo es su única constancia, y por eso su
+   * clave —`order_received_back_office`— se apaga aparte y hoy no lo está.
+   * Son un puñado al día frente a los 115 de la tienda, así que no mueven el
+   * cupo del plan.
+   */
+  async orderReceived(
+    orderId: string,
+    canal: CanalDelPedido = 'tienda',
+  ): Promise<SendResult | null> {
+    const clave =
+      canal === 'back-office' ? 'order_received_back_office' : 'order_received';
+    return this.dispatch(orderId, clave, (data) => orderReceived(data));
   }
 
   async paymentReceived(orderId: string): Promise<SendResult | null> {
-    return this.dispatch(orderId, 'payment_received', (data) =>
-      paymentReceived(data),
+    return this.dispatch(
+      orderId,
+      'payment_received',
+      (data) => paymentReceived(data),
+      true,
     );
   }
 
@@ -128,10 +164,62 @@ export class OrderMailerService {
     );
   }
 
+  /**
+   * El pedido en papel, para que viaje con el aviso de pago.
+   *
+   * Si componerlo falla, el correo sale igual y sin adjunto: que el cliente
+   * sepa que su pago entró vale más que el documento, y el comprobante lo
+   * puede descargar después desde su pedido.
+   */
+  private async comprobante(order: Order): Promise<{
+    adjuntos?: { filename: string; content: Buffer }[];
+    nota?: string;
+  }> {
+    try {
+      const pdf = await this.orderPdf.generate(order.id);
+      return {
+        adjuntos: [
+          {
+            filename: `pedido-${order.orderNumber ?? order.id}.pdf`,
+            content: pdf,
+          },
+        ],
+      };
+    } catch (err) {
+      const motivo = err instanceof Error ? err.message : String(err);
+      this.logger.error(
+        `No se pudo componer el comprobante del pedido ${order.orderNumber ?? order.id}; el aviso de pago sale sin él`,
+        err instanceof Error ? err.stack : String(err),
+      );
+      // Queda en `email_log`, que es lo que se puede contar: si la plantilla
+      // del PDF se rompe para todos, se ve con una consulta en vez de
+      // esperar a que alguien mire el stdout de un contenedor.
+      return { nota: `enviado sin comprobante: ${motivo}`.slice(0, 500) };
+    }
+  }
+
+  /**
+   * Las redes configuradas, o ninguna si no se pueden leer.
+   *
+   * Un fallo leyendo los ajustes no puede costar el correo: la plantilla cae
+   * entonces en las de siempre, que es lo que hacía hasta hoy.
+   */
+  private async redesDelSitio(): Promise<FooterLink[] | undefined> {
+    try {
+      return (await this.cms.getSettings()).social;
+    } catch (err) {
+      this.logger.warn(
+        `No se pudieron leer las redes de los ajustes; el correo sale con las de siempre: ${String(err)}`,
+      );
+      return undefined;
+    }
+  }
+
   private async dispatch(
     orderId: string,
     template: string,
     render: (data: OrderMailData) => RenderedEmail,
+    conComprobante = false,
   ): Promise<SendResult | null> {
     try {
       const order = await this.orderRepository.findOne({
@@ -151,7 +239,12 @@ export class OrderMailerService {
         );
         return null;
       }
-      const rendered = render(this.toMailData(order));
+      const datos = this.toMailData(order);
+      datos.redes = await this.redesDelSitio();
+      const rendered = render(datos);
+      const { adjuntos, nota } = conComprobante
+        ? await this.comprobante(order)
+        : {};
       return await this.mail.send({
         to,
         subject: rendered.subject,
@@ -159,6 +252,8 @@ export class OrderMailerService {
         text: rendered.text,
         template,
         orderId: order.id,
+        ...(adjuntos ? { attachments: adjuntos } : {}),
+        ...(nota ? { nota } : {}),
       });
     } catch (err) {
       // Avisar nunca puede tumbar lo que se estaba haciendo.
@@ -213,7 +308,12 @@ export class OrderMailerService {
       // términos no salía en ningún correo aunque el layout supiera armarlo.
       storeUrl: tienda ?? null,
       orderUrl: tienda ? `${tienda}/pedidos/${order.id}` : null,
+      // El público, que es el que llevan los correos informativos. Se arma con
+      // el mismo helper que usa el panel para copiarlo, para que no haya dos
+      // formas de escribir la misma dirección.
+      trackingUrl: enlaceDeSeguimiento(tienda, order.trackingId ?? null),
       recipient: this.quienRecibe(order),
+      promisedAt: order.promisedAt,
     };
   }
 

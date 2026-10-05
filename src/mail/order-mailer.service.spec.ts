@@ -1,3 +1,5 @@
+import { CmsService } from '../cms/cms.service';
+import { OrderPdfService } from '../orders/order-pdf.service';
 import { ConfigService } from '@nestjs/config';
 import { Test, TestingModule } from '@nestjs/testing';
 import { getRepositoryToken } from '@nestjs/typeorm';
@@ -33,7 +35,21 @@ describe('OrderMailerService', () => {
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         OrderMailerService,
+        {
+          // Las redes del pie salen de los ajustes del sitio (MxH-0119).
+          provide: CmsService,
+          useValue: {
+            getSettings: jest.fn().mockResolvedValue({ social: [] }),
+          },
+        },
         { provide: MailService, useValue: mail },
+        {
+          // Desde MxH-0051 el aviso de pago lleva el comprobante adjunto.
+          provide: OrderPdfService,
+          useValue: {
+            generate: jest.fn().mockResolvedValue(Buffer.from('%PDF')),
+          },
+        },
         { provide: getRepositoryToken(Order), useValue: orderRepo },
         {
           provide: ConfigService,
@@ -114,6 +130,36 @@ describe('OrderMailerService', () => {
         expect.objectContaining({
           template: 'order_cancelled_payment_not_received',
         }),
+      );
+    });
+  });
+
+  /**
+   * El aviso del pedido nace en dos sitios con la misma plantilla y distinta
+   * importancia, así que se registran aparte: en producción el de la tienda
+   * está apagado por volumen (MxH-0121) y el del back-office no puede estarlo
+   * —quien encarga por teléfono no tiene otra constancia de su pedido—.
+   * Si algún día vuelven a compartir clave, apagar uno apaga el otro.
+   */
+  describe('el canal separa el aviso del pedido', () => {
+    it('desde la tienda registra order_received', async () => {
+      await service.orderReceived('abc-123');
+      expect(mail.send).toHaveBeenCalledWith(
+        expect.objectContaining({ template: 'order_received' }),
+      );
+    });
+
+    it('desde el panel registra order_received_back_office', async () => {
+      await service.orderReceived('abc-123', 'back-office');
+      expect(mail.send).toHaveBeenCalledWith(
+        expect.objectContaining({ template: 'order_received_back_office' }),
+      );
+    });
+
+    it('sin canal se comporta como la tienda, que es el caso habitual', async () => {
+      await service.orderReceived('abc-123');
+      expect(mail.send).not.toHaveBeenCalledWith(
+        expect.objectContaining({ template: 'order_received_back_office' }),
       );
     });
   });

@@ -17,7 +17,15 @@ export interface CmsBannerResolvedTarget extends CmsBannerTargetReference {
   isAvailable: boolean;
 }
 
-export interface CmsBannerView {
-  banner: CmsBanner;
+/** Anything that can point at catalog content: a banner row or a published copy. */
+export interface BannerTargetSource {
+  targetType: CmsBannerTargetType | null;
+  targetId: string | null;
+}
+
+export interface BannerView<T extends BannerTargetSource> {
+  banner: T;
   target: CmsBannerResolvedTarget | null;
 }
+
+export type CmsBannerView = BannerView<CmsBanner>;

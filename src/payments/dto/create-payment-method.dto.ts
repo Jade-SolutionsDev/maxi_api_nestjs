@@ -18,8 +18,8 @@ import { PaymentInstructions } from '../entities/payment-method.entity';
  * equivocada pierde los fondos.
  */
 export class PaymentInstructionsDto {
-  @IsIn(['bank', 'qr', 'link', 'crypto'])
-  type: 'bank' | 'qr' | 'link' | 'crypto';
+  @IsIn(['cash', 'bank', 'qr', 'link', 'crypto'])
+  type: 'cash' | 'bank' | 'qr' | 'link' | 'crypto';
 
   @IsOptional()
   @IsString()
@@ -118,6 +118,11 @@ export const assertInstructions = (
   dto: PaymentInstructionsDto,
 ): PaymentInstructions => {
   switch (dto.type) {
+    case 'cash':
+      return {
+        type: 'cash',
+        note: dto.note?.trim() || null,
+      };
     case 'bank':
       if (!dto.bankName?.trim()) {
         throw new Error('Falta el banco');

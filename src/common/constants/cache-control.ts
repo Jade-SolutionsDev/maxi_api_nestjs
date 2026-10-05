@@ -6,3 +6,11 @@
  * (Express's default weak ETags already make revalidations cheap 304s.)
  */
 export const TAXONOMY_CACHE = 'public, max-age=300, stale-while-revalidate=600';
+
+/**
+ * Cache-Control for content that switches on and off by the clock (home
+ * notices with start/end dates): a minute of reuse at most, so a notice
+ * appears and disappears close to the time the editor chose.
+ */
+export const SCHEDULED_CONTENT_CACHE =
+  'public, max-age=60, stale-while-revalidate=60';

@@ -463,12 +463,22 @@ describe('UsersService', () => {
       ).rejects.toBeInstanceOf(ForbiddenException);
     });
 
+    // Estas dos pasan ahora un SUPER_ADMIN como actor. Antes no pasaban
+    // ninguno y seguían en verde; desde que una cuenta de superadministrador
+    // sólo la toca otro superadministrador, sin actor se rechaza por permiso
+    // y la primera habría pasado por el camino de al lado: Forbidden, sí, pero
+    // por no saber quién llama, no por ser el último superadministrador.
+    const otroSuper = {
+      id: 'sa-2',
+      role: Role.SUPER_ADMIN,
+    } as unknown as User;
+
     it('should forbid demoting the last active super admin', async () => {
       const superAdmin = { ...user, id: 'sa-1', role: Role.SUPER_ADMIN };
       repository.findOne.mockResolvedValue({ ...superAdmin });
       repository.count.mockResolvedValue(1);
       await expect(
-        service.update('sa-1', { role: Role.ADMIN }),
+        service.update('sa-1', { role: Role.ADMIN }, otroSuper),
       ).rejects.toBeInstanceOf(ForbiddenException);
     });
 
@@ -477,7 +487,11 @@ describe('UsersService', () => {
       repository.findOne.mockResolvedValue({ ...superAdmin });
       repository.count.mockResolvedValue(2);
       repository.save.mockImplementation((u) => Promise.resolve(u as User));
-      const result = await service.update('sa-1', { role: Role.ADMIN });
+      const result = await service.update(
+        'sa-1',
+        { role: Role.ADMIN },
+        otroSuper,
+      );
       expect(result.role).toBe(Role.ADMIN);
     });
   });

@@ -39,4 +39,14 @@ export class ListClientsQueryDto extends PaginationQueryDto {
   @IsOptional()
   @IsString()
   id?: string;
+
+  /**
+   * Trae también las invitaciones pendientes, como filas sin cuenta. El panel
+   * lo pide siempre en el listado de clientes; se deja fuera de los informes y
+   * de cualquier otro consumidor, que esperan clientes de verdad.
+   */
+  @IsOptional()
+  @Transform(toOptionalBoolean)
+  @IsBoolean()
+  includeInvitations?: boolean;
 }

@@ -19,6 +19,16 @@ export interface OutgoingEmail {
    * el enlace. El contenido va en memoria y se codifica aquí.
    */
   attachments?: OutgoingAttachment[];
+  /**
+   * Algo que anotar en el registro aunque el correo salga bien.
+   *
+   * Existe por el comprobante del aviso de pago: si no se pudo componer, el
+   * correo sale igual —el cliente necesita saber que su pago entró— pero el
+   * registro tiene que poder distinguirlo de los que sí lo llevaron. Sin esto
+   * el fallo es invisible: el `logger.error` va al stdout del contenedor, que
+   * hoy no llega a Loki, y en `email_log` los dos casos quedan como `sent`.
+   */
+  nota?: string | null;
 }
 
 export interface OutgoingAttachment {
@@ -284,7 +294,9 @@ export class MailService {
           orderId: email.orderId ?? null,
           status: result.status,
           providerId: result.providerId,
-          errorMessage: result.error,
+          // El error del envío manda; si no lo hubo, la nota deja constancia
+          // de que algo salió a medias aunque el correo llegara.
+          errorMessage: result.error ?? email.nota ?? null,
         }),
       );
     } catch (err) {

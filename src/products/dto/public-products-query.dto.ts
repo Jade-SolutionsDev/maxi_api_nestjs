@@ -1,6 +1,7 @@
 import { ApiPropertyOptional } from '@nestjs/swagger';
 import { Transform } from 'class-transformer';
 import {
+  ArrayMaxSize,
   IsBoolean,
   IsIn,
   IsNumber,
@@ -12,6 +13,7 @@ import {
 } from 'class-validator';
 import {
   toOptionalBoolean,
+  toOptionalList,
   toOptionalNumber,
   toSortOrder,
 } from '../../common/dto/query-transforms';
@@ -92,6 +94,14 @@ export class PublicProductsQueryDto extends PaginationQueryDto {
   @Transform(toOptionalBoolean)
   @IsBoolean()
   featured?: boolean;
+
+  /** Only these products (comma-separated UUIDs), e.g. a curated home list. */
+  @ApiPropertyOptional({ type: String, example: 'uuid-1,uuid-2' })
+  @IsOptional()
+  @Transform(toOptionalList)
+  @IsUUID('all', { each: true })
+  @ArrayMaxSize(100)
+  ids?: string[];
 
   /** Only products carrying a discount (`false` → only products at list price). */
   @IsOptional()

@@ -8,6 +8,8 @@
  * si cambian, cambian a la vez el texto y la tarea que lo manda.
  */
 
+import { fechaLargaEnCuba } from '../common/zona';
+
 /** Días que se guarda un pedido pagado antes de que venza la custodia. */
 export const PICKUP_CUSTODY_DAYS = 30;
 
@@ -49,14 +51,29 @@ export interface OrderMailData {
   pickupAddress: string | null;
   whatsapp: string;
   storeUrl: string | null;
-  /** La ficha del pedido en la tienda, para pagarlo y seguirlo. */
+  /** La ficha del pedido en la tienda, para pagarlo. Exige iniciar sesión. */
   orderUrl: string | null;
+  /**
+   * El seguimiento público del pedido. Es el que va en los correos
+   * informativos: se abre sin contraseña, que es lo que hace que el cliente
+   * llegue de verdad, y no enseña ni correo, ni teléfono, ni dirección, ni
+   * importes, ni productos — solo el estado y su historial.
+   */
+  trackingUrl: string | null;
   /**
    * Quién recibe el pedido, si se registró. En una recogida es con quien el
    * mostrador contrasta el carnet, así que el correo tiene que decirlo: quien
    * va a buscarlo suele no ser el que compró.
    */
   recipient?: { name: string; idCard: string | null } | null;
+  /** Las redes del pie, de los ajustes del sitio. Si faltan, las de siempre. */
+  redes?: FooterLink[];
+  /**
+   * La fecha comprometida, que la API calcula al entrar el pago contando días
+   * hábiles (`common/business-days.ts`). Los pedidos de antes de MxH-0092 no la
+   * tienen, y los de una opción de entrega sin plazo configurado tampoco.
+   */
+  promisedAt?: Date | string | null;
 }
 
 /**
@@ -180,16 +197,26 @@ const footerLinks = (links: FooterLink[]): string =>
  * Las redes, en texto y no con iconos: un PNG de Facebook en el pie es una
  * imagen más que Gmail bloquea, y entonces no queda ni el enlace.
  */
-const redesDelPie = (): string =>
-  `<p style="margin:0 0 10px;font-size:12px;">${REDES.map(
-    (red) =>
-      `<a href="${red.url}" style="color:#ffe1bd;text-decoration:none;">${esc(red.label)}</a>`,
-  ).join(' &nbsp;·&nbsp; ')}</p>`;
+const redesDelPie = (redes: FooterLink[] = REDES): string =>
+  !redes.length
+    ? ''
+    : `<p style="margin:0 0 10px;font-size:12px;">${redes
+        .map(
+          (red) =>
+            `<a href="${red.url}" style="color:#ffe1bd;text-decoration:none;">${esc(red.label)}</a>`,
+        )
+        .join(' &nbsp;·&nbsp; ')}</p>`;
 
 export interface LayoutOptions {
   title: string;
   body: string;
   whatsapp: string;
+  /**
+   * Las redes del pie. Vienen de los ajustes del sitio, que es donde se editan
+   * desde el panel (MxH-0119); sin ellas se usan las de siempre, para que una
+   * plantilla que no las pase no deje el pie cojo.
+   */
+  redes?: FooterLink[];
   storeUrl?: string | null;
   estado?: { texto: string; tono: TonoEstado };
   /** Por qué le llega esto: cuenta para no acabar en spam, y es honesto. */
@@ -203,6 +230,7 @@ const layout = ({
   storeUrl,
   estado,
   motivo,
+  redes,
 }: LayoutOptions): string => `
 <!doctype html>
 <html lang="es">
@@ -226,7 +254,7 @@ ${cabecera()}${franja(estado)}
         </td></tr>
         <tr><td style="background:#14291f;padding:18px 30px;">
           ${footerLinks(enlacesDelPie(storeUrl))}
-          ${redesDelPie()}
+          ${redesDelPie(redes)}
           <p style="margin:0;font-size:11px;line-height:1.7;color:#8ba394;">
             © ${new Date().getFullYear()} Maxi Habana · La Meknica Export &amp; Import SRL${motivo ? `<br>${esc(motivo)}` : ''}
           </p>
@@ -273,11 +301,32 @@ const destacado = (rotulo: string, valor: string, nota: string): string =>
 const p = (text: string): string =>
   `<p style="margin:0 0 14px;font-size:15px;line-height:1.6;">${text}</p>`;
 
+/**
+ * Un párrafo que solo se ve en el correo HTML.
+ *
+ * Lo quita `strip()` al armar la versión de texto, donde no hay botones que
+ * pulsar ni direcciones que copiar a mano: ahí el enlace ya sale escrito.
+ */
+const soloHtml = (text: string): string =>
+  `<p data-solo-html style="margin:0 0 14px;font-size:15px;line-height:1.6;">${text}</p>`;
+
 const box = (text: string): string =>
   `<div style="margin:0 0 16px;padding:14px 16px;background:#fef3c7;border-radius:8px;font-size:15px;line-height:1.6;">${text}</div>`;
 
 const strip = (html: string): string =>
   html
+    // Lo que solo tiene sentido viéndolo: el respaldo de «si el botón no te
+    // funciona» habla de un botón que en texto plano no existe, y repetiría la
+    // dirección que la línea de abajo ya deja escrita.
+    .replace(/<[^>]+data-solo-html[^>]*>[\s\S]*?<\/[a-z]+>/g, '')
+    // El enlace, antes de quitar etiquetas: si no, en la versión de texto
+    // quedaba «Pagar mi pedido» a secas y quien lee así no tenía cómo llegar.
+    // Se escribe como lo leería una persona: el texto y detrás la dirección.
+    .replace(
+      /<a\b[^>]*href="([^"]+)"[^>]*>([\s\S]*?)<\/a>/g,
+      (_todo, url: string, texto: string) =>
+        `${texto.replace(/<[^>]+>/g, '').trim()}: ${url}`,
+    )
     .replace(/<br\s*\/?>/g, '\n')
     .replace(/<\/p>|<\/div>/g, '\n\n')
     // Las tablas de `datos()` salían pegadas —«PedidoORD-20260199Se recoge
@@ -336,6 +385,7 @@ export const orderReceived = (order: OrderMailData): RenderedEmail => {
       title: '¡Listo! Tenemos tu pedido',
       body,
       whatsapp: order.whatsapp,
+      redes: order.redes,
       storeUrl: order.storeUrl,
       estado: { texto: 'PENDIENTE DE PAGO', tono: 'atencion' },
       motivo:
@@ -344,7 +394,20 @@ export const orderReceived = (order: OrderMailData): RenderedEmail => {
   };
 };
 
+/**
+ * El pago entró. Es el correo que más se lee de todos, y el que dice cuándo.
+ *
+ * La fecha comprometida (MxH-0092) entra aquí porque este es el momento en que
+ * empieza a contar: el plazo se cuenta en días hábiles **desde que el pago se
+ * confirma**, así que antes de este correo no hay fecha que dar.
+ *
+ * Y cuando hay fecha, el correo **no puede decir que ya está listo**. Decía
+ * «Tu pedido está listo para recoger» desde el minuto del cobro, lo que manda a
+ * la gente al mostrador días antes de que haya algo que entregarle. Sin fecha
+ * —pedidos viejos, u opción sin plazo configurado— se queda como estaba.
+ */
 export const paymentReceived = (order: OrderMailData): RenderedEmail => {
+  const listoEl = order.promisedAt ? fechaLargaEnCuba(order.promisedAt) : null;
   const body = [
     p(
       `${greeting(order.customerName)} recibimos el pago de tu pedido <strong>${esc(order.orderNumber)}</strong> por ${money(order.total, order.currency)}. Ya lo estamos preparando.`,
@@ -352,6 +415,9 @@ export const paymentReceived = (order: OrderMailData): RenderedEmail => {
     datos([
       ['Pedido', esc(order.orderNumber)],
       ['Total pagado', money(order.total, order.currency)],
+      ...(listoEl
+        ? ([['Listo el', esc(listoEl)]] as Array<[string, string]>)
+        : []),
       ...(order.pickupAddress
         ? ([['Se recoge en', esc(order.pickupAddress)]] as Array<
             [string, string]
@@ -367,7 +433,12 @@ export const paymentReceived = (order: OrderMailData): RenderedEmail => {
             ],
           ] as Array<[string, string]>)
         : []),
-      ['Lo guardamos', `${PICKUP_CUSTODY_DAYS} días desde hoy`],
+      [
+        'Lo guardamos',
+        listoEl
+          ? `${PICKUP_CUSTODY_DAYS} días desde que esté listo`
+          : `${PICKUP_CUSTODY_DAYS} días desde hoy`,
+      ],
     ]),
     p(
       `Quien vaya a buscarlo debe llevar su carné de identidad y el número del pedido.`,
@@ -375,17 +446,25 @@ export const paymentReceived = (order: OrderMailData): RenderedEmail => {
     p(
       `Te avisaremos a los ${PICKUP_REMINDER_DAYS[0]} y a los ${PICKUP_REMINDER_DAYS[1]} días si todavía no lo has recogido.`,
     ),
+    ...(order.trackingUrl
+      ? [button(order.trackingUrl, 'Seguir mi pedido')]
+      : []),
   ].join('\n');
   const { html, text } = render({
-    title: 'Tu pedido está listo para recoger',
+    title: listoEl
+      ? `Tu pedido estará listo el ${listoEl}`
+      : 'Tu pedido está listo para recoger',
     body,
     whatsapp: order.whatsapp,
+    redes: order.redes,
     storeUrl: order.storeUrl,
     estado: { texto: 'PAGO RECIBIDO', tono: 'bien' },
     motivo: 'Recibes este correo porque hiciste un pedido en Maxi Habana.',
   });
   return {
-    subject: `Pedido ${order.orderNumber}: pago recibido y listo para recoger`,
+    subject: listoEl
+      ? `Pedido ${order.orderNumber}: pago recibido, listo el ${listoEl}`
+      : `Pedido ${order.orderNumber}: pago recibido y listo para recoger`,
     html,
     text,
   };
@@ -410,11 +489,15 @@ export const pickupReminder = (
     p(
       `Si no puedes ir tú, puede recogerlo otra persona: solo necesita su carné y el número del pedido.`,
     ),
+    ...(order.trackingUrl
+      ? [button(order.trackingUrl, 'Seguir mi pedido')]
+      : []),
   ].join('\n');
   const { html, text } = render({
     title: `Tu pedido ${esc(order.orderNumber)} te espera`,
     body,
     whatsapp: order.whatsapp,
+    redes: order.redes,
     storeUrl: order.storeUrl,
     estado: { texto: `TE QUEDAN ${remaining} DÍAS`, tono: 'atencion' },
     motivo: 'Recibes este correo porque tienes un pedido pagado sin recoger.',
@@ -459,6 +542,7 @@ export const refundCompleted = (
     title: 'Te devolvimos tu dinero',
     body,
     whatsapp: order.whatsapp,
+    redes: order.redes,
     storeUrl: order.storeUrl,
     estado: { texto: 'DEVOLUCIÓN COMPLETADA', tono: 'bien' },
     motivo: 'Recibes este correo por una devolución de tu pedido.',
@@ -492,6 +576,7 @@ export const refundRequested = (
     title: 'Tu devolución está en trámite',
     body,
     whatsapp: order.whatsapp,
+    redes: order.redes,
     storeUrl: order.storeUrl,
     estado: { texto: 'DEVOLUCIÓN EN TRÁMITE', tono: 'atencion' },
     motivo: 'Recibes este correo por una devolución de tu pedido.',
@@ -568,7 +653,7 @@ export const clientInvitation = (
       `Solo falta que elijas tu contraseña. El enlace es personal: no lo compartas.`,
     ),
     button(data.invitationUrl, 'Elegir mi contraseña'),
-    p(
+    soloHtml(
       `Si el botón no te funciona, copia esta dirección en tu navegador:<br><span style="word-break:break-all;color:#5d6c65;font-size:13px;">${esc(data.invitationUrl)}</span>`,
     ),
     box(
@@ -634,6 +719,9 @@ export const orderShipped = (order: OrderMailData): RenderedEmail => {
     p(
       `Quien lo reciba debe llevar su carné de identidad y el número del pedido.`,
     ),
+    ...(order.trackingUrl
+      ? [button(order.trackingUrl, 'Seguir mi pedido')]
+      : []),
   ].join('\n');
   return {
     subject: `Pedido ${order.orderNumber}: va en camino`,
@@ -641,6 +729,7 @@ export const orderShipped = (order: OrderMailData): RenderedEmail => {
       title: 'Tu pedido va en camino',
       body,
       whatsapp: order.whatsapp,
+      redes: order.redes,
       storeUrl: order.storeUrl,
       estado: { texto: 'EN CAMINO', tono: 'bien' },
       motivo: 'Recibes este correo porque hiciste un pedido en Maxi Habana.',
@@ -657,6 +746,9 @@ export const orderDelivered = (order: OrderMailData): RenderedEmail => {
     p(
       `Si algo no está como esperabas, escríbenos y lo miramos: guardamos el registro de cada pedido.`,
     ),
+    ...(order.trackingUrl
+      ? [button(order.trackingUrl, 'Ver el historial del pedido')]
+      : []),
   ].join('\n');
   return {
     subject: `Pedido ${order.orderNumber}: entregado`,
@@ -664,6 +756,7 @@ export const orderDelivered = (order: OrderMailData): RenderedEmail => {
       title: 'Pedido entregado',
       body,
       whatsapp: order.whatsapp,
+      redes: order.redes,
       storeUrl: order.storeUrl,
       estado: { texto: 'ENTREGADO', tono: 'bien' },
       motivo: 'Recibes este correo porque hiciste un pedido en Maxi Habana.',
@@ -709,6 +802,9 @@ export const orderCancelled = (
       ),
       p(`No se te cobró nada, y lo que tenías apartado volvió a la venta.`),
       p(`Si no fuiste tú quien lo canceló, escríbenos y lo revisamos.`),
+      ...(order.trackingUrl
+        ? [button(order.trackingUrl, 'Ver el historial del pedido')]
+        : []),
     ],
   }[motivo ?? 'ordinaria'].join('\n');
 
@@ -723,6 +819,7 @@ export const orderCancelled = (
         : 'Tu pedido se canceló',
       body: cuerpo,
       whatsapp: order.whatsapp,
+      redes: order.redes,
       storeUrl: order.storeUrl,
       estado: conDevolucion
         ? { texto: 'CANCELADO · TE DEVOLVEMOS EL DINERO', tono: 'atencion' }

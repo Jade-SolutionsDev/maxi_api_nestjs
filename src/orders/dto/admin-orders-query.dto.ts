@@ -8,18 +8,10 @@ import {
   IsString,
   IsUUID,
 } from 'class-validator';
-import { toOptionalBoolean } from '../../common/dto/query-transforms';
-
-/**
- * Una cadena vacía es «sin filtro», no un valor a validar.
- *
- * `@IsOptional()` solo perdona lo ausente: un formulario que manda `from: ''`
- * —porque el campo se dejó en blanco— hacía que `@IsDateString` rechazara el
- * cuerpo entero y la petición muriera con un 400 que nadie veía. Le pasó al
- * envío del reporte por correo el 25-sep.
- */
-const vacioEsNada = ({ value }: { value: unknown }) =>
-  typeof value === 'string' && value.trim() === '' ? undefined : value;
+import {
+  toOptionalBoolean,
+  vacioEsNada,
+} from '../../common/dto/query-transforms';
 import { PaginationQueryDto } from '../../common/dto/pagination.dto';
 import {
   FulfillmentType,

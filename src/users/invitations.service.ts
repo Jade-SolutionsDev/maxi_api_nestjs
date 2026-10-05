@@ -1,6 +1,7 @@
 import {
   BadRequestException,
   ConflictException,
+  ForbiddenException,
   Injectable,
   Logger,
   NotFoundException,
@@ -53,6 +54,12 @@ export class InvitationsService {
     dto: InviteUserDto,
     inviter: User,
   ): Promise<Invitation> {
+    // Una invitación es una cuenta futura: vale la misma regla que crearla.
+    if (dto.role === Role.SUPER_ADMIN && inviter.role !== Role.SUPER_ADMIN) {
+      throw new ForbiddenException(
+        'Only a super admin can invite a super admin',
+      );
+    }
     const normalizedEmail = dto.email.toLowerCase().trim();
 
     // Admin tiers bypass permissions — roles on their invitation would be a

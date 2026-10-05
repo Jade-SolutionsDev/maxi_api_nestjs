@@ -130,7 +130,7 @@ describe('OrdersController · reporte de pedidos', () => {
       to: '2026-09-24',
     };
 
-    await controller.reportePdf(filtros, undefined, res as unknown as Response);
+    await controller.reportePdf(filtros, res as unknown as Response);
 
     expect(ordersService.findAllForReport).toHaveBeenCalledWith(filtros);
     expect(ordersService.totalesForReport).toHaveBeenCalledWith(filtros);
@@ -139,7 +139,6 @@ describe('OrdersController · reporte de pedidos', () => {
   it('devuelve el PDF con un nombre que dice qué contiene', async () => {
     const archivo = await controller.reportePdf(
       { status: OrderStatus.CANCELLED },
-      undefined,
       res as unknown as Response,
     );
 
@@ -154,20 +153,25 @@ describe('OrdersController · reporte de pedidos', () => {
   // El resumen es opcional: sin `groupBy` no se pide, para no gastar una
   // consulta de agregación en un reporte que no lo lleva.
   it('sin agrupación no consulta el resumen', async () => {
-    await controller.reportePdf({}, undefined, res as unknown as Response);
+    await controller.reportePdf({}, res as unknown as Response);
     expect(ordersService.resumenPorPeriodo).not.toHaveBeenCalled();
   });
 
   it('con agrupación pide el resumen de ese periodo', async () => {
-    await controller.reportePdf({}, 'week', res as unknown as Response);
+    await controller.reportePdf(
+      { groupBy: 'week' },
+      res as unknown as Response,
+    );
     expect(ordersService.resumenPorPeriodo).toHaveBeenCalledWith({}, 'week');
   });
 
-  // Un `groupBy` inventado no puede colarse en el SQL del `date_trunc`.
-  it('ignora una agrupación que no reconoce', async () => {
+  // Un `groupBy` inventado ya no llega hasta aquí: lo rechaza el DTO, que es
+  // quien declara la lista cerrada (ver report-pdf-query.dto.spec.ts). Y si
+  // alguien llamara al servicio por su cuenta, `resumenPorPeriodo` tampoco lo
+  // interpola en el `date_trunc` (ver orders.service.spec.ts).
+  it('no pide el resumen cuando no se eligió periodo', async () => {
     await controller.reportePdf(
-      {},
-      'año; DROP TABLE orders' as never,
+      { status: OrderStatus.CANCELLED },
       res as unknown as Response,
     );
     expect(ordersService.resumenPorPeriodo).not.toHaveBeenCalled();

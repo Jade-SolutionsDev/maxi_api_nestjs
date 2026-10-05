@@ -1,3 +1,4 @@
+import { Order } from '../orders/entities/order.entity';
 import { sinTildesSql } from '../common/search/accent-insensitive';
 import {
   BadRequestException,
@@ -44,6 +45,9 @@ export class InventoryService {
     private readonly itemRepository: Repository<InventoryOperationItem>,
     @InjectRepository(Product)
     private readonly productRepository: Repository<Product>,
+    // Solo para traducir `order_id` al número que se enseña en pantalla.
+    @InjectRepository(Order)
+    private readonly orderRepository: Repository<Order>,
     private readonly stockLocationsService: StockLocationsService,
     private readonly dataSource: DataSource,
   ) {}
@@ -73,11 +77,47 @@ export class InventoryService {
     const items = await this.itemRepository.find({
       where: { operationId: In(operations.map((o) => o.id)) },
     });
+    // Los números de pedido de toda la página en una consulta, no una por
+    // línea: el libro de un almacén con movimiento son cientos de filas.
+    const numeros = await this.numerosDePedido(operations);
     return operations.map((op) =>
       OperationResponseDto.build(
         op,
         items.filter((i) => i.operationId === op.id),
+        op.orderId ? (numeros.get(op.orderId) ?? null) : null,
       ),
+    );
+  }
+
+  /**
+   * `orderId` -> `ORD-2026xxxx`, para las operaciones que vienen de un pedido.
+   *
+   * Un pedido que ya no esté simplemente no aparece en el mapa, y su línea del
+   * libro se queda sin número: el movimiento ocurrió y tiene que seguir
+   * viéndose.
+   */
+  private async numerosDePedido(
+    operations: InventoryOperation[],
+  ): Promise<Map<string, string>> {
+    return this.numerosDePedidoPorId(operations.map((o) => o.orderId));
+  }
+
+  /** Igual, a partir de una lista suelta de identificadores. */
+  private async numerosDePedidoPorId(
+    posiblesIds: (string | null | undefined)[],
+  ): Promise<Map<string, string>> {
+    const ids = [...new Set(posiblesIds.filter(Boolean))];
+    if (ids.length === 0) return new Map();
+    const pedidos = await this.orderRepository.find({
+      where: { id: In(ids as string[]) },
+      select: { id: true, orderNumber: true },
+    });
+    // Un pedido sin número —los hay antiguos— se queda fuera del mapa, igual
+    // que uno borrado: la línea del libro se ve sin número, pero se ve.
+    return new Map(
+      pedidos
+        .filter((p): p is Order & { orderNumber: string } => !!p.orderNumber)
+        .map((p) => [p.id, p.orderNumber]),
     );
   }
 
@@ -296,6 +336,14 @@ export class InventoryService {
       [id],
     );
 
+    // El número de pedido de todas las líneas —movimientos y reservas— en una
+    // consulta. El libro enseñaba el identificador interno recortado a ocho
+    // caracteres, que no es el número que se ve en ninguna otra pantalla.
+    const numeros = await this.numerosDePedidoPorId([
+      ...ops.map((o) => o.order_id),
+      ...reservations.map((r) => r.order_id),
+    ]);
+
     const events: InventoryHistoryEventDto[] = [];
 
     for (const o of ops) {
@@ -315,6 +363,7 @@ export class InventoryService {
         actorId: o.created_by,
         actorName,
         orderId: o.order_id,
+        orderNumber: o.order_id ? (numeros.get(o.order_id) ?? null) : null,
         createdAt: o.created_at,
       });
     }
@@ -338,6 +387,7 @@ export class InventoryService {
         actorId: null,
         actorName: null,
         orderId: r.order_id,
+        orderNumber: r.order_id ? (numeros.get(r.order_id) ?? null) : null,
         createdAt: r.created_at,
       });
     }

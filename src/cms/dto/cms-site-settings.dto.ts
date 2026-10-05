@@ -1,10 +1,13 @@
 import { Type } from 'class-transformer';
 import {
+  ArrayMaxSize,
   IsArray,
   IsBoolean,
   IsEmail,
   IsString,
+  IsUrl,
   MaxLength,
+  MinLength,
   ValidateNested,
 } from 'class-validator';
 import {
@@ -21,6 +24,21 @@ export class SiteLegalLinkDto {
   @IsString()
   @MaxLength(120)
   slug: string;
+}
+
+export class SiteSocialLinkDto {
+  @IsString()
+  @MinLength(1)
+  @MaxLength(40)
+  label: string;
+
+  /**
+   * Solo http(s). Sin esto cabría un `javascript:` y ese enlace acaba en el
+   * pie de la tienda y en ocho plantillas de correo.
+   */
+  @IsUrl({ protocols: ['http', 'https'], require_protocol: true })
+  @MaxLength(300)
+  url: string;
 }
 
 export class SiteFooterDto {
@@ -89,7 +107,33 @@ export class UpdateSiteSettingsDto implements SiteSettingsData {
   @ValidateNested()
   @Type(() => SiteServicesSectionDto)
   services: SiteServicesSectionDto;
+
+  @IsArray()
+  @ArrayMaxSize(10)
+  @ValidateNested({ each: true })
+  @Type(() => SiteSocialLinkDto)
+  social: SiteSocialLinkDto[];
 }
+
+/**
+ * Los ajustes guardados, con las redes rellenas si la fila es anterior a que
+ * el campo existiera.
+ *
+ * La fila de staging y la de producción se guardaron antes de MxH-0119, así que
+ * no traen `social`. Sin esto el panel abre la lista vacía y el primero que
+ * guarde cualquier otra cosa —un teléfono— se lleva las redes por delante,
+ * porque el PATCH reemplaza el documento entero.
+ *
+ * Una lista vacía sí se respeta: eso es «las quité a propósito», no «nunca se
+ * configuraron».
+ */
+export const conRedes = (
+  data: SiteSettingsData,
+  fallback: SiteSettingsData,
+): SiteSettingsData => ({
+  ...data,
+  social: data.social ?? fallback.social,
+});
 
 export class SiteSettingsResponseDto {
   data: SiteSettingsData;
@@ -100,7 +144,7 @@ export class SiteSettingsResponseDto {
     fallback: SiteSettingsData,
   ): SiteSettingsResponseDto {
     const dto = new SiteSettingsResponseDto();
-    dto.data = entity?.data ?? fallback;
+    dto.data = conRedes(entity?.data ?? fallback, fallback);
     dto.updatedAt = entity?.updatedAt ?? null;
     return dto;
   }

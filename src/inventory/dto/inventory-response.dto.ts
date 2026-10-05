@@ -82,6 +82,8 @@ export class InventoryHistoryEventDto {
   actorName: string | null;
   /** Order reference for reservation events; null for manual operations. */
   orderId: string | null;
+  /** `ORD-2026xxxx`, para poder decir de qué pedido viene y enlazarlo. */
+  orderNumber: string | null;
   createdAt: Date;
 }
 
@@ -93,6 +95,14 @@ export class OperationResponseDto {
   // Set when the operation was driven by an order (sale OUT / restock IN); null
   // for manual admin operations.
   orderId: string | null;
+  /**
+   * El número que el pedido enseña en todas las demás pantallas
+   * (`ORD-2026xxxx`). El libro mostraba el identificador interno, que no le
+   * dice nada a quien lo lee. Null en las operaciones manuales —que no vienen
+   * de ningún pedido— y también si el pedido ya no existe: el movimiento
+   * ocurrió igual y la línea no puede desaparecer del libro por eso.
+   */
+  orderNumber: string | null;
   note: string | null;
   createdBy: string;
   createdAt: Date;
@@ -101,6 +111,7 @@ export class OperationResponseDto {
   static build(
     operation: InventoryOperation,
     items: InventoryOperationItem[],
+    orderNumber?: string | null,
   ): OperationResponseDto {
     const dto = new OperationResponseDto();
     dto.id = operation.id;
@@ -108,6 +119,7 @@ export class OperationResponseDto {
     dto.locationId = operation.locationId;
     dto.targetLocationId = operation.targetLocationId;
     dto.orderId = operation.orderId;
+    dto.orderNumber = orderNumber ?? null;
     dto.note = operation.note;
     dto.createdBy = operation.createdBy;
     dto.createdAt = operation.createdAt;

@@ -8,6 +8,8 @@ import {
   Logger,
   NotFoundException,
 } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
+import { StorefrontConfig } from '../config/configuration';
 import { InjectRepository } from '@nestjs/typeorm';
 import {
   DataSource,
@@ -38,6 +40,7 @@ import {
   AdminOrdersQueryDto,
   SIN_METODO_DE_PAGO,
 } from './dto/admin-orders-query.dto';
+import { PERIODOS, type Periodo } from './dto/report-pdf-query.dto';
 import { CheckoutDto } from './dto/checkout.dto';
 import { CorrectOrderDto } from './dto/correct-order.dto';
 import { CreateOrderForClientDto } from './dto/create-order-for-client.dto';
@@ -240,7 +243,17 @@ export class OrdersService {
     private readonly orderEvents: OrderEventsService,
     private readonly orderMailer: OrderMailerService,
     private readonly dataSource: DataSource,
+    private readonly configService: ConfigService,
   ) {}
+
+  /**
+   * La dirección pública de la tienda, para montar el enlace de seguimiento que
+   * el panel copia. Si no está configurada, el pedido viaja sin enlace y el
+   * botón de copiar no aparece.
+   */
+  private urlDeLaTienda(): string | null {
+    return this.configService.get<StorefrontConfig>('storefront')?.url ?? null;
+  }
 
   // List rows carry the method name and the transfer flag (not the whole
   // attempt/detail): two batched queries for the page, never one per row.
@@ -253,7 +266,7 @@ export class OrdersService {
       this.needsTransferIds(orderIds),
     ]);
     return orders.map((order) => {
-      const dto = OrderResponseDto.fromEntity(order);
+      const dto = OrderResponseDto.fromEntity(order, this.urlDeLaTienda());
       dto.paymentMethod = methods.get(order.id);
       dto.needsTransfer = transferIds.has(order.id);
       return dto;
@@ -629,9 +642,12 @@ export class OrdersService {
         : undefined,
     });
 
+    // El canal importa: sin cobro, el aviso sale bajo la clave del
+    // back-office, que no comparte el apagado de la tienda. Quien encarga por
+    // teléfono no tiene otra constancia de su pedido.
     const aviso = cobro
       ? this.orderMailer.paymentReceived(orderId)
-      : this.orderMailer.orderReceived(orderId);
+      : this.orderMailer.orderReceived(orderId, 'back-office');
     void aviso.catch((err) => {
       this.logger.error(
         `No se pudo avisar por correo del pedido ${orderId}`,
@@ -875,7 +891,7 @@ export class OrdersService {
     if (!order || order.deletedAt) {
       throw new NotFoundException(`Order with id "${id}" not found`);
     }
-    const dto = OrderResponseDto.fromEntity(order);
+    const dto = OrderResponseDto.fromEntity(order, this.urlDeLaTienda());
     dto.payment = await this.paymentsService.latestChargeDto(order.id);
     dto.paymentMethod = (
       await this.paymentsService.latestMethodsFor([order.id])
@@ -1135,8 +1151,14 @@ export class OrdersService {
    */
   async resumenPorPeriodo(
     query: AdminOrdersQueryDto,
-    periodo: 'day' | 'week' | 'month',
+    periodo: Periodo,
   ): Promise<{ periodo: string; pedidos: number; importe: string }[]> {
+    // El periodo se interpola en el SQL, así que se comprueba aquí también y no
+    // solo en el DTO: si mañana alguien llama a este método desde otro sitio, el
+    // `date_trunc` no puede quedar a merced de lo que le pasen.
+    if (!PERIODOS.includes(periodo)) {
+      throw new BadRequestException(`Periodo no válido: ${String(periodo)}`);
+    }
     const qb = this.orderRepository
       .createQueryBuilder('order')
       .leftJoin('order.client', 'client');
@@ -1164,7 +1186,7 @@ export class OrdersService {
     if (!order || order.deletedAt) {
       throw new NotFoundException(`Order with id "${id}" not found`);
     }
-    const dto = OrderResponseDto.fromEntity(order);
+    const dto = OrderResponseDto.fromEntity(order, this.urlDeLaTienda());
     dto.payment = await this.paymentsService.latestChargeDto(order.id);
     dto.paymentMethod = (
       await this.paymentsService.latestMethodsFor([order.id])

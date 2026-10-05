@@ -70,14 +70,16 @@ export class PickupRemindersService {
         // y evita que un pedido antiguo reciba hoy los dos recordatorios de
         // golpe por haberse rellenado su fecha de pago hacia atrás.
         .andWhere('order.paid_at > :custodyFloor', { custodyFloor })
-        // Pasada la custodia ya no se recuerda nada: el aviso serviría de poco
-        // y evita que un pedido viejo reciba hoy los dos recordatorios de
-        // golpe cuando se rellenó su fecha de pago hacia atrás.
-        .andWhere('order.paid_at > :custodyFloor', { custodyFloor })
         .andWhere(
+          // `"order"` entre comillas: es el alias que pone TypeORM y además una
+          // palabra reservada de PostgreSQL. Sin ellas, este subconsulta —que
+          // va escrita a mano y por tanto nadie reescribe— rompe la sentencia
+          // entera con «syntax error at or near "order"», y la pasada muere
+          // con un 500. Es la razón de que no se enviara ni un recordatorio
+          // desde que existe el endpoint.
           `NOT EXISTS (
              SELECT 1 FROM email_log log
-             WHERE log.order_id = order.id
+             WHERE log.order_id = "order".id
                AND log.template = :template
                AND log.status = :sent
            )`,

@@ -14,6 +14,7 @@ import {
   Order,
 } from './entities/order.entity';
 import { OrderItem } from './entities/order-item.entity';
+import { fechaHoraEnCuba } from '../common/zona';
 
 /** Paleta de la tienda, para que el documento se reconozca como suyo. */
 const VERDE = '#2e9e78';
@@ -36,16 +37,7 @@ const dinero = (valor: string | number | null | undefined): string =>
         maximumFractionDigits: 2,
       })}`;
 
-const fecha = (valor: Date | null | undefined): string =>
-  valor
-    ? new Date(valor).toLocaleString('es-CU', {
-        day: '2-digit',
-        month: '2-digit',
-        year: 'numeric',
-        hour: '2-digit',
-        minute: '2-digit',
-      })
-    : '—';
+const fecha = fechaHoraEnCuba;
 
 /**
  * El comprobante de un pedido, en PDF.

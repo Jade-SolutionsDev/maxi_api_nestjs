@@ -1,3 +1,4 @@
+import { Order } from '../orders/entities/order.entity';
 import { forwardRef, Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { AuthModule } from '../auth/auth.module';
@@ -13,6 +14,7 @@ import { InventoryService } from './inventory.service';
 @Module({
   imports: [
     TypeOrmModule.forFeature([
+      Order,
       Inventory,
       InventoryOperation,
       InventoryOperationItem,

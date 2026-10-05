@@ -11,7 +11,8 @@ import {
   type PaginatedResponse,
   type PaginationQueryDto,
 } from '../common/dto/pagination.dto';
-import { sinTildes } from '../common/search/accent-insensitive';
+import { contieneTexto, sinTildes } from '../common/search/accent-insensitive';
+import { ClientInvitationsService } from './client-invitations.service';
 import { CAMPOS_ORDENABLES } from './dto/list-clients-query.dto';
 import { CreateClientDto } from './dto/create-client.dto';
 import { UpdateClientDto } from './dto/update-client.dto';
@@ -22,11 +23,17 @@ export interface FiltroDeClientes {
   q?: string;
   isActive?: boolean;
   ids?: string[];
+  /**
+   * Añade al listado las invitaciones pendientes, como filas sin cuenta. Sin
+   * esto, a quien invitas desaparece del panel hasta que activa.
+   */
+  includeInvitations?: boolean;
 }
 
 @Injectable()
 export class ClientsService {
   constructor(
+    private readonly invitaciones: ClientInvitationsService,
     @InjectRepository(Client)
     private readonly clientsRepository: Repository<Client>,
   ) {}
@@ -71,6 +78,27 @@ export class ClientsService {
       .take(limit);
 
     const [clients, total] = await qb.getManyAndCount();
+
+    // Las invitaciones no son clientes todavía, así que no están en la tabla:
+    // se piden a Clerk y se anteponen. Filtrar por estado las deja fuera —son
+    // facetas excluyentes—, y solo aparecen en la primera página, aunque
+    // cuenten en el total para que la paginación no mienta.
+    if (filtro.includeInvitations && filtro.isActive === undefined) {
+      let pendientes = await this.invitaciones.listarPendientes();
+      if (filtro.q) {
+        const q = filtro.q;
+        pendientes = pendientes.filter((p) =>
+          contieneTexto(q, p.firstName, p.lastName, p.email),
+        );
+      }
+      return buildPaginatedResponse(
+        page === 1 ? [...pendientes, ...clients] : clients,
+        total + pendientes.length,
+        page,
+        limit,
+      );
+    }
+
     return buildPaginatedResponse(clients, total, page, limit);
   }
 
