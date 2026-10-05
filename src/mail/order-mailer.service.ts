@@ -1,3 +1,4 @@
+import { OrderPdfService } from '../orders/order-pdf.service';
 import { enlaceDeSeguimiento } from '../orders/enlace-de-seguimiento';
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
@@ -38,6 +39,9 @@ export class OrderMailerService {
   constructor(
     private readonly configService: ConfigService,
     private readonly mail: MailService,
+    // El comprobante que viaja con el aviso de pago. Vive en su propio módulo
+    // justo para poder llegar hasta aquí sin cerrar un círculo de módulos.
+    private readonly orderPdf: OrderPdfService,
     @InjectRepository(Order)
     private readonly orderRepository: Repository<Order>,
   ) {}
@@ -80,8 +84,11 @@ export class OrderMailerService {
   }
 
   async paymentReceived(orderId: string): Promise<SendResult | null> {
-    return this.dispatch(orderId, 'payment_received', (data) =>
-      paymentReceived(data),
+    return this.dispatch(
+      orderId,
+      'payment_received',
+      (data) => paymentReceived(data),
+      true,
     );
   }
 
@@ -151,10 +158,38 @@ export class OrderMailerService {
     );
   }
 
+  /**
+   * El pedido en papel, para que viaje con el aviso de pago.
+   *
+   * Si componerlo falla, el correo sale igual y sin adjunto: que el cliente
+   * sepa que su pago entró vale más que el documento, y el comprobante lo
+   * puede descargar después desde su pedido.
+   */
+  private async comprobante(
+    order: Order,
+  ): Promise<{ filename: string; content: Buffer }[] | undefined> {
+    try {
+      const pdf = await this.orderPdf.generate(order.id);
+      return [
+        {
+          filename: `pedido-${order.orderNumber ?? order.id}.pdf`,
+          content: pdf,
+        },
+      ];
+    } catch (err) {
+      this.logger.error(
+        `No se pudo componer el comprobante del pedido ${order.orderNumber ?? order.id}; el aviso de pago sale sin él`,
+        err instanceof Error ? err.stack : String(err),
+      );
+      return undefined;
+    }
+  }
+
   private async dispatch(
     orderId: string,
     template: string,
     render: (data: OrderMailData) => RenderedEmail,
+    conComprobante = false,
   ): Promise<SendResult | null> {
     try {
       const order = await this.orderRepository.findOne({
@@ -175,6 +210,9 @@ export class OrderMailerService {
         return null;
       }
       const rendered = render(this.toMailData(order));
+      const adjuntos = conComprobante
+        ? await this.comprobante(order)
+        : undefined;
       return await this.mail.send({
         to,
         subject: rendered.subject,
@@ -182,6 +220,7 @@ export class OrderMailerService {
         text: rendered.text,
         template,
         orderId: order.id,
+        ...(adjuntos ? { attachments: adjuntos } : {}),
       });
     } catch (err) {
       // Avisar nunca puede tumbar lo que se estaba haciendo.
