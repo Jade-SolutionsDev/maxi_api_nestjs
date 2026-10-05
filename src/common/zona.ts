@@ -73,6 +73,27 @@ export const fechaEnCuba = (valor: Date | string | null | undefined): string =>
       })
     : '—';
 
+/**
+ * El día con su día de la semana, sin año: `lunes 22 de septiembre`.
+ *
+ * Para la fecha comprometida de entrega, que es la que lee un cliente desde
+ * Miami para decirle a su familia en La Habana cuándo pasar. El día de la
+ * semana es la mitad útil del dato —«el 22» obliga a mirar un calendario— y el
+ * año sobra: un plazo de entrega nunca cae en otro.
+ *
+ * `es-CU` compone «lunes, 22 de septiembre» con una coma que en una frase
+ * («Listo el lunes, 22...») lee raro; se quita la primera.
+ */
+export const fechaLargaEnCuba = (valor: Date | string): string =>
+  new Date(valor)
+    .toLocaleDateString('es-CU', {
+      timeZone: ZONA_CUBA,
+      weekday: 'long',
+      day: 'numeric',
+      month: 'long',
+    })
+    .replace(', ', ' ');
+
 /** El mes en palabras, para los títulos de los reportes. */
 export const mesEnCuba = (valor: Date | string): string =>
   new Date(valor).toLocaleDateString('es', {

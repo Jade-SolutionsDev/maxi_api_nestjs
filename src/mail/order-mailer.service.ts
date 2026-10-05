@@ -313,6 +313,7 @@ export class OrderMailerService {
       // formas de escribir la misma dirección.
       trackingUrl: enlaceDeSeguimiento(tienda, order.trackingId ?? null),
       recipient: this.quienRecibe(order),
+      promisedAt: order.promisedAt,
     };
   }
 

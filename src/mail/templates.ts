@@ -8,6 +8,8 @@
  * si cambian, cambian a la vez el texto y la tarea que lo manda.
  */
 
+import { fechaLargaEnCuba } from '../common/zona';
+
 /** Días que se guarda un pedido pagado antes de que venza la custodia. */
 export const PICKUP_CUSTODY_DAYS = 30;
 
@@ -66,6 +68,12 @@ export interface OrderMailData {
   recipient?: { name: string; idCard: string | null } | null;
   /** Las redes del pie, de los ajustes del sitio. Si faltan, las de siempre. */
   redes?: FooterLink[];
+  /**
+   * La fecha comprometida, que la API calcula al entrar el pago contando días
+   * hábiles (`common/business-days.ts`). Los pedidos de antes de MxH-0092 no la
+   * tienen, y los de una opción de entrega sin plazo configurado tampoco.
+   */
+  promisedAt?: Date | string | null;
 }
 
 /**
@@ -386,7 +394,20 @@ export const orderReceived = (order: OrderMailData): RenderedEmail => {
   };
 };
 
+/**
+ * El pago entró. Es el correo que más se lee de todos, y el que dice cuándo.
+ *
+ * La fecha comprometida (MxH-0092) entra aquí porque este es el momento en que
+ * empieza a contar: el plazo se cuenta en días hábiles **desde que el pago se
+ * confirma**, así que antes de este correo no hay fecha que dar.
+ *
+ * Y cuando hay fecha, el correo **no puede decir que ya está listo**. Decía
+ * «Tu pedido está listo para recoger» desde el minuto del cobro, lo que manda a
+ * la gente al mostrador días antes de que haya algo que entregarle. Sin fecha
+ * —pedidos viejos, u opción sin plazo configurado— se queda como estaba.
+ */
 export const paymentReceived = (order: OrderMailData): RenderedEmail => {
+  const listoEl = order.promisedAt ? fechaLargaEnCuba(order.promisedAt) : null;
   const body = [
     p(
       `${greeting(order.customerName)} recibimos el pago de tu pedido <strong>${esc(order.orderNumber)}</strong> por ${money(order.total, order.currency)}. Ya lo estamos preparando.`,
@@ -394,6 +415,9 @@ export const paymentReceived = (order: OrderMailData): RenderedEmail => {
     datos([
       ['Pedido', esc(order.orderNumber)],
       ['Total pagado', money(order.total, order.currency)],
+      ...(listoEl
+        ? ([['Listo el', esc(listoEl)]] as Array<[string, string]>)
+        : []),
       ...(order.pickupAddress
         ? ([['Se recoge en', esc(order.pickupAddress)]] as Array<
             [string, string]
@@ -409,7 +433,12 @@ export const paymentReceived = (order: OrderMailData): RenderedEmail => {
             ],
           ] as Array<[string, string]>)
         : []),
-      ['Lo guardamos', `${PICKUP_CUSTODY_DAYS} días desde hoy`],
+      [
+        'Lo guardamos',
+        listoEl
+          ? `${PICKUP_CUSTODY_DAYS} días desde que esté listo`
+          : `${PICKUP_CUSTODY_DAYS} días desde hoy`,
+      ],
     ]),
     p(
       `Quien vaya a buscarlo debe llevar su carné de identidad y el número del pedido.`,
@@ -422,7 +451,9 @@ export const paymentReceived = (order: OrderMailData): RenderedEmail => {
       : []),
   ].join('\n');
   const { html, text } = render({
-    title: 'Tu pedido está listo para recoger',
+    title: listoEl
+      ? `Tu pedido estará listo el ${listoEl}`
+      : 'Tu pedido está listo para recoger',
     body,
     whatsapp: order.whatsapp,
     redes: order.redes,
@@ -431,7 +462,9 @@ export const paymentReceived = (order: OrderMailData): RenderedEmail => {
     motivo: 'Recibes este correo porque hiciste un pedido en Maxi Habana.',
   });
   return {
-    subject: `Pedido ${order.orderNumber}: pago recibido y listo para recoger`,
+    subject: listoEl
+      ? `Pedido ${order.orderNumber}: pago recibido, listo el ${listoEl}`
+      : `Pedido ${order.orderNumber}: pago recibido y listo para recoger`,
     html,
     text,
   };
