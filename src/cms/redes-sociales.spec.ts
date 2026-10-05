@@ -1,7 +1,12 @@
 import { plainToInstance } from 'class-transformer';
 import { validate } from 'class-validator';
 import { DEFAULT_SITE_SETTINGS } from './cms.service';
-import { UpdateSiteSettingsDto } from './dto/cms-site-settings.dto';
+import {
+  conRedes,
+  SiteSettingsResponseDto,
+  UpdateSiteSettingsDto,
+} from './dto/cms-site-settings.dto';
+import type { CmsSiteSettings } from './entities/cms-site-settings.entity';
 import { paymentReceived } from '../mail/templates';
 
 /**
@@ -100,5 +105,41 @@ describe('el pie del correo usa las redes configuradas', () => {
     });
     expect(html).toContain('ORD-1');
     expect(html).not.toContain('facebook.com');
+  });
+});
+
+/**
+ * La fila que ya está guardada en staging y en producción se escribió antes de
+ * que `social` existiera. Si al leerla no se rellena, pasan dos cosas malas:
+ * el panel abre la lista vacía, y el PATCH —que reemplaza el documento entero—
+ * borra las redes en cuanto alguien guarde cualquier otra cosa.
+ */
+describe('una fila guardada antes de que el campo existiera', () => {
+  const sinRedes = () => {
+    const { social: _fuera, ...resto } = DEFAULT_SITE_SETTINGS;
+    return resto as typeof DEFAULT_SITE_SETTINGS;
+  };
+
+  it('se lee con las redes de siempre, no vacía', () => {
+    expect(conRedes(sinRedes(), DEFAULT_SITE_SETTINGS).social).toEqual(
+      DEFAULT_SITE_SETTINGS.social,
+    );
+  });
+
+  it('y el panel la recibe igual, para no borrarlas al guardar', () => {
+    const fila = {
+      data: sinRedes(),
+      updatedAt: new Date('2026-09-30T00:00:00Z'),
+    } as CmsSiteSettings;
+    const dto = SiteSettingsResponseDto.fromEntity(fila, DEFAULT_SITE_SETTINGS);
+    expect(dto.data.social.map((r) => r.label)).toEqual([
+      'Facebook',
+      'Instagram',
+    ]);
+  });
+
+  it('pero una lista vacía a propósito se respeta', () => {
+    const guardado = { ...DEFAULT_SITE_SETTINGS, social: [] };
+    expect(conRedes(guardado, DEFAULT_SITE_SETTINGS).social).toEqual([]);
   });
 });
