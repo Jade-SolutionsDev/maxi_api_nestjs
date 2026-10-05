@@ -1,10 +1,13 @@
 import { Type } from 'class-transformer';
 import {
+  ArrayMaxSize,
   IsArray,
   IsBoolean,
   IsEmail,
   IsString,
+  IsUrl,
   MaxLength,
+  MinLength,
   ValidateNested,
 } from 'class-validator';
 import {
@@ -21,6 +24,21 @@ export class SiteLegalLinkDto {
   @IsString()
   @MaxLength(120)
   slug: string;
+}
+
+export class SiteSocialLinkDto {
+  @IsString()
+  @MinLength(1)
+  @MaxLength(40)
+  label: string;
+
+  /**
+   * Solo http(s). Sin esto cabría un `javascript:` y ese enlace acaba en el
+   * pie de la tienda y en ocho plantillas de correo.
+   */
+  @IsUrl({ protocols: ['http', 'https'], require_protocol: true })
+  @MaxLength(300)
+  url: string;
 }
 
 export class SiteFooterDto {
@@ -89,6 +107,12 @@ export class UpdateSiteSettingsDto implements SiteSettingsData {
   @ValidateNested()
   @Type(() => SiteServicesSectionDto)
   services: SiteServicesSectionDto;
+
+  @IsArray()
+  @ArrayMaxSize(10)
+  @ValidateNested({ each: true })
+  @Type(() => SiteSocialLinkDto)
+  social: SiteSocialLinkDto[];
 }
 
 export class SiteSettingsResponseDto {

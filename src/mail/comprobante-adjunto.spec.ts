@@ -1,3 +1,4 @@
+import { CmsService } from '../cms/cms.service';
 import { ConfigService } from '@nestjs/config';
 import { Test } from '@nestjs/testing';
 import { getRepositoryToken } from '@nestjs/typeorm';
@@ -38,6 +39,13 @@ describe('MxH-0051 · el correo de pago lleva el comprobante', () => {
     const module = await Test.createTestingModule({
       providers: [
         OrderMailerService,
+        {
+          // Las redes del pie salen de los ajustes del sitio (MxH-0119).
+          provide: CmsService,
+          useValue: {
+            getSettings: jest.fn().mockResolvedValue({ social: [] }),
+          },
+        },
         { provide: MailService, useValue: mail },
         {
           provide: getRepositoryToken(Order),
