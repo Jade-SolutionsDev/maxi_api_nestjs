@@ -1,3 +1,4 @@
+import { OrderPdfService } from '../orders/order-pdf.service';
 import { ConfigService } from '@nestjs/config';
 import { Test, TestingModule } from '@nestjs/testing';
 import { getRepositoryToken } from '@nestjs/typeorm';
@@ -34,6 +35,13 @@ describe('OrderMailerService', () => {
       providers: [
         OrderMailerService,
         { provide: MailService, useValue: mail },
+        {
+          // Desde MxH-0051 el aviso de pago lleva el comprobante adjunto.
+          provide: OrderPdfService,
+          useValue: {
+            generate: jest.fn().mockResolvedValue(Buffer.from('%PDF')),
+          },
+        },
         { provide: getRepositoryToken(Order), useValue: orderRepo },
         {
           provide: ConfigService,
