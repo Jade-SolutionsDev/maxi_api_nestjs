@@ -1,5 +1,6 @@
 import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
+import { CmsModule } from '../cms/cms.module';
 import { Order } from '../orders/entities/order.entity';
 import { OrderPdfModule } from '../orders/order-pdf.module';
 import { EmailLog } from './entities/email-log.entity';
@@ -16,7 +17,17 @@ import { PickupRemindersService } from './pickup-reminders.service';
 @Module({
   // OrderPdfModule, no OrdersModule: el comprobante sin arrastrar los
   // pedidos enteros, que importan este módulo y cerrarían el círculo.
-  imports: [TypeOrmModule.forFeature([EmailLog, Order]), OrderPdfModule],
+  //
+  // CmsModule tiene que estar aquí aunque OrderPdfModule ya lo importe: Nest no
+  // propaga los exports de un módulo importado, así que `CmsService` llegaba a
+  // `OrderPdfService` y no a `OrderMailerService`. Sin esta línea la API no
+  // arranca —`UnknownDependenciesException`—, y las pruebas unitarias no lo ven
+  // porque cada una le pasa el proveedor a mano.
+  imports: [
+    TypeOrmModule.forFeature([EmailLog, Order]),
+    OrderPdfModule,
+    CmsModule,
+  ],
   controllers: [PickupRemindersController],
   providers: [
     MailService,
