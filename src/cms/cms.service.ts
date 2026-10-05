@@ -29,7 +29,7 @@ import {
   CreateCmsServiceDto,
   UpdateCmsServiceDto,
 } from './dto/cms-service.dto';
-import { UpdateSiteSettingsDto } from './dto/cms-site-settings.dto';
+import { conRedes, UpdateSiteSettingsDto } from './dto/cms-site-settings.dto';
 import {
   CreateCmsStaffMemberDto,
   UpdateCmsStaffMemberDto,
@@ -554,7 +554,7 @@ export class CmsService {
 
   async getSettings(): Promise<SiteSettingsData> {
     const row = await this.getSettingsRow();
-    return row?.data ?? DEFAULT_SITE_SETTINGS;
+    return conRedes(row?.data ?? DEFAULT_SITE_SETTINGS, DEFAULT_SITE_SETTINGS);
   }
 
   async updateSettings(dto: UpdateSiteSettingsDto): Promise<CmsSiteSettings> {

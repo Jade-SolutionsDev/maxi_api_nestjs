@@ -115,6 +115,26 @@ export class UpdateSiteSettingsDto implements SiteSettingsData {
   social: SiteSocialLinkDto[];
 }
 
+/**
+ * Los ajustes guardados, con las redes rellenas si la fila es anterior a que
+ * el campo existiera.
+ *
+ * La fila de staging y la de producción se guardaron antes de MxH-0119, así que
+ * no traen `social`. Sin esto el panel abre la lista vacía y el primero que
+ * guarde cualquier otra cosa —un teléfono— se lleva las redes por delante,
+ * porque el PATCH reemplaza el documento entero.
+ *
+ * Una lista vacía sí se respeta: eso es «las quité a propósito», no «nunca se
+ * configuraron».
+ */
+export const conRedes = (
+  data: SiteSettingsData,
+  fallback: SiteSettingsData,
+): SiteSettingsData => ({
+  ...data,
+  social: data.social ?? fallback.social,
+});
+
 export class SiteSettingsResponseDto {
   data: SiteSettingsData;
   updatedAt: Date | null;
@@ -124,7 +144,7 @@ export class SiteSettingsResponseDto {
     fallback: SiteSettingsData,
   ): SiteSettingsResponseDto {
     const dto = new SiteSettingsResponseDto();
-    dto.data = entity?.data ?? fallback;
+    dto.data = conRedes(entity?.data ?? fallback, fallback);
     dto.updatedAt = entity?.updatedAt ?? null;
     return dto;
   }
