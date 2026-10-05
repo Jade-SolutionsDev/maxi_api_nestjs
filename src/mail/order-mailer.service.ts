@@ -165,23 +165,30 @@ export class OrderMailerService {
    * sepa que su pago entró vale más que el documento, y el comprobante lo
    * puede descargar después desde su pedido.
    */
-  private async comprobante(
-    order: Order,
-  ): Promise<{ filename: string; content: Buffer }[] | undefined> {
+  private async comprobante(order: Order): Promise<{
+    adjuntos?: { filename: string; content: Buffer }[];
+    nota?: string;
+  }> {
     try {
       const pdf = await this.orderPdf.generate(order.id);
-      return [
-        {
-          filename: `pedido-${order.orderNumber ?? order.id}.pdf`,
-          content: pdf,
-        },
-      ];
+      return {
+        adjuntos: [
+          {
+            filename: `pedido-${order.orderNumber ?? order.id}.pdf`,
+            content: pdf,
+          },
+        ],
+      };
     } catch (err) {
+      const motivo = err instanceof Error ? err.message : String(err);
       this.logger.error(
         `No se pudo componer el comprobante del pedido ${order.orderNumber ?? order.id}; el aviso de pago sale sin él`,
         err instanceof Error ? err.stack : String(err),
       );
-      return undefined;
+      // Queda en `email_log`, que es lo que se puede contar: si la plantilla
+      // del PDF se rompe para todos, se ve con una consulta en vez de
+      // esperar a que alguien mire el stdout de un contenedor.
+      return { nota: `enviado sin comprobante: ${motivo}`.slice(0, 500) };
     }
   }
 
@@ -210,9 +217,9 @@ export class OrderMailerService {
         return null;
       }
       const rendered = render(this.toMailData(order));
-      const adjuntos = conComprobante
+      const { adjuntos, nota } = conComprobante
         ? await this.comprobante(order)
-        : undefined;
+        : {};
       return await this.mail.send({
         to,
         subject: rendered.subject,
@@ -221,6 +228,7 @@ export class OrderMailerService {
         template,
         orderId: order.id,
         ...(adjuntos ? { attachments: adjuntos } : {}),
+        ...(nota ? { nota } : {}),
       });
     } catch (err) {
       // Avisar nunca puede tumbar lo que se estaba haciendo.
