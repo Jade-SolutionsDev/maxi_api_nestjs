@@ -66,6 +66,18 @@ export const DEFAULT_SITE_SETTINGS: SiteSettingsData = {
     mastercard: true,
     mibilletera: false,
   },
+  // Los mismos enlaces que vivían en código, para que el día que esto se
+  // despliegue no cambie nada sin que nadie haya tocado el panel. El de
+  // Facebook es el canónico —el que se comparte desde la app redirige aquí— y
+  // el de Instagram va sin el `?stkn=`, que es un token de sesión de quien
+  // copió el enlace y no debe publicarse.
+  social: [
+    {
+      label: 'Facebook',
+      url: 'https://www.facebook.com/profile.php?id=61550740714835',
+    },
+    { label: 'Instagram', url: 'https://www.instagram.com/maxihabana' },
+  ],
   services: {
     heading: 'Nuestros servicios',
     subheading:

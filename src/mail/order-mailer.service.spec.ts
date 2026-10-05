@@ -1,3 +1,4 @@
+import { CmsService } from '../cms/cms.service';
 import { OrderPdfService } from '../orders/order-pdf.service';
 import { ConfigService } from '@nestjs/config';
 import { Test, TestingModule } from '@nestjs/testing';
@@ -34,6 +35,13 @@ describe('OrderMailerService', () => {
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         OrderMailerService,
+        {
+          // Las redes del pie salen de los ajustes del sitio (MxH-0119).
+          provide: CmsService,
+          useValue: {
+            getSettings: jest.fn().mockResolvedValue({ social: [] }),
+          },
+        },
         { provide: MailService, useValue: mail },
         {
           // Desde MxH-0051 el aviso de pago lleva el comprobante adjunto.

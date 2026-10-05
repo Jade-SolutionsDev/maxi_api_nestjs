@@ -1,3 +1,4 @@
+import { CmsService } from '../cms/cms.service';
 import { OrderPdfService } from '../orders/order-pdf.service';
 import { enlaceDeSeguimiento } from '../orders/enlace-de-seguimiento';
 import { Injectable, Logger } from '@nestjs/common';
@@ -20,6 +21,7 @@ import {
   pickupReminder,
   refundCompleted,
   refundRequested,
+  type FooterLink,
 } from './templates';
 
 /**
@@ -42,6 +44,10 @@ export class OrderMailerService {
     // El comprobante que viaja con el aviso de pago. Vive en su propio módulo
     // justo para poder llegar hasta aquí sin cerrar un círculo de módulos.
     private readonly orderPdf: OrderPdfService,
+    // Las redes del pie salen de los ajustes del sitio, que es donde se editan
+    // desde el panel. Antes estaban en una constante aquí y otra en la tienda:
+    // cambiar un perfil obligaba a tocar dos repos y publicar los dos.
+    private readonly cms: CmsService,
     @InjectRepository(Order)
     private readonly orderRepository: Repository<Order>,
   ) {}
@@ -192,6 +198,23 @@ export class OrderMailerService {
     }
   }
 
+  /**
+   * Las redes configuradas, o ninguna si no se pueden leer.
+   *
+   * Un fallo leyendo los ajustes no puede costar el correo: la plantilla cae
+   * entonces en las de siempre, que es lo que hacía hasta hoy.
+   */
+  private async redesDelSitio(): Promise<FooterLink[] | undefined> {
+    try {
+      return (await this.cms.getSettings()).social;
+    } catch (err) {
+      this.logger.warn(
+        `No se pudieron leer las redes de los ajustes; el correo sale con las de siempre: ${String(err)}`,
+      );
+      return undefined;
+    }
+  }
+
   private async dispatch(
     orderId: string,
     template: string,
@@ -216,7 +239,9 @@ export class OrderMailerService {
         );
         return null;
       }
-      const rendered = render(this.toMailData(order));
+      const datos = this.toMailData(order);
+      datos.redes = await this.redesDelSitio();
+      const rendered = render(datos);
       const { adjuntos, nota } = conComprobante
         ? await this.comprobante(order)
         : {};

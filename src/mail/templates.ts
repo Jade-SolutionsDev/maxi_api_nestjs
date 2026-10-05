@@ -64,6 +64,8 @@ export interface OrderMailData {
    * va a buscarlo suele no ser el que compró.
    */
   recipient?: { name: string; idCard: string | null } | null;
+  /** Las redes del pie, de los ajustes del sitio. Si faltan, las de siempre. */
+  redes?: FooterLink[];
 }
 
 /**
@@ -187,16 +189,26 @@ const footerLinks = (links: FooterLink[]): string =>
  * Las redes, en texto y no con iconos: un PNG de Facebook en el pie es una
  * imagen más que Gmail bloquea, y entonces no queda ni el enlace.
  */
-const redesDelPie = (): string =>
-  `<p style="margin:0 0 10px;font-size:12px;">${REDES.map(
-    (red) =>
-      `<a href="${red.url}" style="color:#ffe1bd;text-decoration:none;">${esc(red.label)}</a>`,
-  ).join(' &nbsp;·&nbsp; ')}</p>`;
+const redesDelPie = (redes: FooterLink[] = REDES): string =>
+  !redes.length
+    ? ''
+    : `<p style="margin:0 0 10px;font-size:12px;">${redes
+        .map(
+          (red) =>
+            `<a href="${red.url}" style="color:#ffe1bd;text-decoration:none;">${esc(red.label)}</a>`,
+        )
+        .join(' &nbsp;·&nbsp; ')}</p>`;
 
 export interface LayoutOptions {
   title: string;
   body: string;
   whatsapp: string;
+  /**
+   * Las redes del pie. Vienen de los ajustes del sitio, que es donde se editan
+   * desde el panel (MxH-0119); sin ellas se usan las de siempre, para que una
+   * plantilla que no las pase no deje el pie cojo.
+   */
+  redes?: FooterLink[];
   storeUrl?: string | null;
   estado?: { texto: string; tono: TonoEstado };
   /** Por qué le llega esto: cuenta para no acabar en spam, y es honesto. */
@@ -210,6 +222,7 @@ const layout = ({
   storeUrl,
   estado,
   motivo,
+  redes,
 }: LayoutOptions): string => `
 <!doctype html>
 <html lang="es">
@@ -233,7 +246,7 @@ ${cabecera()}${franja(estado)}
         </td></tr>
         <tr><td style="background:#14291f;padding:18px 30px;">
           ${footerLinks(enlacesDelPie(storeUrl))}
-          ${redesDelPie()}
+          ${redesDelPie(redes)}
           <p style="margin:0;font-size:11px;line-height:1.7;color:#8ba394;">
             © ${new Date().getFullYear()} Maxi Habana · La Meknica Export &amp; Import SRL${motivo ? `<br>${esc(motivo)}` : ''}
           </p>
@@ -364,6 +377,7 @@ export const orderReceived = (order: OrderMailData): RenderedEmail => {
       title: '¡Listo! Tenemos tu pedido',
       body,
       whatsapp: order.whatsapp,
+      redes: order.redes,
       storeUrl: order.storeUrl,
       estado: { texto: 'PENDIENTE DE PAGO', tono: 'atencion' },
       motivo:
@@ -411,6 +425,7 @@ export const paymentReceived = (order: OrderMailData): RenderedEmail => {
     title: 'Tu pedido está listo para recoger',
     body,
     whatsapp: order.whatsapp,
+    redes: order.redes,
     storeUrl: order.storeUrl,
     estado: { texto: 'PAGO RECIBIDO', tono: 'bien' },
     motivo: 'Recibes este correo porque hiciste un pedido en Maxi Habana.',
@@ -449,6 +464,7 @@ export const pickupReminder = (
     title: `Tu pedido ${esc(order.orderNumber)} te espera`,
     body,
     whatsapp: order.whatsapp,
+    redes: order.redes,
     storeUrl: order.storeUrl,
     estado: { texto: `TE QUEDAN ${remaining} DÍAS`, tono: 'atencion' },
     motivo: 'Recibes este correo porque tienes un pedido pagado sin recoger.',
@@ -493,6 +509,7 @@ export const refundCompleted = (
     title: 'Te devolvimos tu dinero',
     body,
     whatsapp: order.whatsapp,
+    redes: order.redes,
     storeUrl: order.storeUrl,
     estado: { texto: 'DEVOLUCIÓN COMPLETADA', tono: 'bien' },
     motivo: 'Recibes este correo por una devolución de tu pedido.',
@@ -526,6 +543,7 @@ export const refundRequested = (
     title: 'Tu devolución está en trámite',
     body,
     whatsapp: order.whatsapp,
+    redes: order.redes,
     storeUrl: order.storeUrl,
     estado: { texto: 'DEVOLUCIÓN EN TRÁMITE', tono: 'atencion' },
     motivo: 'Recibes este correo por una devolución de tu pedido.',
@@ -678,6 +696,7 @@ export const orderShipped = (order: OrderMailData): RenderedEmail => {
       title: 'Tu pedido va en camino',
       body,
       whatsapp: order.whatsapp,
+      redes: order.redes,
       storeUrl: order.storeUrl,
       estado: { texto: 'EN CAMINO', tono: 'bien' },
       motivo: 'Recibes este correo porque hiciste un pedido en Maxi Habana.',
@@ -704,6 +723,7 @@ export const orderDelivered = (order: OrderMailData): RenderedEmail => {
       title: 'Pedido entregado',
       body,
       whatsapp: order.whatsapp,
+      redes: order.redes,
       storeUrl: order.storeUrl,
       estado: { texto: 'ENTREGADO', tono: 'bien' },
       motivo: 'Recibes este correo porque hiciste un pedido en Maxi Habana.',
@@ -766,6 +786,7 @@ export const orderCancelled = (
         : 'Tu pedido se canceló',
       body: cuerpo,
       whatsapp: order.whatsapp,
+      redes: order.redes,
       storeUrl: order.storeUrl,
       estado: conDevolucion
         ? { texto: 'CANCELADO · TE DEVOLVEMOS EL DINERO', tono: 'atencion' }

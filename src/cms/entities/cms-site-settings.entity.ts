@@ -13,6 +13,21 @@ export interface SiteLegalLink {
 }
 
 /**
+ * Una red social de la tienda: lo que se ve en el pie, en la página de contacto
+ * y en el pie de los ocho correos.
+ *
+ * Es una lista y no un objeto con un campo por red porque mañana hay un TikTok
+ * y eso no debería tocar ni el esquema ni el código. El `label` es lo que lee
+ * una persona; el icono no se guarda: la tienda las pinta como texto a
+ * propósito, porque un PNG en el pie de un correo es una imagen más de las que
+ * el gestor bloquea, y entonces no queda ni el enlace.
+ */
+export interface SiteSocialLink {
+  label: string;
+  url: string;
+}
+
+/**
  * Site-wide editable settings consumed by the storefront layout. Payment
  * methods are a FIXED catalog of toggles — the storefront bundles the logos
  * and only shows the enabled ones; adding a new method is a code change on
@@ -37,6 +52,8 @@ export interface SiteSettingsData {
     heading: string;
     subheading: string;
   };
+  /** Vacío es válido: una tienda puede no tener redes. */
+  social: SiteSocialLink[];
 }
 
 /**
