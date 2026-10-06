@@ -23,6 +23,14 @@ export class StockLocationPickupAddress {
   @Column({ type: 'varchar', length: 300 })
   address: string;
 
+  /**
+   * Cuándo se puede pasar a recoger, tal cual se le dice al cliente: «9:00 am a
+   * 3:00 pm, de lunes a viernes». Nulo = sin horario publicado, y entonces no se
+   * enseña nada en vez de un hueco (MxH-0160).
+   */
+  @Column({ type: 'varchar', length: 160, nullable: true })
+  hours: string | null;
+
   @CreateDateColumn({ name: 'created_at', type: 'timestamptz' })
   createdAt: Date;
 

@@ -29,6 +29,7 @@ const point = (overrides = {}) => ({
   locationName: 'Almacén Centro',
   label: 'Mostrador',
   address: 'Calle 1 #2',
+  hours: '9:00 am a 3:00 pm, de lunes a viernes',
   ...overrides,
 });
 
@@ -293,6 +294,35 @@ describe('FulfillmentService', () => {
       expect(choice.pickupAddressSnapshot).toMatchObject({
         address: 'Calle 1 #2',
       });
+    });
+
+    /**
+     * MxH-0160. El horario se congela con la dirección por lo mismo que ella: el
+     * pedido guarda lo que se le dijo al cliente al comprar, y de ahí lo leen la
+     * ficha del pedido y los correos sin volver a preguntar.
+     */
+    it('congela el horario del mostrador junto a su dirección', async () => {
+      const choice = await service.resolveChoice({
+        fulfillmentType: FulfillmentType.PICKUP,
+        pickupAddressId: 'pick-1',
+        municipalityId: 'mun-1',
+      });
+
+      expect(choice.pickupAddressSnapshot).toMatchObject({
+        hours: '9:00 am a 3:00 pm, de lunes a viernes',
+      });
+    });
+
+    it('un mostrador sin horario deja el campo en nulo, no en undefined', async () => {
+      pickupPoints = [point({ hours: null })];
+
+      const choice = await service.resolveChoice({
+        fulfillmentType: FulfillmentType.PICKUP,
+        pickupAddressId: 'pick-1',
+        municipalityId: 'mun-1',
+      });
+
+      expect(choice.pickupAddressSnapshot).toMatchObject({ hours: null });
     });
 
     it('refuses a pickup point that is not on offer', async () => {

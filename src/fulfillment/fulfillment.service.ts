@@ -243,6 +243,7 @@ export class FulfillmentService {
       .addSelect('location.name', 'locationName')
       .addSelect('pickup.label', 'label')
       .addSelect('pickup.address', 'address')
+      .addSelect('pickup.hours', 'hours')
       .orderBy('location.name')
       .addOrderBy('pickup.label');
 
@@ -375,10 +376,14 @@ export class FulfillmentService {
         deliveryOptionLabel: null,
         pickupLocationId: point.locationId,
         pickupAddressId: point.id,
+        // El horario se congela con la dirección, por lo mismo que ella: el
+        // pedido guarda lo que se le dijo al cliente al comprar. Si el mostrador
+        // cambia de horario, los pedidos nuevos llevan el nuevo.
         pickupAddressSnapshot: {
           locationName: point.locationName,
           label: point.label,
           address: point.address,
+          hours: point.hours ?? null,
         },
       };
     }
