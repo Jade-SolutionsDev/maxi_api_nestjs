@@ -9,6 +9,7 @@ import {
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { DataSource, In, Repository } from 'typeorm';
+import { quitarDelCarrito } from '../cart/devolver-al-carrito';
 import { InventoryService } from '../inventory/inventory.service';
 import { OrderEventKind } from '../order-events/entities/order-event.entity';
 import { OrderEventsService } from '../order-events/order-events.service';
@@ -575,6 +576,10 @@ export class PaymentsService {
         order.status = OrderStatus.PENDING;
         order.cancellationReason = null;
         await manager.getRepository(Order).save(order);
+        // Al caducar, sus líneas volvieron al carrito (MxH-0099). El pedido
+        // revive, así que salen de ahí: si no, el cliente vería en el carrito
+        // exactamente lo que acaba de pagar.
+        await quitarDelCarrito(manager, order.clientId, items);
         await this.orderEvents.record(manager, {
           orderId: order.id,
           kind: OrderEventKind.REINSTATED,

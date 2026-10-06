@@ -781,7 +781,9 @@ export const orderCancelled = (
       p(
         `Los productos que tenías apartados volvieron a la venta. No se te cobró nada.`,
       ),
-      p(`Si todavía lo quieres, puedes hacer el pedido otra vez.`),
+      p(
+        `Los dejamos otra vez en tu carrito, así que si todavía lo quieres no tienes que armar el pedido de nuevo: entra, revísalo y págalo.`,
+      ),
     ],
     paid_after_expiry_out_of_stock: [
       p(

@@ -3,6 +3,7 @@ import { ConflictException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { Test, TestingModule } from '@nestjs/testing';
 import { getRepositoryToken } from '@nestjs/typeorm';
+import { CartItem } from '../cart/entities/cart-item.entity';
 import { DataSource } from 'typeorm';
 import {
   CancellationReason,
@@ -50,6 +51,12 @@ describe('OrderExpiryService', () => {
   let payments: { latestChargesFor: jest.Mock };
   let methods: { gatewayFor: jest.Mock };
   let inventory: { releaseReservations: jest.Mock };
+  let cartRepo: {
+    find: jest.Mock;
+    create: jest.Mock;
+    save: jest.Mock;
+    remove: jest.Mock;
+  };
   let saved: Order[];
 
   beforeEach(async () => {
@@ -71,7 +78,18 @@ describe('OrderExpiryService', () => {
     };
     inventory = { releaseReservations: jest.fn() };
 
-    const manager = { getRepository: () => orderRepo };
+    cartRepo = {
+      find: jest.fn().mockResolvedValue([]),
+      create: jest.fn((datos: unknown) => datos),
+      save: jest.fn((filas: unknown) => Promise.resolve(filas)),
+      remove: jest.fn((filas: unknown) => Promise.resolve(filas)),
+    };
+    // Por entidad, no uno para todo: devolviendo `orderRepo` a cualquiera,
+    // `getRepository(CartItem)` daba pedidos y nada de lo del carrito se medía.
+    const manager = {
+      getRepository: (entity: unknown) =>
+        entity === CartItem ? cartRepo : orderRepo,
+    };
     const dataSource = {
       transaction: jest.fn((cb: (m: unknown) => unknown) => cb(manager)),
     };
@@ -138,6 +156,40 @@ describe('OrderExpiryService', () => {
       cancelled: 1,
       orderIds: ['order-1'],
     });
+  });
+
+  /**
+   * MxH-0099. El carrito se vacía al crear el pedido, y hasta ahora caducar lo
+   * dejaba vacío para siempre: el cliente apartaba quince líneas, no llegaba a
+   * pagar y tenía que armar la compra otra vez desde el catálogo. El correo de
+   * caducidad llegaba a decirle «puedes hacer el pedido otra vez».
+   */
+  it('devuelve al carrito del cliente lo que el pedido caducado se llevó', async () => {
+    const order = makeOrder({
+      clientId: 'client-1',
+      items: [
+        { productId: 'ibc-diesel', quantity: 2 },
+        { productId: 'panel-solar', quantity: 1 },
+      ],
+    } as Partial<Order>);
+
+    await sweepWith(order, makeCharge({ createdAt: ago(31 * MINUTE) }));
+
+    expect(cartRepo.save).toHaveBeenCalledWith([
+      { clientId: 'client-1', productId: 'ibc-diesel', quantity: 2 },
+      { clientId: 'client-1', productId: 'panel-solar', quantity: 1 },
+    ]);
+  });
+
+  it('no toca el carrito de un pedido que todavía no caduca', async () => {
+    const order = makeOrder({
+      clientId: 'client-1',
+      items: [{ productId: 'ibc-diesel', quantity: 2 }],
+    } as Partial<Order>);
+
+    await sweepWith(order, makeCharge({ createdAt: ago(5 * MINUTE) }));
+
+    expect(cartRepo.save).not.toHaveBeenCalled();
   });
 
   it('spares a gateway order still inside its window', async () => {

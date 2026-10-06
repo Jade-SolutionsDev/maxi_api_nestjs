@@ -20,6 +20,7 @@ import {
 } from 'typeorm';
 import { CartService } from '../cart/cart.service';
 import { CartItem } from '../cart/entities/cart-item.entity';
+import { devolverAlCarrito } from '../cart/devolver-al-carrito';
 import { Client } from '../clients/entities/client.entity';
 import {
   buildPaginatedResponse,
@@ -904,8 +905,11 @@ export class OrdersService {
     clientId: string,
     id: string,
   ): Promise<OrderResponseDto> {
+    // Con las líneas: al cancelar vuelven al carrito (MxH-0099), para que el
+    // cliente no tenga que rearmar la compra desde el catálogo.
     const order = await this.orderRepository.findOne({
       where: { id, clientId },
+      relations: { items: true },
     });
     if (!order) {
       throw new NotFoundException(`Order with id "${id}" not found`);
@@ -920,6 +924,13 @@ export class OrdersService {
       const previous = order.status;
       order.status = OrderStatus.CANCELLED;
       await manager.getRepository(Order).save(order);
+      // Lo que apartó vuelve a su carrito: el pedido deja de existir como
+      // compra y el carrito es donde estaba su trabajo.
+      const devueltas = await devolverAlCarrito(
+        manager,
+        clientId,
+        order.items ?? [],
+      );
       await this.orderEvents.record(manager, {
         orderId: order.id,
         kind: OrderEventKind.STATUS_CHANGED,
@@ -927,7 +938,9 @@ export class OrdersService {
         field: 'status',
         previousValue: previous,
         nextValue: OrderStatus.CANCELLED,
-        reason: 'Cancelado por el cliente desde la tienda',
+        reason: devueltas
+          ? `Cancelado por el cliente desde la tienda; ${devueltas} ${devueltas === 1 ? 'línea' : 'líneas'} de vuelta en su carrito`
+          : 'Cancelado por el cliente desde la tienda',
       });
     });
     return this.findOneForClient(clientId, id);
