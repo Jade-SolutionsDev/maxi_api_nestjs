@@ -16,6 +16,8 @@ export class StorefrontPickupPointDto {
   locationName: string;
   label: string | null;
   address: string;
+  /** Cuándo se puede pasar a recogerlo. `null` = sin horario publicado. */
+  hours: string | null;
 }
 
 export class StorefrontFulfillmentDto {

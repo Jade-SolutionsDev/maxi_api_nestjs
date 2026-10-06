@@ -314,7 +314,19 @@ export class OrderMailerService {
       trackingUrl: enlaceDeSeguimiento(tienda, order.trackingId ?? null),
       recipient: this.quienRecibe(order),
       promisedAt: order.promisedAt,
+      pickupHours: this.pickupHours(order),
     };
+  }
+
+  /**
+   * El horario del mostrador, congelado al comprar junto a la dirección.
+   *
+   * Los pedidos anteriores a MxH-0160 no lo llevan, y entonces el correo no
+   * dice nada en vez de enseñar un hueco.
+   */
+  private pickupHours(order: Order): string | null {
+    const snapshot = order.pickupAddressSnapshot as { hours?: string } | null;
+    return snapshot?.hours?.trim() || null;
   }
 
   /** `{locationName, label, address}` tal como lo guarda el checkout. */

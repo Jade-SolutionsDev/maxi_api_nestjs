@@ -11,4 +11,10 @@ export class PickupAddressItemDto {
   @IsNotEmpty()
   @Length(1, 300)
   address: string;
+
+  // Horario del mostrador, tal cual se le dice al cliente (MxH-0160).
+  @IsOptional()
+  @IsString()
+  @Length(1, 160)
+  hours?: string;
 }

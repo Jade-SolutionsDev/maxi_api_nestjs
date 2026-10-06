@@ -427,6 +427,7 @@ export class StockLocationsService {
           locationId,
           label: item.label?.trim() || null,
           address: item.address.trim(),
+          hours: item.hours?.trim() || null,
         }),
       ),
     );
