@@ -4,6 +4,7 @@ import { ConfigService } from '@nestjs/config';
 import { InjectRepository } from '@nestjs/typeorm';
 import { DataSource, In, IsNull, LessThan, Repository } from 'typeorm';
 import { ExpiryConfig, PaymentsConfig } from '../config/configuration';
+import { devolverAlCarrito } from '../cart/devolver-al-carrito';
 import { InventoryService } from '../inventory/inventory.service';
 import { OrderMailerService } from '../mail/order-mailer.service';
 import { OrderEventKind } from '../order-events/entities/order-event.entity';
@@ -158,7 +159,11 @@ export class OrderExpiryService {
     try {
       const caducado = await this.dataSource.transaction(async (manager) => {
         const repo = manager.getRepository(Order);
-        const fresh = await repo.findOne({ where: { id: order.id } });
+        // Con las líneas: si caduca, vuelven al carrito del cliente (MxH-0099).
+        const fresh = await repo.findOne({
+          where: { id: order.id },
+          relations: { items: true },
+        });
         if (
           !fresh ||
           fresh.status !== OrderStatus.PENDING ||
@@ -176,6 +181,14 @@ export class OrderExpiryService {
         fresh.status = OrderStatus.CANCELLED;
         fresh.cancellationReason = CancellationReason.PAYMENT_NOT_RECEIVED;
         await repo.save(fresh);
+        // Lo que había apartado vuelve a su carrito. El stock se libera de
+        // todas formas; lo que se le devuelve es el trabajo de haber armado la
+        // compra, que es lo que antes tenía que repetir desde el catálogo.
+        const devueltas = await devolverAlCarrito(
+          manager,
+          fresh.clientId,
+          fresh.items ?? [],
+        );
         await this.orderEvents.record(manager, {
           orderId: fresh.id,
           kind: OrderEventKind.EXPIRED,
@@ -183,7 +196,9 @@ export class OrderExpiryService {
           field: 'status',
           previousValue: OrderStatus.PENDING,
           nextValue: OrderStatus.CANCELLED,
-          reason: 'No se recibió el pago a tiempo; el stock se liberó',
+          reason: devueltas
+            ? `No se recibió el pago a tiempo; el stock se liberó y ${devueltas} ${devueltas === 1 ? 'línea' : 'líneas'} volvieron a su carrito`
+            : 'No se recibió el pago a tiempo; el stock se liberó',
         });
         return true;
       });
