@@ -11,7 +11,11 @@ import {
   type PaginatedResponse,
   type PaginationQueryDto,
 } from '../common/dto/pagination.dto';
-import { contieneTexto, sinTildes } from '../common/search/accent-insensitive';
+import {
+  comoBusquedaParcial,
+  contieneTexto,
+  sinTildes,
+} from '../common/search/accent-insensitive';
 import { ClientInvitationsService } from './client-invitations.service';
 import { CAMPOS_ORDENABLES } from './dto/list-clients-query.dto';
 import { CreateClientDto } from './dto/create-client.dto';
@@ -54,7 +58,7 @@ export class ClientsService {
         `(${sinTildes('client.firstName')} OR ${sinTildes('client.lastName')}
           OR ${sinTildes("concat_ws(' ', client.firstName, client.lastName)")}
           OR ${sinTildes('client.email')} OR ${sinTildes('client.phone')})`,
-        { q: `%${filtro.q}%` },
+        { q: comoBusquedaParcial(filtro.q) },
       );
     }
 

@@ -9,6 +9,25 @@ import { Raw } from 'typeorm';
  * la migración `UnaccentSearch`.
  */
 
+/**
+ * El texto tecleado, listo para un `ILIKE` que busca por dentro.
+ *
+ * **Escapa los comodines antes de envolver.** En `LIKE`/`ILIKE`, `%` significa
+ * «lo que sea» y `_` «un carácter cualquiera», así que pegar el texto crudo
+ * entre dos `%` traiciona a quien busca justo esos caracteres: teclear `%`
+ * devolvía la lista entera y `_` encontraba cualquier cosa de esa longitud.
+ *
+ * El carácter de escape es `\`, el que PostgreSQL usa por defecto en `LIKE`,
+ * y por eso se escapa también él mismo —primero, o se escaparían los escapes
+ * que añadimos después—.
+ *
+ * Vive aquí y no en cada servicio a propósito: el fallo venía de copiar la
+ * misma línea a cada buscador nuevo. Con una sola función, el siguiente
+ * buscador lo hereda bien sin que nadie se acuerde.
+ */
+export const comoBusquedaParcial = (termino: string): string =>
+  `%${termino.replace(/[\\%_]/g, (caracter) => `\\${caracter}`)}%`;
+
 /** Para QueryBuilder: `qb.andWhere(sinTildes('product.name'), { q })`. */
 export const sinTildes = (columna: string): string =>
   `f_unaccent(${columna}) ILIKE f_unaccent(:q)`;
@@ -35,5 +54,5 @@ export const contieneTexto = (
 /** Para las condiciones declarativas de TypeORM (`where: { name: … }`). */
 export const contieneSinTildes = (termino: string) =>
   Raw((alias) => `f_unaccent(${alias}) ILIKE f_unaccent(:termino)`, {
-    termino: `%${termino}%`,
+    termino: comoBusquedaParcial(termino),
   });

@@ -1,5 +1,8 @@
 import { randomBytes } from 'node:crypto';
-import { sinTildes } from '../common/search/accent-insensitive';
+import {
+  comoBusquedaParcial,
+  sinTildes,
+} from '../common/search/accent-insensitive';
 import {
   BadRequestException,
   ConflictException,
@@ -988,7 +991,7 @@ export class OrdersService {
           OR ${sinTildes("(order.contact_snapshot)->>'recipientName'")}
           OR ${sinTildes("(order.contact_snapshot)->>'idCard'")}
           OR ${sinTildes("(order.contact_snapshot)->>'contactPhone'")})`,
-        { q: `%${query.q}%` },
+        { q: comoBusquedaParcial(query.q) },
       );
     }
     if (query.status) {
