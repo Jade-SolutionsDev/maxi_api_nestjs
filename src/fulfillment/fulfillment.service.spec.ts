@@ -80,21 +80,35 @@ describe('FulfillmentService', () => {
       coveringLocationIds: jest.fn().mockResolvedValue(['loc-1']),
     };
 
-    // Chainable stub for the pickup-points query builder.
-    const chain: Record<string, unknown> = {
-      getRawMany: () => Promise.resolve(pickupPoints),
+    // Chainable stub for the pickup-points query builder. `andWhere` is not a
+    // no-op: it applies the storage filter the service asks for, so a test that
+    // claims a counter was filtered out is actually measuring the filter.
+    const nuevaCadena = () => {
+      let serving: string[] | null = null;
+      const chain: Record<string, unknown> = {
+        getRawMany: () =>
+          Promise.resolve(
+            serving === null
+              ? pickupPoints
+              : pickupPoints.filter((p) => serving?.includes(p.locationId)),
+          ),
+        andWhere: (_sql: string, params?: { serving?: string[] }) => {
+          if (params?.serving) serving = params.serving;
+          return chain;
+        },
+      };
+      for (const method of [
+        'innerJoin',
+        'select',
+        'addSelect',
+        'orderBy',
+        'addOrderBy',
+      ]) {
+        chain[method] = () => chain;
+      }
+      return chain;
     };
-    for (const method of [
-      'innerJoin',
-      'andWhere',
-      'select',
-      'addSelect',
-      'orderBy',
-      'addOrderBy',
-    ]) {
-      chain[method] = () => chain;
-    }
-    const pickupRepo = { createQueryBuilder: () => chain };
+    const pickupRepo = { createQueryBuilder: () => nuevaCadena() };
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
@@ -136,6 +150,33 @@ describe('FulfillmentService', () => {
       expect(products.coveringLocationIds).toHaveBeenCalledWith({
         municipalityId: 'mun-1',
       });
+    });
+
+    /**
+     * MxH-0101. El catálogo enseña el producto porque un almacén con cobertura
+     * tiene stock; si ese almacén no tiene mostrador, el checkout se quedaba
+     * sin una sola vía y mandaba a escribir por privado. El pedido sí sabe
+     * resolverlo: reserva en los almacenes con cobertura y marca el traslado
+     * al mostrador elegido (orders.service, resolveAllowedLocationIds).
+     */
+    it('ofrece los demás mostradores cuando el almacén que cubre la zona no tiene ninguno', async () => {
+      pickupPoints = [point({ id: 'pick-2', locationId: 'loc-2' })];
+      products.coveringLocationIds.mockResolvedValue(['loc-1']);
+
+      const offer = await service.availableForClient('mun-1');
+
+      expect(offer.pickupPoints).toHaveLength(1);
+      expect(offer.pickupPoints[0].locationId).toBe('loc-2');
+      expect(offer.unavailableMessage).toBeNull();
+    });
+
+    it('prefiere el mostrador de la zona cuando lo hay, y no enseña los lejanos', async () => {
+      pickupPoints = [point(), point({ id: 'pick-2', locationId: 'loc-2' })];
+      products.coveringLocationIds.mockResolvedValue(['loc-1']);
+
+      const offer = await service.availableForClient('mun-1');
+
+      expect(offer.pickupPoints.map((p) => p.locationId)).toEqual(['loc-1']);
     });
 
     it('keeps the full pickup list when the customer has no municipality', async () => {
