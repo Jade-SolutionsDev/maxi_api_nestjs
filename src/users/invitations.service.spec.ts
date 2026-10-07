@@ -44,6 +44,7 @@ describe('InvitationsService', () => {
     businessLogoUrl: null,
     clerkOrgId: null,
     isActive: true,
+    approvedAt: null,
     createdBy: null,
     createdAt: new Date(),
     updatedAt: new Date(),

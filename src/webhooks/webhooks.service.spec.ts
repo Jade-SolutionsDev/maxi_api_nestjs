@@ -213,6 +213,9 @@ describe('WebhooksService', () => {
       id: 'invite-id',
       email: 'admin@example.com',
       role: Role.ADMIN,
+      roleIds: [],
+      firstName: null,
+      lastName: null,
       invitedById: null,
       invitedBy: null,
       organizationId: null,
@@ -249,6 +252,10 @@ describe('WebhooksService', () => {
       const result = await service.handleAdminWebhook('raw-body', {});
 
       expect(result.processed).toBe(true);
+      // `roleIds` entra en la cuenta: son los roles que la invitación le
+      // concede, y de ahí salen sus permisos. La aserción no lo nombraba y el
+      // fixture de la invitación tampoco lo traía, así que el campo que decide
+      // qué puede hacer un administrador invitado no estaba cubierto por nada.
       expect(usersService.createOrUpdateFromClerk).toHaveBeenCalledWith(
         'admin_clerk_id',
         {
@@ -256,6 +263,9 @@ describe('WebhooksService', () => {
           firstName: 'Admin',
           lastName: 'User',
           role: Role.ADMIN,
+          roleIds: invitation.roleIds,
+          phone: undefined,
+          businessName: undefined,
         },
       );
       expect(invitationsService.markAccepted).toHaveBeenCalledWith(invitation);

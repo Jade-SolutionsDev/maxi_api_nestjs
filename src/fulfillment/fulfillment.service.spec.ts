@@ -271,7 +271,7 @@ describe('FulfillmentService', () => {
         },
       });
 
-      const oferta = await service.availableForClient({});
+      const oferta = await service.availableForClient();
 
       expect(oferta.pickupPromiseDays).toBe(2);
     });

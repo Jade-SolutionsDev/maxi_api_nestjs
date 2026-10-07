@@ -50,7 +50,9 @@ describe('InventoryService', () => {
       save: jest
         .fn()
         .mockImplementation((d: unknown) =>
-          Promise.resolve(Array.isArray(d) ? d : { id: 'op-1', ...d }),
+          Promise.resolve(
+            Array.isArray(d) ? d : { id: 'op-1', ...(d as object) },
+          ),
         ),
       count: jest.fn().mockResolvedValue(1),
       update: jest.fn().mockResolvedValue({ affected: 1 }),
