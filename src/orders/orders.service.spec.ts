@@ -43,6 +43,8 @@ function makeUser(role: Role): User {
 }
 
 function makeOrder(overrides: Partial<Order> = {}): Order {
+  // `as Order` al final: el spread de un Partial vuelve opcional lo que la
+  // entidad exige, y entonces el objeto ya no es un Order a ojos de TypeScript.
   return {
     id: 'order-1',
     orderNumber: 'ORD-20260001',
@@ -61,7 +63,7 @@ function makeOrder(overrides: Partial<Order> = {}): Order {
     updatedAt: new Date(),
     deletedAt: null,
     ...overrides,
-  };
+  } as Order;
 }
 
 const cartLine = {
@@ -130,6 +132,11 @@ describe('OrdersService', () => {
   };
   let permissionsService: { hasPermission: jest.Mock };
   let orderEvents: { record: jest.Mock; listForOrder: jest.Mock };
+  // Faltaba declararlo: la asignación creaba una global y TypeScript no la veía.
+  let geographyService: {
+    getMunicipalityOrThrow: jest.Mock;
+    getProvinceOrThrow: jest.Mock;
+  };
   let mailer: {
     orderReceived: jest.Mock;
     paymentReceived: jest.Mock;

@@ -89,7 +89,7 @@ describe('UsersService', () => {
             merge: jest.fn((entity: User, dto: Partial<User>) => {
               for (const [key, value] of Object.entries(dto)) {
                 if (value !== undefined) {
-                  (entity as Record<string, unknown>)[key] = value;
+                  (entity as unknown as Record<string, unknown>)[key] = value;
                 }
               }
               return entity;

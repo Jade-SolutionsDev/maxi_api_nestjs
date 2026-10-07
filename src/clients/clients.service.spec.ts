@@ -23,6 +23,7 @@ describe('ClientsService', () => {
     avatarUrl: null,
     defaultMunicipalityId: null,
     isActive: true,
+    adminInvitePending: false,
     onboardingCompleted: false,
     createdAt: new Date(),
     updatedAt: new Date(),
@@ -190,9 +191,9 @@ describe('ClientsService', () => {
       repository.save.mockResolvedValue(client);
 
       const result = await service.createOrUpdateFromClerk(client.clerkId, {
-        email: client.email,
-        firstName: client.firstName,
-        lastName: client.lastName,
+        email: client.email ?? undefined,
+        firstName: client.firstName ?? undefined,
+        lastName: client.lastName ?? undefined,
       });
 
       expect(result).toEqual(client);
