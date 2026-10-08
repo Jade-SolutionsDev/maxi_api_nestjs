@@ -47,7 +47,12 @@ describe('FulfillmentService', () => {
     save: jest.Mock;
     create: jest.Mock;
   };
-  let settingsRepo: { findOne: jest.Mock; save: jest.Mock; create: jest.Mock };
+  let settingsRepo: {
+    findOne: jest.Mock;
+    save: jest.Mock;
+    create: jest.Mock;
+    manager: { query: jest.Mock };
+  };
   let pickupPoints: ReturnType<typeof point>[];
   let geography: { getMunicipalityOrThrow: jest.Mock };
   let products: { coveringLocationIds: jest.Mock };
@@ -70,6 +75,7 @@ describe('FulfillmentService', () => {
       findOne: jest.fn().mockResolvedValue(null),
       save: jest.fn().mockImplementation((s: unknown) => Promise.resolve(s)),
       create: jest.fn().mockImplementation((s: unknown) => s),
+      manager: { query: jest.fn().mockResolvedValue([]) },
     };
     geography = {
       getMunicipalityOrThrow: jest
@@ -315,6 +321,49 @@ describe('FulfillmentService', () => {
       const oferta = await service.availableForClient();
 
       expect(oferta.pickupPromiseDays).toBe(2);
+    });
+  });
+
+  /**
+   * P-046: cubrir un municipio no es poder despachar en él. El catálogo enseña
+   * productos donde hay cobertura y stock; el checkout exige además una vía.
+   * Nada avisaba de la diferencia hasta que la contaba un cliente.
+   */
+  describe('municipios sin forma de despacho', () => {
+    it('no los busca siquiera cuando la recogida está en pie', async () => {
+      const respuesta = await service.getSettingsResponse();
+
+      expect(respuesta.municipalitiesWithoutFulfillment).toEqual([]);
+      // La consulta cuesta y sobra: con un mostrador en pie, cualquier
+      // municipio cubierto lo alcanza (MxH-0101).
+      expect(settingsRepo.manager.query).not.toHaveBeenCalled();
+    });
+
+    it('los enseña cuando la recogida está apagada', async () => {
+      settingsRepo.findOne.mockResolvedValue({
+        data: { pickupEnabled: false, supportMessage: 'Escríbenos' },
+      });
+      settingsRepo.manager.query.mockResolvedValue([
+        { id: 'mun-1', name: 'Contramaestre' },
+      ]);
+
+      const respuesta = await service.getSettingsResponse();
+
+      expect(respuesta.municipalitiesWithoutFulfillment).toEqual([
+        { id: 'mun-1', name: 'Contramaestre' },
+      ]);
+    });
+
+    it('también cuando la recogida está activada pero no hay un solo mostrador', async () => {
+      pickupPoints = [];
+      settingsRepo.manager.query.mockResolvedValue([
+        { id: 'mun-1', name: 'Contramaestre' },
+      ]);
+
+      const respuesta = await service.getSettingsResponse();
+
+      expect(respuesta.pickupEnabledWithoutAddresses).toBe(true);
+      expect(respuesta.municipalitiesWithoutFulfillment).toHaveLength(1);
     });
   });
 

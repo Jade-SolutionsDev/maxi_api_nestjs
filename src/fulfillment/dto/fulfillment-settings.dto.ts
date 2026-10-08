@@ -39,4 +39,12 @@ export class FulfillmentSettingsResponseDto implements FulfillmentSettingsData {
    * the configuration that leaves customers with nothing to choose.
    */
   pickupEnabledWithoutAddresses: boolean;
+
+  /**
+   * Municipalities the catalogue treats as sellable and the checkout cannot
+   * serve: an active storage covers them, so the shop shows products there,
+   * but nothing can reach them — no pickup counter and no delivery option for
+   * that zone. Empty while pickup is on with at least one counter.
+   */
+  municipalitiesWithoutFulfillment: { id: string; name: string }[];
 }
