@@ -114,7 +114,10 @@ describe('la tienda y el panel crean el mismo pedido', () => {
     toDto: jest.Mock;
   };
   let paymentMethodsService: { resolve: jest.Mock };
-  let fulfillmentService: { resolveChoice: jest.Mock };
+  let fulfillmentService: {
+    resolveChoice: jest.Mock;
+    envioGratisPara: jest.Mock;
+  };
   let clientAddressesService: {
     findOneForClient: jest.Mock;
     create: jest.Mock;
@@ -200,6 +203,8 @@ describe('la tienda y el panel crean el mismo pedido', () => {
       resolve: jest.fn().mockResolvedValue({ code: 'manual' }),
     };
     fulfillmentService = {
+      // Sin promoción salvo que la prueba diga lo contrario (MxH-0043).
+      envioGratisPara: jest.fn().mockResolvedValue(false),
       resolveChoice: jest.fn().mockResolvedValue({
         type: 'delivery',
         fee: '0.00',
@@ -306,6 +311,32 @@ describe('la tienda y el panel crean el mismo pedido', () => {
       promiseDays: 3,
     };
   }
+
+  /**
+   * MxH-0043. Lo que esta prueba defiende es que la promoción vive **en el
+   * cálculo del pedido** y no en la pantalla: por las dos vías —la tienda y el
+   * panel— el envío tiene que salir en cero, y el total sin él. Si algún día
+   * alguien la implementa solo en el resumen del checkout, esta cae.
+   */
+  it('pasado el umbral, el envío no se cobra, venga de la tienda o del panel', async () => {
+    fulfillmentService.resolveChoice.mockResolvedValue(fulfillmentNoTrivial());
+    fulfillmentService.envioGratisPara.mockResolvedValue(true);
+    cartService.getCart.mockResolvedValue({
+      items: [cartLine],
+      totalItems: 2,
+      subtotal: 15,
+    });
+    orderRepo.findOne.mockResolvedValue(makeOrder({ items: [] }));
+
+    await service.checkout(makeClient(), {});
+    const guardadoPorLaTienda = orderRepo.save.mock.calls.at(-1)?.[0];
+
+    // Sin la promoción este pedido vale 17.50: 15 de productos y 2.50 de
+    // envío, que es lo que afirma la prueba de al lado.
+    expect(guardadoPorLaTienda.deliveryFee).toBe('0.00');
+    expect(guardadoPorLaTienda.total).toBe('15.00');
+    expect(guardadoPorLaTienda.subtotal).toBe('15.00');
+  });
 
   it('aparta el mismo stock, calcula el mismo total y congela el mismo plazo', async () => {
     fulfillmentService.resolveChoice.mockResolvedValue(fulfillmentNoTrivial());

@@ -41,9 +41,13 @@ export class PublicFulfillmentController {
       offer.deliveryOptions.length > 0 ||
       (offer.pickupEnabled && offer.pickupPoints.length > 0);
 
+    const { freeDeliveryThreshold } =
+      await this.fulfillmentService.getSettingsResponse();
+
     return {
       fulfillable: hayVia,
       unavailableMessage: hayVia ? null : offer.unavailableMessage,
+      freeDeliveryThreshold,
     };
   }
 }

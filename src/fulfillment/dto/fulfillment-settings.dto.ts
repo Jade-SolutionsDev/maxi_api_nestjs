@@ -1,6 +1,7 @@
 import {
   IsBoolean,
   IsInt,
+  IsNumber,
   IsOptional,
   IsString,
   Max,
@@ -28,12 +29,29 @@ export class UpdateFulfillmentSettingsDto {
   @Min(1)
   @Max(60)
   pickupPromiseDays?: number | null;
+
+  /**
+   * Importe en USD a partir del cual el envío sale gratis. `null` apaga la
+   * promoción. Se recibe en USD —con decimales, como se escribe un precio— y
+   * se guarda en céntimos.
+   */
+  @IsOptional()
+  @IsNumber({ maxDecimalPlaces: 2 })
+  @Min(0.01)
+  @Max(100000)
+  freeDeliveryThreshold?: number | null;
 }
 
 export class FulfillmentSettingsResponseDto implements FulfillmentSettingsData {
   pickupEnabled: boolean;
   supportMessage: string;
   pickupPromiseDays?: number | null;
+  /**
+   * Importe en USD a partir del cual el envío sale gratis, o `null` si no hay
+   * promoción. Sale en USD aunque se guarde en céntimos: quien lo lee —el
+   * panel y la tienda— piensa en precios, no en céntimos.
+   */
+  freeDeliveryThreshold: number | null;
   /**
    * True when pickup is on but not one active storage has a pickup address —
    * the configuration that leaves customers with nothing to choose.

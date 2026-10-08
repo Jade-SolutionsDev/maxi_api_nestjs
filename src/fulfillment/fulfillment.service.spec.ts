@@ -367,6 +367,116 @@ describe('FulfillmentService', () => {
     });
   });
 
+  /**
+   * MxH-0043. El umbral se guarda en céntimos a propósito: comparar dólares en
+   * coma flotante deja a quien compra justo el importe con el envío cobrado.
+   */
+  describe('envío gratis a partir de un importe', () => {
+    const conUmbral = (centimos: number | null) =>
+      settingsRepo.findOne.mockResolvedValue({
+        data: {
+          pickupEnabled: true,
+          supportMessage: 'Escríbenos',
+          freeDeliveryThresholdCents: centimos,
+        },
+      });
+
+    it('sin umbral configurado, nunca es gratis', async () => {
+      conUmbral(null);
+
+      await expect(service.envioGratisPara(10_000)).resolves.toBe(false);
+    });
+
+    it('por debajo del umbral se cobra', async () => {
+      conUmbral(5000);
+
+      await expect(service.envioGratisPara(49.99)).resolves.toBe(false);
+    });
+
+    it('justo en el umbral ya es gratis', async () => {
+      conUmbral(5000);
+
+      await expect(service.envioGratisPara(50)).resolves.toBe(true);
+    });
+
+    /**
+     * El caso que obliga a los céntimos, y no vale cualquiera: hay que elegir
+     * una suma que caiga **por debajo** de su propio valor exacto.
+     *
+     *     9.51 + 10.50 = 20.009999999999998   y el umbral son 20.01
+     *
+     * Comparando dólares, ese cliente paga el envío con la cuenta dándole
+     * justo. En céntimos enteros, 2001 >= 2001 y se lo lleva gratis.
+     *
+     * La primera versión de esta prueba usaba `0.1 + 0.2 + 29.7`, que cae por
+     * **encima** de 30: pasaba igual con las dos aritméticas y no medía nada.
+     * Se vio al mutar el código a dólares y no caer ninguna prueba.
+     */
+    it('un subtotal que la coma flotante deja corto no pierde el envío gratis', async () => {
+      conUmbral(2001);
+
+      await expect(service.envioGratisPara(9.51 + 10.5)).resolves.toBe(true);
+    });
+
+    it('un umbral en cero no enciende la promoción: es «apagada», no «todo gratis»', async () => {
+      conUmbral(0);
+
+      await expect(service.envioGratisPara(1)).resolves.toBe(false);
+    });
+
+    it('el umbral sale en dólares aunque se guarde en céntimos', async () => {
+      conUmbral(4550);
+
+      const respuesta = await service.getSettingsResponse();
+
+      expect(respuesta.freeDeliveryThreshold).toBe(45.5);
+    });
+
+    it('sin promoción, el umbral sale nulo y no cero', async () => {
+      conUmbral(null);
+
+      const respuesta = await service.getSettingsResponse();
+
+      expect(respuesta.freeDeliveryThreshold).toBeNull();
+    });
+
+    it('guardar en dólares deja céntimos enteros en la base', async () => {
+      conUmbral(null);
+
+      await service.updateSettings({ freeDeliveryThreshold: 45.5 });
+
+      expect(settingsRepo.save).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({ freeDeliveryThresholdCents: 4550 }),
+        }),
+      );
+    });
+
+    it('apagar la promoción se guarda como nulo, no se ignora', async () => {
+      conUmbral(5000);
+
+      await service.updateSettings({ freeDeliveryThreshold: null });
+
+      expect(settingsRepo.save).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({ freeDeliveryThresholdCents: null }),
+        }),
+      );
+    });
+
+    it('guardar otra cosa no toca el umbral', async () => {
+      conUmbral(5000);
+
+      await service.updateSettings({ supportMessage: 'Otro texto' });
+
+      expect(settingsRepo.save).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({ freeDeliveryThresholdCents: 5000 }),
+        }),
+      );
+    });
+  });
+
   describe('resolveChoice', () => {
     it('returns the pickup point and its storage', async () => {
       const choice = await service.resolveChoice({
