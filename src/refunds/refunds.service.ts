@@ -114,55 +114,86 @@ export class RefundsService {
     dto: CreateRefundDto,
     actor: RefundActor,
   ): Promise<RefundResponseDto> {
-    const order = await this.orderRepository.findOne({
-      where: { id: orderId },
-    });
-    if (!order) {
-      throw new NotFoundException(`Order with id "${orderId}" not found`);
-    }
-    if (order.paymentStatus !== PaymentStatus.PAID) {
-      throw new ConflictException(
-        `Solo se puede reembolsar un pedido cobrado; este está en "${order.paymentStatus}"`,
-      );
-    }
+    /**
+     * Todo dentro de una transacción, con el pedido bloqueado.
+     *
+     * Antes esto leía el resumen, comprobaba el tope y guardaba, cada paso por
+     * su cuenta. Dos peticiones a la vez leían las mismas «quedan 60 por
+     * devolver», las dos pasaban la comprobación y las dos insertaban: el
+     * pedido acababa con más dinero comprometido del que se cobró, que es
+     * justo lo que la regla 2 de arriba promete que no puede pasar.
+     *
+     * No es hipotético. El 8-oct-2026 se fue la conexión mientras se
+     * registraba una devolución en producción; el aviso se quedó puesto, se
+     * pulsó tres veces, y entraron tres: una buena y dos de más, 120 USD
+     * comprometidos sobre un pedido de 60.
+     *
+     * El `SELECT ... FOR UPDATE` sobre el pedido es lo que las pone en fila:
+     * la segunda espera a que la primera termine, recalcula con su fila ya
+     * dentro y se encuentra el 409 que le toca. Se bloquea el pedido y no las
+     * devoluciones porque lo que hay que proteger es el tope del pedido, y las
+     * filas que lo consumen todavía no existen cuando hay que decidir.
+     */
+    const { refund, totalDelPedido } = await this.dataSource.transaction(
+      async (manager) => {
+        const order = await manager.findOne(Order, {
+          where: { id: orderId },
+          lock: { mode: 'pessimistic_write' },
+        });
+        if (!order) {
+          throw new NotFoundException(`Order with id "${orderId}" not found`);
+        }
+        if (order.paymentStatus !== PaymentStatus.PAID) {
+          throw new ConflictException(
+            `Solo se puede reembolsar un pedido cobrado; este está en "${order.paymentStatus}"`,
+          );
+        }
 
-    const summary = await this.summaryFor(order);
-    const refundable = cents(summary.refundable);
-    if (refundable <= 0) {
-      throw new ConflictException(
-        `Este pedido ya tiene comprometido o devuelto todo lo cobrado (${summary.total} ${'USD'})`,
-      );
-    }
-    const amount = dto.amount ? cents(dto.amount) : refundable;
-    if (amount <= 0) {
-      throw new BadRequestException(
-        'El importe a devolver tiene que ser mayor que cero',
-      );
-    }
-    if (amount > refundable) {
-      throw new ConflictException(
-        `No se puede devolver ${fromCents(amount)}: de este pedido solo quedan ${summary.refundable} por devolver`,
-      );
-    }
+        const summary = await this.summaryFor(order, manager);
+        const refundable = cents(summary.refundable);
+        if (refundable <= 0) {
+          throw new ConflictException(
+            `Este pedido ya tiene comprometido o devuelto todo lo cobrado (${summary.total} ${'USD'})`,
+          );
+        }
+        const importe = dto.amount ? cents(dto.amount) : refundable;
+        if (importe <= 0) {
+          throw new BadRequestException(
+            'El importe a devolver tiene que ser mayor que cero',
+          );
+        }
+        if (importe > refundable) {
+          throw new ConflictException(
+            `No se puede devolver ${fromCents(importe)}: de este pedido solo quedan ${summary.refundable} por devolver`,
+          );
+        }
 
-    const refund = await this.refundRepository.save(
-      this.refundRepository.create({
-        orderId: order.id,
-        amount: fromCents(amount),
-        currency: 'USD',
-        status: RefundStatus.REQUESTED,
-        method: dto.method ?? RefundMethod.MANUAL,
-        origin: 'system' in actor ? RefundOrigin.SYSTEM : RefundOrigin.ADMIN,
-        reason: dto.reason,
-        destination: dto.destination ?? null,
-        notes: dto.notes ?? null,
-        requestedBy: 'userId' in actor ? actor.userId : null,
-        requestedAt: new Date(),
-      }),
+        const creada = await manager.save(
+          manager.create(Refund, {
+            orderId: order.id,
+            amount: fromCents(importe),
+            currency: 'USD',
+            status: RefundStatus.REQUESTED,
+            method: dto.method ?? RefundMethod.MANUAL,
+            origin:
+              'system' in actor ? RefundOrigin.SYSTEM : RefundOrigin.ADMIN,
+            reason: dto.reason,
+            destination: dto.destination ?? null,
+            notes: dto.notes ?? null,
+            requestedBy: 'userId' in actor ? actor.userId : null,
+            requestedAt: new Date(),
+          }),
+        );
+        // El total sale de aquí y no de otra consulta: dentro del bloqueo es
+        // el valor bueno, y fuera habría que volver a pedir el pedido.
+        return { refund: creada, totalDelPedido: cents(order.total) };
+      },
     );
 
+    const amount = cents(refund.amount);
+
     await this.orderEvents.record(null, {
-      orderId: order.id,
+      orderId,
       kind: OrderEventKind.REFUND_REQUESTED,
       actor: 'userId' in actor ? { userId: actor.userId } : { system: true },
       field: 'refund',
@@ -171,12 +202,12 @@ export class RefundsService {
       meta: { refundId: refund.id, amount: fromCents(amount) },
     });
 
-    void this.mailer.refundRequested(order.id, {
+    void this.mailer.refundRequested(orderId, {
       amount: refund.amount,
       currency: refund.currency,
       destination: refund.destination,
       providerRef: null,
-      partial: amount < cents(order.total),
+      partial: amount < totalDelPedido,
     });
 
     return (await this.decorate([refund]))[0];
@@ -343,8 +374,20 @@ export class RefundsService {
     }
   }
 
-  private async summaryFor(order: Order): Promise<RefundSummary> {
-    const rows = await this.refundRepository.find({
+  /**
+   * `manager` cuando hay que contar **dentro** de la transacción que acaba de
+   * bloquear el pedido: con el repositorio de fuera se leería desde otra
+   * conexión y no se vería lo que la transacción lleva escrito, que es
+   * exactamente lo que hay que ver para no pasarse del tope.
+   */
+  private async summaryFor(
+    order: Order,
+    manager?: EntityManager,
+  ): Promise<RefundSummary> {
+    const repo = manager
+      ? manager.getRepository(Refund)
+      : this.refundRepository;
+    const rows = await repo.find({
       where: {
         orderId: order.id,
         status: In([RefundStatus.REQUESTED, RefundStatus.COMPLETED]),
