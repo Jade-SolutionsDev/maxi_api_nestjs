@@ -195,12 +195,24 @@ const contactoDesdeDireccion = (
   };
 };
 
+/** Un decimal con dos cifras, o nulo si no hay dato que congelar. */
+const dosCifrasONulo = (valor: number | undefined): string | null =>
+  valor === undefined || Number.isNaN(valor) ? null : valor.toFixed(2);
+
 /** Una línea ya valorada: el núcleo no vuelve a mirar el catálogo. */
 interface LineaResuelta {
   productId: string;
   name: string;
   quantity: number;
   unitPrice: number;
+  /**
+   * De dónde salió `unitPrice`: el precio de lista y la rebaja del día de la
+   * compra. Opcionales porque no todos los caminos los conocen —una línea que
+   * llega con el precio ya puesto a mano no tiene desglose que congelar—, y
+   * en ese caso se guardan nulos antes que inventados (MxH-0056).
+   */
+  listPrice?: number;
+  discount?: number;
 }
 
 interface CrearPedidoParams {
@@ -374,6 +386,9 @@ export class OrdersService {
         name: line.name,
         quantity: line.quantity,
         unitPrice: line.unitPrice,
+        // El carrito ya trae los dos: se congelan tal cual, sin recalcular.
+        listPrice: line.basePrice,
+        discount: line.discount,
       })),
       fulfillment,
       deliveryMunicipalityId,
@@ -767,6 +782,8 @@ export class OrdersService {
             orderId: order.id,
             productId: line.productId,
             productNameSnapshot: line.name,
+            listPrice: dosCifrasONulo(line.listPrice),
+            discount: dosCifrasONulo(line.discount),
             unitPrice: line.unitPrice.toFixed(2),
             quantity: line.quantity,
             lineTotal,
@@ -1929,6 +1946,18 @@ export class OrdersService {
           Math.round(line.unitPrice * line.quantity * 100) / 100
         ).toFixed(2);
         if (existing) {
+          /**
+           * El desglose solo vale mientras explique el precio. Cambiar la
+           * cantidad no lo toca —el precio por unidad sigue siendo el mismo—,
+           * pero si la administración pone otro precio a mano, el precio de
+           * lista y la rebaja guardados dejan de cuadrar con lo cobrado y se
+           * anulan: un desglose que no explica su propio resultado miente
+           * (MxH-0056).
+           */
+          if (existing.unitPrice !== line.unitPrice.toFixed(2)) {
+            existing.listPrice = null;
+            existing.discount = null;
+          }
           existing.quantity = line.quantity;
           existing.unitPrice = line.unitPrice.toFixed(2);
           existing.lineTotal = lineTotal;
@@ -1939,6 +1968,8 @@ export class OrdersService {
               orderId: order.id,
               productId: line.productId,
               productNameSnapshot: line.name,
+              listPrice: dosCifrasONulo(line.listPrice),
+              discount: dosCifrasONulo(line.discount),
               unitPrice: line.unitPrice.toFixed(2),
               quantity: line.quantity,
               lineTotal,
@@ -2005,15 +2036,8 @@ export class OrdersService {
   private async resolveLines(
     lines: UpdateOrderItemsDto['items'],
     current: Map<string, OrderItem>,
-  ): Promise<
-    { productId: string; name: string; quantity: number; unitPrice: number }[]
-  > {
-    const resolved: {
-      productId: string;
-      name: string;
-      quantity: number;
-      unitPrice: number;
-    }[] = [];
+  ): Promise<LineaResuelta[]> {
+    const resolved: LineaResuelta[] = [];
     for (const line of lines) {
       const existing = current.get(line.productId);
       if (existing) {
@@ -2031,18 +2055,26 @@ export class OrdersService {
           `"${product.name}" no está a la venta; no se puede añadir al pedido`,
         );
       }
+      const deCatalogo =
+        Math.round(
+          Number(product.basePrice) *
+            (1 - Number(product.discount) / 100) *
+            100,
+        ) / 100;
+      /**
+       * Si el precio viene puesto desde fuera, no hay desglose que congelar:
+       * ese número no sale del catálogo y afirmar que sí sería falso. Se
+       * guarda nulo, que es lo que de verdad se sabe.
+       */
+      const esDelCatalogo = line.unitPrice === undefined;
       resolved.push({
         productId: line.productId,
         name: product.name,
         quantity: line.quantity,
         // Misma fórmula que el carrito y la ficha de producto.
-        unitPrice:
-          line.unitPrice ??
-          Math.round(
-            Number(product.basePrice) *
-              (1 - Number(product.discount) / 100) *
-              100,
-          ) / 100,
+        unitPrice: line.unitPrice ?? deCatalogo,
+        listPrice: esDelCatalogo ? Number(product.basePrice) : undefined,
+        discount: esDelCatalogo ? Number(product.discount) : undefined,
       });
     }
     return resolved;
