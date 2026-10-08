@@ -28,6 +28,7 @@ describe('RefundsService', () => {
   };
   let orderRepo: { findOne: jest.Mock; find: jest.Mock; save: jest.Mock };
   let events: { record: jest.Mock };
+  let managerDePrueba: { findOne: jest.Mock };
   let mailer: { refundRequested: jest.Mock; refundCompleted: jest.Mock };
 
   const makeRefund = (partial: Partial<Refund>): Refund =>
@@ -106,10 +107,34 @@ describe('RefundsService', () => {
       refundCompleted: jest.fn().mockResolvedValue(null),
     };
 
+    /**
+     * `request` trabaja dentro de la transacción y con el pedido bloqueado,
+     * así que el manager tiene que hacer lo mismo que los repos **y sobre los
+     * mismos datos**: si `save` no guardara donde guardan ellos, la segunda
+     * solicitud no vería la primera y la prueba del tope daría verde sin
+     * medir nada.
+     */
     const manager = {
       getRepository: (entity: unknown) =>
         entity === Refund ? refundRepo : orderRepo,
+      findOne: jest.fn(
+        (entity: unknown, opciones: unknown): Promise<Refund | Order | null> =>
+          entity === Refund
+            ? (refundRepo.findOne(opciones) as Promise<Refund | null>)
+            : (orderRepo.findOne(opciones) as Promise<Order | null>),
+      ),
+      create: jest.fn(
+        (entity: unknown, datos: Partial<Refund>): Partial<Refund> =>
+          entity === Refund
+            ? (refundRepo.create(datos) as Partial<Refund>)
+            : datos,
+      ),
+      save: jest.fn(
+        (datos: Refund): Promise<Refund> =>
+          refundRepo.save(datos) as Promise<Refund>,
+      ),
     };
+    managerDePrueba = manager;
     const dataSource = {
       transaction: jest
         .fn()
@@ -154,6 +179,31 @@ describe('RefundsService', () => {
       expect(events.record).toHaveBeenCalledWith(
         null,
         expect.objectContaining({ kind: OrderEventKind.REFUND_REQUESTED }),
+      );
+    });
+
+    /**
+     * El 8-oct-2026, en producción: se fue la conexión mientras se registraba
+     * una devolución, el aviso se quedó puesto, se pulsó tres veces y entraron
+     * tres. 120 USD comprometidos sobre un pedido de 60. La comprobación del
+     * tope ya estaba, pero leía y escribía por separado, así que tres
+     * peticiones a la vez leían las mismas «quedan 60» y las tres pasaban.
+     *
+     * Lo que impide repetirlo es leer el pedido bloqueado: la segunda espera a
+     * la primera y recalcula con la fila de aquella ya dentro. Por eso esto
+     * comprueba el bloqueo y no solo el resultado — la prueba de abajo corre
+     * las solicitudes en fila, que es justo lo que no pasó aquella noche, y
+     * seguiría en verde sin bloqueo ninguno.
+     */
+    it('lee el pedido con el bloqueo puesto, para poner las solicitudes en fila', async () => {
+      await service.request(
+        'o1',
+        { amount: '10.00', reason: 'la que sea' },
+        { userId: 'u1' },
+      );
+      expect(managerDePrueba.findOne).toHaveBeenCalledWith(
+        Order,
+        expect.objectContaining({ lock: { mode: 'pessimistic_write' } }),
       );
     });
 
