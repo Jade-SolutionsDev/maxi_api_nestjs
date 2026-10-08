@@ -1,5 +1,8 @@
 import { Order } from '../orders/entities/order.entity';
-import { sinTildesSql } from '../common/search/accent-insensitive';
+import {
+  comoBusquedaParcial,
+  sinTildesSql,
+} from '../common/search/accent-insensitive';
 import {
   BadRequestException,
   ConflictException,
@@ -194,7 +197,7 @@ export class InventoryService {
 
     const where: string[] = [];
     if (filters.q) {
-      where.push(sinTildesSql('p.name', add(`%${filters.q}%`)));
+      where.push(sinTildesSql('p.name', add(comoBusquedaParcial(filters.q))));
     }
     if (filters.categoryId) {
       where.push(`p.category_id = ${add(filters.categoryId)}`);

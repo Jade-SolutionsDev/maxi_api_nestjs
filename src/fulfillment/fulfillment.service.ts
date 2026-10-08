@@ -222,16 +222,10 @@ export class FulfillmentService {
 
   // ---------------- Storefront ----------------
 
-  /**
-   * Pickup points of active storages. Scoped to the storages covering the
-   * customer's municipality when one is known — a customer buying in Matanzas
-   * has no business seeing Guantánamo's counter. Without a municipality the
-   * full list stays available so checkout never dead-ends.
-   */
-  private async pickupPoints(
-    municipalityId?: string,
-  ): Promise<StorefrontPickupPointDto[]> {
-    const qb = this.pickupRepository
+  // Pickup counters of active storages, unfiltered. Kept apart so the
+  // near-first lookup below can ask the same question twice.
+  private pickupPointsQuery() {
+    return this.pickupRepository
       .createQueryBuilder('pickup')
       .innerJoin(
         'stock_locations',
@@ -246,16 +240,40 @@ export class FulfillmentService {
       .addSelect('pickup.hours', 'hours')
       .orderBy('location.name')
       .addOrderBy('pickup.label');
+  }
 
+  /**
+   * Pickup points of active storages. Scoped to the storages covering the
+   * customer's municipality when one is known — a customer buying in Matanzas
+   * has no business seeing Guantánamo's counter. Without a municipality the
+   * full list stays available so checkout never dead-ends.
+   *
+   * MxH-0101: that scoping used to return nothing when the covering storages
+   * had no counter of their own, and the customer — who had just been shown
+   * the product in the catalogue, priced and in stock — hit a checkout with no
+   * way through. Collecting is the customer travelling, not the shop
+   * delivering, so a counter outside the delivery area is a worse offer than a
+   * near one but a far better one than none. The order already knows how to
+   * finish it: it reserves in the covering storages and flags the transfer to
+   * the chosen counter (`orders.service`, `resolveAllowedLocationIds`).
+   */
+  private async pickupPoints(
+    municipalityId?: string,
+  ): Promise<StorefrontPickupPointDto[]> {
     if (municipalityId) {
       const serving = await this.productsService.coveringLocationIds({
         municipalityId,
       });
+      // Nothing serves the place: there is no stock to collect either.
       if (serving.length === 0) return [];
-      qb.andWhere('pickup.location_id IN (:...serving)', { serving });
+
+      const cercanos = await this.pickupPointsQuery()
+        .andWhere('pickup.location_id IN (:...serving)', { serving })
+        .getRawMany<StorefrontPickupPointDto>();
+      if (cercanos.length > 0) return cercanos;
     }
 
-    return qb.getRawMany<StorefrontPickupPointDto>();
+    return this.pickupPointsQuery().getRawMany<StorefrontPickupPointDto>();
   }
 
   /**

@@ -1,4 +1,7 @@
-import { sinTildes } from '../common/search/accent-insensitive';
+import {
+  comoBusquedaParcial,
+  sinTildes,
+} from '../common/search/accent-insensitive';
 import {
   ConflictException,
   Injectable,
@@ -116,7 +119,9 @@ export class ProductsService {
       );
     }
     if (filters.q) {
-      qb.andWhere(sinTildes('product.name'), { q: `%${filters.q}%` });
+      qb.andWhere(sinTildes('product.name'), {
+        q: comoBusquedaParcial(filters.q),
+      });
     }
     const priceExpr =
       filters.priceField === 'finalPrice'

@@ -207,10 +207,9 @@ export class StockLocationsService {
         await this.writeGrocers(tx, id, grocerIds);
       }
       if (dto.pickupAddresses !== undefined) {
-        await tx
-          .getRepository(StockLocationPickupAddress)
-          .delete({ locationId: id });
-        await this.writePickupAddresses(tx, id, dto.pickupAddresses);
+        // Reconciliar, no borrar y recrear: el pedido guarda el id del punto
+        // de recogida y recrearlos lo deja apuntando al vacío.
+        await this.reconcilePickupAddresses(tx, id, dto.pickupAddresses);
       }
     });
 
@@ -431,5 +430,72 @@ export class StockLocationsService {
         }),
       ),
     );
+  }
+
+  /**
+   * Pone al día los puntos de recogida **conservando el id de los que siguen**.
+   *
+   * Antes se borraban todos y se volvían a crear en cada guardado, así que
+   * cambiar el horario de un almacén le daba identificadores nuevos a sus
+   * puntos. El pedido guarda `pickup_address_id`, y ese id quedaba apuntando a
+   * una fila que ya no existía: medido el 7-oct-2026 en producción, **3.720 de
+   * 3.735 pedidos** con punto de recogida apuntaban al vacío. No se notaba
+   * porque el pedido lleva también una copia de los datos
+   * (`pickup_address_snapshot`), que es lo que se enseña; pero el id no servía
+   * para unir con nada, y no hay clave ajena que lo impidiera.
+   *
+   * Se reconcilia por la dirección, que es el campo obligatorio y el que
+   * identifica el punto de cara al cliente: la misma dirección conserva su
+   * fila y solo se le actualizan el rótulo y el horario. Lo ideal sería que el
+   * panel devolviera el id de cada punto —hoy el DTO no lo lleva— y entonces
+   * esto se reduciría a comparar ids; mientras tanto, esto cubre el caso real,
+   * que es editar un almacén sin tocar sus direcciones.
+   *
+   * Lo que ya quedó huérfano no se puede recuperar: esas filas se borraron. El
+   * dato de aquellos pedidos vive en su copia.
+   */
+  private async reconcilePickupAddresses(
+    manager: EntityManager,
+    locationId: string,
+    items: PickupAddressItemDto[],
+  ): Promise<void> {
+    const repo = manager.getRepository(StockLocationPickupAddress);
+    const existentes = await repo.find({ where: { locationId } });
+    const porDireccion = new Map(
+      existentes.map((fila) => [fila.address.trim(), fila]),
+    );
+
+    const conservados = new Set<string>();
+    const nuevos: StockLocationPickupAddress[] = [];
+
+    for (const item of items) {
+      const direccion = item.address.trim();
+      const anterior = porDireccion.get(direccion);
+      if (anterior) {
+        anterior.label = item.label?.trim() || null;
+        anterior.hours = item.hours?.trim() || null;
+        conservados.add(anterior.id);
+        nuevos.push(anterior);
+      } else {
+        nuevos.push(
+          repo.create({
+            locationId,
+            label: item.label?.trim() || null,
+            address: direccion,
+            hours: item.hours?.trim() || null,
+          }),
+        );
+      }
+    }
+
+    const retirados = existentes
+      .filter((fila) => !conservados.has(fila.id))
+      .map((fila) => fila.id);
+    if (retirados.length > 0) {
+      await repo.delete(retirados);
+    }
+    if (nuevos.length > 0) {
+      await repo.save(nuevos);
+    }
   }
 }

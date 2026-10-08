@@ -8,6 +8,7 @@ import {
   MinLength,
   ValidateNested,
 } from 'class-validator';
+import { IsCubanIdCard } from '../../common/decorators/is-cuban-id.decorator';
 import { OrderStatus } from '../entities/order.entity';
 
 /**
@@ -20,10 +21,15 @@ export class PickedUpByDto {
   @MaxLength(120)
   name: string;
 
-  /** Carné de identidad de quien retira. */
+  /**
+   * Carné de identidad de quien retira. Sigue siendo opcional —a veces se
+   * entrega sin anotarlo—, pero si se anota tiene que ser un carné de verdad.
+   * Antes solo pedía texto de hasta 20 caracteres y aceptaba «ajajaj», que es
+   * lo que QA encontró en MxH-0111; el resto del sistema (checkout y
+   * direcciones del cliente) ya usaba `@IsCubanIdCard()`.
+   */
   @IsOptional()
-  @IsString()
-  @MaxLength(20)
+  @IsCubanIdCard()
   idCard?: string;
 }
 
