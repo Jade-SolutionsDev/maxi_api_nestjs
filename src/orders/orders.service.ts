@@ -704,7 +704,19 @@ export class OrdersService {
           (c, l) => c + Math.round(l.unitPrice * l.quantity * 100),
           0,
         ) / 100;
-      const total = (subtotal + Number(params.fulfillment.fee)).toFixed(2);
+      /**
+       * MxH-0043: pasado el umbral, el envío no se cobra.
+       *
+       * Aquí y no en la pantalla: este es el único sitio donde nace un pedido
+       * —lo usan el checkout de la tienda y la creación desde el panel—, así
+       * que la promesa se cumple venga de donde venga. Y el pedido guarda la
+       * tarifa ya rebajada, así que cambiar el umbral mañana no reescribe lo
+       * que se le cobró hoy a nadie.
+       */
+      const envioGratis =
+        await this.fulfillmentService.envioGratisPara(subtotal);
+      const deliveryFee = envioGratis ? '0.00' : params.fulfillment.fee;
+      const total = (subtotal + Number(deliveryFee)).toFixed(2);
 
       const orderRepo = manager.getRepository(Order);
       const order = await orderRepo.save(
@@ -713,7 +725,7 @@ export class OrdersService {
           status: OrderStatus.PENDING,
           paymentStatus: PaymentStatus.PENDING,
           subtotal: subtotal.toFixed(2),
-          deliveryFee: params.fulfillment.fee,
+          deliveryFee,
           total,
           fulfillmentType: params.fulfillment.type,
           deliveryOptionId: params.fulfillment.deliveryOptionId,

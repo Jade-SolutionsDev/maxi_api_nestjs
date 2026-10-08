@@ -54,6 +54,10 @@ export interface FulfillmentChoice {
  * switch plus whatever addresses the storages carry. When neither yields
  * anything, checkout is blocked rather than producing an order nobody can fill.
  */
+/** Céntimos guardados → dólares para quien los lee. `null` se mantiene `null`. */
+const aDolares = (centimos?: number | null): number | null =>
+  centimos == null ? null : centimos / 100;
+
 @Injectable()
 export class FulfillmentService {
   constructor(
@@ -83,6 +87,7 @@ export class FulfillmentService {
     const hayRecogida = data.pickupEnabled && points.length > 0;
     return {
       ...data,
+      freeDeliveryThreshold: aDolares(data.freeDeliveryThresholdCents),
       pickupEnabledWithoutAddresses: data.pickupEnabled && points.length === 0,
       // Con recogida en pie no hace falta la consulta: cualquier municipio
       // cubierto alcanza algún mostrador (MxH-0101).
@@ -130,6 +135,23 @@ export class FulfillmentService {
     );
   }
 
+  /**
+   * Si una compra de este subtotal se lleva el envío gratis (MxH-0043).
+   *
+   * Se compara en **céntimos enteros**: con dólares en coma flotante, una
+   * compra de 50 USD contra un umbral de 50 puede salir falsa por el redondeo
+   * del binario, y eso es un cliente que ve el envío cobrado cuando la cuenta
+   * le daba justo.
+   *
+   * El subtotal es el de productos, con sus rebajas ya aplicadas: el envío no
+   * cuenta para ganarse el envío.
+   */
+  async envioGratisPara(subtotal: number): Promise<boolean> {
+    const { freeDeliveryThresholdCents } = await this.getSettings();
+    if (!freeDeliveryThresholdCents) return false;
+    return Math.round(subtotal * 100) >= freeDeliveryThresholdCents;
+  }
+
   async updateSettings(
     dto: UpdateFulfillmentSettingsDto,
   ): Promise<FulfillmentSettingsResponseDto> {
@@ -141,10 +163,23 @@ export class FulfillmentService {
     // el valor guardado y desaparece del jsonb: guardar el mensaje de soporte
     // borraba el ajuste de recogida, que volvía a su valor por defecto sin
     // que nadie lo notara.
-    const cambios = Object.fromEntries(
-      Object.entries(dto).filter(([, valor]) => valor !== undefined),
+    // El umbral entra en USD y se guarda en céntimos, así que no puede ir con
+    // los demás: se saca antes de mezclar y se convierte aparte. `null` sí pasa
+    // —es cómo se apaga la promoción—; solo `undefined` significa «no lo toques».
+    const { freeDeliveryThreshold, ...resto } = dto;
+    const cambios: Record<string, unknown> = Object.fromEntries(
+      Object.entries(resto).filter(([, valor]) => valor !== undefined),
     );
-    const data: FulfillmentSettingsData = { ...current, ...cambios };
+    if (freeDeliveryThreshold !== undefined) {
+      cambios.freeDeliveryThresholdCents =
+        freeDeliveryThreshold === null
+          ? null
+          : Math.round(freeDeliveryThreshold * 100);
+    }
+    const data: FulfillmentSettingsData = {
+      ...current,
+      ...cambios,
+    };
 
     if (row) {
       row.data = data;

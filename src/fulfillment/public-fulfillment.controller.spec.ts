@@ -23,6 +23,11 @@ describe('PublicFulfillmentController', () => {
   const montar = (dto: StorefrontFulfillmentDto) => {
     const service = {
       availableForClient: jest.fn().mockResolvedValue(dto),
+      // El umbral del envío gratis sale de los ajustes (MxH-0043); sin
+      // promoción salvo que la prueba lo cambie.
+      getSettingsResponse: jest
+        .fn()
+        .mockResolvedValue({ freeDeliveryThreshold: null }),
     } as unknown as FulfillmentService;
     return {
       controlador: new PublicFulfillmentController(service),
@@ -45,6 +50,7 @@ describe('PublicFulfillmentController', () => {
     await expect(controlador.availability('mun-1')).resolves.toEqual({
       fulfillable: true,
       unavailableMessage: null,
+      freeDeliveryThreshold: null,
     });
   });
 
@@ -70,6 +76,7 @@ describe('PublicFulfillmentController', () => {
     await expect(controlador.availability('mun-1')).resolves.toEqual({
       fulfillable: false,
       unavailableMessage: 'Escríbenos y lo coordinamos.',
+      freeDeliveryThreshold: null,
     });
   });
 
@@ -93,6 +100,7 @@ describe('PublicFulfillmentController', () => {
     const res = await controlador.availability('mun-1');
 
     expect(Object.keys(res).sort()).toEqual([
+      'freeDeliveryThreshold',
       'fulfillable',
       'unavailableMessage',
     ]);
