@@ -127,7 +127,8 @@ export const isSystemAdmin = (role: string | null): boolean =>
 
 /**
  * Seeded, EDITABLE starter roles — templates an admin can assign, rename,
- * regrant or delete. Created exactly once: the first boot where no role with
+ * regrant or delete. Sin sufijo «— base» en el nombre: la clasificación la
+ * lleva `systemKey`, que el panel enseña como etiqueta (MxH-0103). Created exactly once: the first boot where no role with
  * that `systemKey` has ever existed; the seeder never reasserts anything.
  *
  * The systemKeys are historical (they were the pre-collapse GROCER/KARDIST
@@ -142,7 +143,7 @@ const BASE_ROLES: ReadonlyArray<{
 }> = [
   {
     systemKey: 'GROCER',
-    name: 'Almacenero — base',
+    name: 'Almacenero',
     description:
       'Permisos iniciales del rol Almacenero. Ajústalos o retíralos según lo que necesite tu equipo.',
     // Lo que MxH-0036 define para el Jefe de almacenes: almacenes e inventario
@@ -163,7 +164,7 @@ const BASE_ROLES: ReadonlyArray<{
   },
   {
     systemKey: 'KARDIST',
-    name: 'Kardista — base',
+    name: 'Kardista',
     description:
       'Permisos iniciales del rol Kardista. Ajústalos o retíralos según lo que necesite tu equipo.',
     grants: {
@@ -175,7 +176,7 @@ const BASE_ROLES: ReadonlyArray<{
   },
   {
     systemKey: 'WEB_MANAGER',
-    name: 'Responsable de la web — base',
+    name: 'Responsable de la web',
     description:
       'Prepara, revisa y publica la portada, los textos legales y los avisos de la tienda. Ajusta sus permisos según lo que necesite tu equipo.',
     // La portada entera y sus banners, los textos de la tienda, más las
