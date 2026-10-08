@@ -80,10 +80,54 @@ export class FulfillmentService {
   async getSettingsResponse(): Promise<FulfillmentSettingsResponseDto> {
     const data = await this.getSettings();
     const points = await this.pickupPoints();
+    const hayRecogida = data.pickupEnabled && points.length > 0;
     return {
       ...data,
       pickupEnabledWithoutAddresses: data.pickupEnabled && points.length === 0,
+      // Con recogida en pie no hace falta la consulta: cualquier municipio
+      // cubierto alcanza algún mostrador (MxH-0101).
+      municipalitiesWithoutFulfillment: hayRecogida
+        ? []
+        : await this.municipalitiesWithoutFulfillment(),
     };
+  }
+
+  /**
+   * Municipios que el catálogo da por vendibles y a los que no se puede hacer
+   * llegar nada: un almacén activo los cubre —así que la tienda les enseña
+   * productos con precio y les deja llenar el carrito— y en el checkout no hay
+   * ni recogida ni una opción de entrega que alcance esa zona.
+   *
+   * Cubrir no es poder despachar, y nada avisaba de la diferencia: se veía
+   * en el último paso de la compra y lo contaba el cliente, no el panel
+   * (MxH-0101, P-046). Solo se llama cuando la recogida no está en pie, que
+   * es cuando la diferencia puede existir.
+   */
+  async municipalitiesWithoutFulfillment(): Promise<
+    { id: string; name: string }[]
+  > {
+    return this.settingsRepository.manager.query(
+      `SELECT DISTINCT m.id, m.name
+         FROM municipalities m
+         JOIN stock_location_coverage c
+           ON c.municipality_id = m.id
+           OR (c.coverage_type = 'province' AND c.province_id = m.province_id)
+         JOIN stock_locations sl
+           ON sl.id = c.location_id
+          AND sl.is_active = true
+          AND sl.deleted_at IS NULL
+        WHERE NOT EXISTS (
+          SELECT 1
+            FROM delivery_options o
+            LEFT JOIN delivery_option_zones z ON z.option_id = o.id
+           WHERE o.enabled = true
+             AND o.deleted_at IS NULL
+             AND (z.id IS NULL
+                  OR z.municipality_id = m.id
+                  OR (z.municipality_id IS NULL AND z.province_id = m.province_id))
+        )
+        ORDER BY m.name`,
+    );
   }
 
   async updateSettings(
