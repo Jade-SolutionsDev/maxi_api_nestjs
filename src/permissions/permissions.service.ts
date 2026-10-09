@@ -155,9 +155,13 @@ const BASE_ROLES: ReadonlyArray<{
 }> = [
   {
     systemKey: 'GROCER',
-    name: 'Almacenero',
+    // El nombre lo decidió Jade el 9-oct-2026: un solo rol de almacén, y en
+    // singular. `systemKey` se queda en 'GROCER' porque es la llave histórica
+    // con la que se identifica la plantilla y renombrarla rompería el índice
+    // único y el sembrador de cualquier base existente.
+    name: 'Jefe de almacén',
     description:
-      'Permisos iniciales del rol Almacenero. Ajústalos o retíralos según lo que necesite tu equipo.',
+      'Permisos iniciales del rol Jefe de almacén. Ajústalos o retíralos según lo que necesite tu equipo.',
     // Lo que MxH-0036 define para el Jefe de almacenes: almacenes e inventario
     // los opera, el catálogo solo lo consulta. En concreto, y porque la tarjeta
     // lo dice con todas las letras: **el catálogo es de solo lectura** (no crea,

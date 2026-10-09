@@ -165,7 +165,7 @@ describe('PermissionsService', () => {
         expect.objectContaining({ systemKey: 'WEB_MANAGER', isSystem: false }),
       );
 
-      // El Almacenero nace con lo que MxH-0036 define: 12 permisos para GROCER,
+      // El Jefe de almacén nace con lo que MxH-0036 define: 12 permisos para GROCER,
       // 8 para KARDIST.
       const grantCalls = rolePermissionRepo.save.mock.calls;
       expect(grantCalls[0][0]).toHaveLength(12);
@@ -187,7 +187,7 @@ describe('PermissionsService', () => {
     // MxH-0036: el Jefe de almacenes opera almacenes e inventario y **consulta**
     // el catálogo. La plantilla no puede nacer pudiendo tocar productos ni
     // almacenes: un rol que nace de más rara vez se recorta después.
-    it('el Almacenero nace sin poder escribir en catálogo, almacenes ni pedidos', async () => {
+    it('el Jefe de almacén nace sin poder escribir en catálogo, almacenes ni pedidos', async () => {
       // Igual que la prueba de arriba: la primera lectura ve la tabla vacía y
       // las siguientes ya ven el catálogo sembrado, que es de donde salen los ids.
       permissionRepo.find
@@ -526,7 +526,7 @@ describe('PermissionsService', () => {
     });
 
     /**
-     * MxH-0036: así nació el lío. Staging tiene «Almacenero» sembrado y «jefe
+     * MxH-0036: así nació el lío. Staging tenía «Almacenero» sembrado y «jefe
      * de almacenes » hecho a mano al día siguiente, con un espacio al final
      * que nadie ve y permisos distintos. La comprobación de duplicados
      * comparaba las cadenas tal cual, así que los dejó pasar a los dos.
