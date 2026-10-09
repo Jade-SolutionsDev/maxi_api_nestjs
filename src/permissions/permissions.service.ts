@@ -33,6 +33,18 @@ export interface UserPermissionsPayload {
 const CRUD = ['list', 'read', 'create', 'update', 'delete'] as const;
 
 /**
+ * El nombre de un rol, limpio.
+ *
+ * Sin esto, «jefe de almacenes » —con el espacio del final— y «Jefe de
+ * almacenes» son dos roles distintos para la base y el mismo para cualquier
+ * persona. Pasó: staging acabó con dos roles de almacén, uno sembrado y otro
+ * hecho a mano un día después, y la comprobación de duplicados no los vio
+ * porque comparaba las cadenas tal cual.
+ */
+export const nombreDeRolNormalizado = (nombre: string): string =>
+  nombre.trim().replace(/\s+/g, ' ');
+
+/**
  * Las dos acciones que solo miran. Todas las demás son trabajar sobre el
  * módulo, y trabajar sobre algo que no puedes ver no significa nada: el menú
  * lateral enseña un módulo cuando el rol tiene `list`, así que un rol con solo
@@ -474,16 +486,13 @@ export class PermissionsService implements OnModuleInit {
     data: { name: string; description?: string; permissionIds?: string[] },
     createdBy: string | null = null,
   ): Promise<ManagedRole> {
-    const existing = await this.roleRepository.findOne({
-      where: { name: data.name },
-      withDeleted: true,
-    });
-    if (existing) {
-      throw new ConflictException(`Role "${data.name}" already exists`);
+    const name = nombreDeRolNormalizado(data.name);
+    if (await this.nombreYaUsado(name)) {
+      throw new ConflictException(`Role "${name}" already exists`);
     }
 
     const role = await this.roleRepository.save({
-      name: data.name,
+      name,
       description: data.description ?? null,
       isSystem: false,
       isActive: true,
@@ -519,12 +528,43 @@ export class PermissionsService implements OnModuleInit {
     return role;
   }
 
+  /**
+   * Hay un rol con ese nombre, sin mirar mayúsculas ni espacios.
+   *
+   * Compara en minúsculas porque «Jefe de almacenes» y «jefe de almacenes» son
+   * el mismo rol para quien los lee en una lista, y dos distintos para la
+   * base: `roles.name` no tiene índice único. Incluye los borrados, igual que
+   * antes: un nombre reutilizado reviviría el rol viejo al restaurarlo.
+   */
+  private async nombreYaUsado(
+    nombre: string,
+    excepto?: string,
+  ): Promise<boolean> {
+    const consulta = this.roleRepository
+      .createQueryBuilder('rol')
+      .withDeleted()
+      .where('LOWER(rol.name) = LOWER(:nombre)', { nombre });
+    if (excepto) consulta.andWhere('rol.id <> :excepto', { excepto });
+    return (await consulta.getCount()) > 0;
+  }
+
   async updateRole(roleId: string, data: UpdateRoleDto): Promise<ManagedRole> {
     const role = await this.getRole(roleId);
     if (role.isSystem) {
       throw new ConflictException('System roles cannot be modified');
     }
-    Object.assign(role, data);
+
+    // Renombrar también puede chocar, y antes no se comprobaba: se podía
+    // dejar un rol con el nombre exacto de otro.
+    const cambios = { ...data };
+    if (cambios.name !== undefined) {
+      cambios.name = nombreDeRolNormalizado(cambios.name);
+      if (await this.nombreYaUsado(cambios.name, roleId)) {
+        throw new ConflictException(`Role "${cambios.name}" already exists`);
+      }
+    }
+
+    Object.assign(role, cambios);
     return this.roleRepository.save(role);
   }
 

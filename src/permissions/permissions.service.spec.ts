@@ -39,6 +39,7 @@ describe('PermissionsService', () => {
     count: jest.Mock;
     softDelete: jest.Mock;
     delete: jest.Mock;
+    createQueryBuilder: jest.Mock;
   };
   let rolePermissionRepo: {
     count: jest.Mock;
@@ -48,6 +49,15 @@ describe('PermissionsService', () => {
   };
   let userRoleRepo: { find: jest.Mock; delete: jest.Mock; save: jest.Mock };
   let userRepo: { findOne: jest.Mock; find: jest.Mock };
+  /**
+   * Los roles que ya están en la base, para la comprobación de nombre
+   * repetido. El constructor de consultas falso los filtra con la misma regla
+   * que pide el SQL —en minúsculas—, y además se guarda la cláusula que se
+   * generó para poder comprobarla: si alguien quita el `LOWER(`, el fake
+   * seguiría acertando y la prueba no se enteraría.
+   */
+  let rolesEnBase: { id: string; name: string }[];
+  let clausulas: string[];
 
   beforeEach(async () => {
     permissionRepo = {
@@ -56,6 +66,8 @@ describe('PermissionsService', () => {
       save: jest.fn(),
       count: jest.fn(),
     };
+    rolesEnBase = [];
+    clausulas = [];
     roleRepo = {
       findOne: jest.fn(),
       find: jest.fn(),
@@ -63,6 +75,32 @@ describe('PermissionsService', () => {
       count: jest.fn(),
       softDelete: jest.fn(),
       delete: jest.fn(),
+      createQueryBuilder: jest.fn(() => {
+        let nombre = '';
+        let excepto: string | undefined;
+        const constructor = {
+          withDeleted: () => constructor,
+          where: (sql: string, params: { nombre: string }) => {
+            clausulas.push(sql);
+            nombre = params.nombre;
+            return constructor;
+          },
+          andWhere: (sql: string, params: { excepto: string }) => {
+            clausulas.push(sql);
+            excepto = params.excepto;
+            return constructor;
+          },
+          getCount: () =>
+            Promise.resolve(
+              rolesEnBase.filter(
+                (r) =>
+                  r.name.toLowerCase() === nombre.toLowerCase() &&
+                  r.id !== excepto,
+              ).length,
+            ),
+        };
+        return constructor;
+      }),
     };
     rolePermissionRepo = {
       count: jest.fn(),
@@ -481,10 +519,67 @@ describe('PermissionsService', () => {
     });
 
     it('rejects creating a duplicate role', async () => {
-      roleRepo.findOne.mockResolvedValue({ id: 'r1' });
+      rolesEnBase.push({ id: 'r1', name: 'Dup' });
       await expect(service.createRole({ name: 'Dup' })).rejects.toBeInstanceOf(
         ConflictException,
       );
+    });
+
+    /**
+     * MxH-0036: así nació el lío. Staging tiene «Almacenero» sembrado y «jefe
+     * de almacenes » hecho a mano al día siguiente, con un espacio al final
+     * que nadie ve y permisos distintos. La comprobación de duplicados
+     * comparaba las cadenas tal cual, así que los dejó pasar a los dos.
+     */
+    it('un nombre que solo cambia en espacios o mayúsculas es el mismo', async () => {
+      rolesEnBase.push({ id: 'r1', name: 'Jefe de almacenes' });
+
+      for (const repetido of [
+        'jefe de almacenes',
+        'Jefe de almacenes ',
+        '  JEFE DE ALMACENES',
+        'Jefe  de   almacenes',
+      ]) {
+        await expect(
+          service.createRole({ name: repetido }),
+        ).rejects.toBeInstanceOf(ConflictException);
+      }
+      expect(roleRepo.save).not.toHaveBeenCalled();
+    });
+
+    // Que el fake no esté acertando por su cuenta: la comparación tiene que
+    // pedirla el SQL, no el doble de prueba.
+    it('la comparación la hace la base en minúsculas', async () => {
+      rolesEnBase.push({ id: 'r1', name: 'Jefe de almacenes' });
+      await expect(
+        service.createRole({ name: 'JEFE DE ALMACENES' }),
+      ).rejects.toBeInstanceOf(ConflictException);
+      expect(clausulas[0]).toContain('LOWER(rol.name) = LOWER(:nombre)');
+    });
+
+    it('el nombre se guarda limpio', async () => {
+      roleRepo.save.mockResolvedValue({ id: 'r-nuevo' });
+      await service.createRole({ name: '  Jefe  de  almacenes  ' });
+      expect(roleRepo.save).toHaveBeenCalledWith(
+        expect.objectContaining({ name: 'Jefe de almacenes' }),
+      );
+    });
+
+    it('renombrar a un nombre ya usado tampoco vale, y uno no choca consigo mismo', async () => {
+      rolesEnBase.push(
+        { id: 'r1', name: 'Jefe de almacenes' },
+        { id: 'r2', name: 'Economista' },
+      );
+      roleRepo.findOne.mockResolvedValue({ id: 'r2', isSystem: false });
+
+      await expect(
+        service.updateRole('r2', { name: 'jefe de almacenes ' }),
+      ).rejects.toBeInstanceOf(ConflictException);
+
+      roleRepo.save.mockResolvedValue({ id: 'r2' });
+      await expect(
+        service.updateRole('r2', { name: 'Economista' }),
+      ).resolves.toBeDefined();
     });
 
     it('blocks modifying a system role', async () => {
@@ -622,9 +717,7 @@ describe('PermissionsService', () => {
     });
 
     it('crear un rol con permisos lo deja listo de una vez', async () => {
-      roleRepo.findOne
-        .mockResolvedValueOnce(null) // no hay otro con ese nombre
-        .mockResolvedValue({ id: 'r-nuevo', isSystem: false });
+      roleRepo.findOne.mockResolvedValue({ id: 'r-nuevo', isSystem: false });
       roleRepo.save.mockResolvedValue({ id: 'r-nuevo', isSystem: false });
       permissionRepo.find.mockResolvedValue([
         { id: 'p-list', module: 'clients', action: 'list' },
