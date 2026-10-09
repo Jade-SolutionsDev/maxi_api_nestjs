@@ -720,7 +720,7 @@ export class OrdersService {
           0,
         ) / 100;
       /**
-       * MxH-0043: pasado el umbral, el envío no se cobra.
+       * MxH-0043: pasado el umbral de **esa forma de entrega**, no se cobra.
        *
        * Aquí y no en la pantalla: este es el único sitio donde nace un pedido
        * —lo usan el checkout de la tienda y la creación desde el panel—, así
@@ -728,9 +728,11 @@ export class OrdersService {
        * tarifa ya rebajada, así que cambiar el umbral mañana no reescribe lo
        * que se le cobró hoy a nadie.
        */
-      const envioGratis =
-        await this.fulfillmentService.envioGratisPara(subtotal);
-      const deliveryFee = envioGratis ? '0.00' : params.fulfillment.fee;
+      const deliveryFee = await this.fulfillmentService.feeConPromocion(
+        params.fulfillment.deliveryOptionId,
+        subtotal,
+        params.fulfillment.fee,
+      );
       const total = (subtotal + Number(deliveryFee)).toFixed(2);
 
       const orderRepo = manager.getRepository(Order);

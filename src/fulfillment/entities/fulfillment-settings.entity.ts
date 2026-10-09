@@ -22,15 +22,6 @@ export interface FulfillmentSettingsData {
    * sin compromiso.
    */
   pickupPromiseDays?: number | null;
-  /**
-   * Importe en USD a partir del cual el envío deja de cobrarse, comparado
-   * contra el **subtotal de productos**: el envío no cuenta para ganárselo.
-   *
-   * Nulo = sin promoción, que es como está la tienda hoy. Se guarda en
-   * céntimos enteros para no arrastrar los decimales del coma flotante en una
-   * comparación de dinero: 50 USD son 5000.
-   */
-  freeDeliveryThresholdCents?: number | null;
 }
 
 @Entity('fulfillment_settings')

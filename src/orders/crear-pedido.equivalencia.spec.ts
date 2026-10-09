@@ -116,7 +116,7 @@ describe('la tienda y el panel crean el mismo pedido', () => {
   let paymentMethodsService: { resolve: jest.Mock };
   let fulfillmentService: {
     resolveChoice: jest.Mock;
-    envioGratisPara: jest.Mock;
+    feeConPromocion: jest.Mock;
   };
   let clientAddressesService: {
     findOneForClient: jest.Mock;
@@ -203,8 +203,13 @@ describe('la tienda y el panel crean el mismo pedido', () => {
       resolve: jest.fn().mockResolvedValue({ code: 'manual' }),
     };
     fulfillmentService = {
-      // Sin promoción salvo que la prueba diga lo contrario (MxH-0043).
-      envioGratisPara: jest.fn().mockResolvedValue(false),
+      // Sin promoción salvo que la prueba diga lo contrario: devuelve la
+      // tarifa tal cual le llega (MxH-0043).
+      feeConPromocion: jest
+        .fn()
+        .mockImplementation((_id: unknown, _subtotal: number, fee: string) =>
+          Promise.resolve(fee),
+        ),
       resolveChoice: jest.fn().mockResolvedValue({
         type: 'delivery',
         fee: '0.00',
@@ -314,13 +319,17 @@ describe('la tienda y el panel crean el mismo pedido', () => {
 
   /**
    * MxH-0043. Lo que esta prueba defiende es que la promoción vive **en el
-   * cálculo del pedido** y no en la pantalla: por las dos vías —la tienda y el
-   * panel— el envío tiene que salir en cero, y el total sin él. Si algún día
-   * alguien la implementa solo en el resumen del checkout, esta cae.
+   * cálculo del pedido** y no en la pantalla: el envío sale en cero y el total
+   * sin él. Si algún día alguien la implementa solo en el resumen del
+   * checkout, esta cae.
+   *
+   * El umbral es de cada forma de entrega, así que lo que se le pregunta al
+   * servicio es «cuánto se cobra por ESTA opción con ESTE subtotal».
    */
   it('pasado el umbral, el envío no se cobra, venga de la tienda o del panel', async () => {
     fulfillmentService.resolveChoice.mockResolvedValue(fulfillmentNoTrivial());
-    fulfillmentService.envioGratisPara.mockResolvedValue(true);
+    // La opción elegida tiene promoción y la alcanza: su tarifa pasa a cero.
+    fulfillmentService.feeConPromocion.mockResolvedValue('0.00');
     cartService.getCart.mockResolvedValue({
       items: [cartLine],
       totalItems: 2,

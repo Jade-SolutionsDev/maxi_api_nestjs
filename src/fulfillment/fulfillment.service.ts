@@ -54,9 +54,9 @@ export interface FulfillmentChoice {
  * switch plus whatever addresses the storages carry. When neither yields
  * anything, checkout is blocked rather than producing an order nobody can fill.
  */
-/** Céntimos guardados → dólares para quien los lee. `null` se mantiene `null`. */
-const aDolares = (centimos?: number | null): number | null =>
-  centimos == null ? null : centimos / 100;
+/** Dólares escritos → céntimos guardados. `null` apaga la promoción. */
+const aCentimos = (dolares?: number | null): number | null =>
+  dolares == null ? null : Math.round(dolares * 100);
 
 @Injectable()
 export class FulfillmentService {
@@ -87,7 +87,6 @@ export class FulfillmentService {
     const hayRecogida = data.pickupEnabled && points.length > 0;
     return {
       ...data,
-      freeDeliveryThreshold: aDolares(data.freeDeliveryThresholdCents),
       pickupEnabledWithoutAddresses: data.pickupEnabled && points.length === 0,
       // Con recogida en pie no hace falta la consulta: cualquier municipio
       // cubierto alcanza algún mostrador (MxH-0101).
@@ -136,20 +135,30 @@ export class FulfillmentService {
   }
 
   /**
-   * Si una compra de este subtotal se lleva el envío gratis (MxH-0043).
+   * El envío que de verdad se cobra por esta opción con este subtotal
+   * (MxH-0043). Cero si la compra alcanza el umbral de **esa** forma de
+   * entrega; su tarifa, si no.
    *
    * Se compara en **céntimos enteros**: con dólares en coma flotante, una
-   * compra de 50 USD contra un umbral de 50 puede salir falsa por el redondeo
-   * del binario, y eso es un cliente que ve el envío cobrado cuando la cuenta
-   * le daba justo.
+   * compra de 20,01 contra un umbral de 20,01 puede salir falsa por el
+   * redondeo del binario —`9.51 + 10.50` da `20.009999999999998`—, y eso es un
+   * cliente que paga el envío con la cuenta dándole justo.
    *
-   * El subtotal es el de productos, con sus rebajas ya aplicadas: el envío no
+   * El subtotal es el de productos, con sus rebajas aplicadas: el envío no
    * cuenta para ganarse el envío.
    */
-  async envioGratisPara(subtotal: number): Promise<boolean> {
-    const { freeDeliveryThresholdCents } = await this.getSettings();
-    if (!freeDeliveryThresholdCents) return false;
-    return Math.round(subtotal * 100) >= freeDeliveryThresholdCents;
+  async feeConPromocion(
+    optionId: string | null | undefined,
+    subtotal: number,
+    fee: string,
+  ): Promise<string> {
+    if (!optionId) return fee;
+    const option = await this.optionRepository.findOne({
+      where: { id: optionId },
+    });
+    const umbral = option?.freeDeliveryThresholdCents;
+    if (!umbral) return fee;
+    return Math.round(subtotal * 100) >= umbral ? '0.00' : fee;
   }
 
   async updateSettings(
@@ -163,23 +172,10 @@ export class FulfillmentService {
     // el valor guardado y desaparece del jsonb: guardar el mensaje de soporte
     // borraba el ajuste de recogida, que volvía a su valor por defecto sin
     // que nadie lo notara.
-    // El umbral entra en USD y se guarda en céntimos, así que no puede ir con
-    // los demás: se saca antes de mezclar y se convierte aparte. `null` sí pasa
-    // —es cómo se apaga la promoción—; solo `undefined` significa «no lo toques».
-    const { freeDeliveryThreshold, ...resto } = dto;
-    const cambios: Record<string, unknown> = Object.fromEntries(
-      Object.entries(resto).filter(([, valor]) => valor !== undefined),
+    const cambios = Object.fromEntries(
+      Object.entries(dto).filter(([, valor]) => valor !== undefined),
     );
-    if (freeDeliveryThreshold !== undefined) {
-      cambios.freeDeliveryThresholdCents =
-        freeDeliveryThreshold === null
-          ? null
-          : Math.round(freeDeliveryThreshold * 100);
-    }
-    const data: FulfillmentSettingsData = {
-      ...current,
-      ...cambios,
-    };
+    const data: FulfillmentSettingsData = { ...current, ...cambios };
 
     if (row) {
       row.data = data;
@@ -222,6 +218,7 @@ export class FulfillmentService {
         description: dto.description ?? null,
         fee: (dto.fee ?? 0).toFixed(2),
         promiseDays: dto.promiseDays ?? null,
+        freeDeliveryThresholdCents: aCentimos(dto.freeDeliveryThreshold),
         sortOrder: dto.sortOrder ?? 0,
         enabled: dto.enabled ?? false,
       }),
@@ -243,6 +240,9 @@ export class FulfillmentService {
     if (dto.fee !== undefined) option.fee = dto.fee.toFixed(2);
     if (dto.promiseDays !== undefined) {
       option.promiseDays = dto.promiseDays ?? null;
+    }
+    if (dto.freeDeliveryThreshold !== undefined) {
+      option.freeDeliveryThresholdCents = aCentimos(dto.freeDeliveryThreshold);
     }
     if (dto.sortOrder !== undefined) option.sortOrder = dto.sortOrder;
     if (dto.enabled !== undefined) option.enabled = dto.enabled;
@@ -416,6 +416,10 @@ export class FulfillmentService {
         description: option.description,
         fee: Number(option.fee),
         promiseDays: option.promiseDays ?? null,
+        freeDeliveryThreshold:
+          option.freeDeliveryThresholdCents == null
+            ? null
+            : option.freeDeliveryThresholdCents / 100,
       })),
       pickupPoints: points,
       pickupEnabled: settings.pickupEnabled,
