@@ -18,8 +18,15 @@ import { MigrationInterface, QueryRunner } from 'typeorm';
  *
  * El ajuste general se borra del jsonb. No se migra ningún valor porque no
  * llegó a configurarse en ninguna parte: nació ayer y se queda sin estrenar.
+ *
+ * **Renumerada de `1790400000000` a `1790500000000`.** Nació con el mismo
+ * sello que `AlmaceneroSembradoDeMas`, escrita el mismo día en la otra sesión.
+ * Con dos iguales, `migration:revert` no sabe cuál es la última. Cede esta por
+ * la regla de la casa —quien creó después— y porque es idempotente: el
+ * `IF NOT EXISTS` y el `WHERE data ? …` hacen que volver a ejecutarla con el
+ * sello nuevo no toque nada donde ya se aplicó.
  */
-export class UmbralDeEnvioGratisPorOpcion1790400000000 implements MigrationInterface {
+export class UmbralDeEnvioGratisPorOpcion1790500000000 implements MigrationInterface {
   public async up(queryRunner: QueryRunner): Promise<void> {
     await queryRunner.query(
       `ALTER TABLE "delivery_options"
