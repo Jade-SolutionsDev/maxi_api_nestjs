@@ -23,8 +23,8 @@ import { MigrationInterface, QueryRunner } from 'typeorm';
  * de mover a su gente. Un rol con usuarios asignados no lo borra una migración
  * en bases que nadie ha mirado.
  */
-export class JefeDeAlmacen1790500000000 implements MigrationInterface {
-  name = 'JefeDeAlmacen1790500000000';
+export class JefeDeAlmacen1790600000000 implements MigrationInterface {
+  name = 'JefeDeAlmacen1790600000000';
 
   public async up(queryRunner: QueryRunner): Promise<void> {
     await queryRunner.query(

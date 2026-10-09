@@ -1,7 +1,7 @@
 import type { QueryRunner } from 'typeorm';
-import { JefeDeAlmacen1790500000000 } from './1790500000000-JefeDeAlmacen';
+import { JefeDeAlmacen1790600000000 } from './1790600000000-JefeDeAlmacen';
 
-describe('JefeDeAlmacen1790500000000', () => {
+describe('JefeDeAlmacen1790600000000', () => {
   const runner = () =>
     ({
       query: jest.fn().mockResolvedValue(undefined),
@@ -12,7 +12,7 @@ describe('JefeDeAlmacen1790500000000', () => {
 
   it('renombra la plantilla a «Jefe de almacén»', async () => {
     const qr = runner();
-    await new JefeDeAlmacen1790500000000().up(qr);
+    await new JefeDeAlmacen1790600000000().up(qr);
     expect(sql(qr)).toContain(`SET "name" = 'Jefe de almacén'`);
     expect(sql(qr)).toContain(`"system_key" = 'GROCER'`);
   });
@@ -24,7 +24,7 @@ describe('JefeDeAlmacen1790500000000', () => {
    */
   it('solo toca el nombre si sigue siendo el sembrado', async () => {
     const qr = runner();
-    await new JefeDeAlmacen1790500000000().up(qr);
+    await new JefeDeAlmacen1790600000000().up(qr);
     expect(sql(qr)).toContain(`'Almacenero', 'Almacenero — base'`);
   });
 
@@ -35,7 +35,7 @@ describe('JefeDeAlmacen1790500000000', () => {
    */
   it('no toca system_key', async () => {
     const qr = runner();
-    const m = new JefeDeAlmacen1790500000000();
+    const m = new JefeDeAlmacen1790600000000();
     await m.up(qr);
     await m.down(qr);
     expect(sql(qr)).not.toMatch(/SET\s+"system_key"/i);
@@ -44,7 +44,7 @@ describe('JefeDeAlmacen1790500000000', () => {
   /** Un rol con usuarios no lo borra una migración. */
   it('no borra roles ni asignaciones', async () => {
     const qr = runner();
-    const m = new JefeDeAlmacen1790500000000();
+    const m = new JefeDeAlmacen1790600000000();
     await m.up(qr);
     await m.down(qr);
     expect(sql(qr)).not.toMatch(/DELETE/i);
@@ -53,7 +53,7 @@ describe('JefeDeAlmacen1790500000000', () => {
 
   it('se puede deshacer', async () => {
     const qr = runner();
-    await new JefeDeAlmacen1790500000000().down(qr);
+    await new JefeDeAlmacen1790600000000().down(qr);
     expect(sql(qr)).toContain(`SET "name" = 'Almacenero'`);
   });
 });
