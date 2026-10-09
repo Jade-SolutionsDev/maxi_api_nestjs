@@ -91,7 +91,7 @@ export class AdminOrdersQueryDto extends PaginationQueryDto {
   @IsDateString()
   to?: string;
 
-  /** A domicilio o recogida en mostrador. */
+  /** A domicilio o recogida en la tienda. */
   @IsOptional()
   @Transform(vacioEsNada)
   @IsEnum(FulfillmentType)

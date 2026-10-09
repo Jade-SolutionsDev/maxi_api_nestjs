@@ -83,7 +83,7 @@ export const lineasDeEntrega = (order: Order): string[] => {
       address?: string;
     } | null;
     return [
-      'Recogida en mostrador',
+      'Recogida en la tienda',
       [recogida?.locationName, recogida?.label].filter(Boolean).join(' · '),
       recogida?.address ?? '',
       quienRecibe ? `Recoge: ${quienRecibe}` : '',
