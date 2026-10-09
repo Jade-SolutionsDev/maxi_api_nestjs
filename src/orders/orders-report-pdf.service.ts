@@ -94,7 +94,7 @@ export interface FilaDelResumen {
 
 const ENTREGAS: Record<string, string> = {
   delivery: 'A domicilio',
-  pickup: 'Recogida en tienda',
+  pickup: 'Recogida en la tienda',
 };
 
 export interface TotalPorEstado {

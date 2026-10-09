@@ -179,6 +179,6 @@ describe('lineasDeEntrega', () => {
     } as unknown as Order);
 
     expect(lineas.some((l) => l.startsWith('Recoge:'))).toBe(false);
-    expect(lineas).toContain('Recogida en mostrador');
+    expect(lineas).toContain('Recogida en la tienda');
   });
 });
