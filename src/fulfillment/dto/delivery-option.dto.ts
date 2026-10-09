@@ -50,6 +50,17 @@ export class CreateDeliveryOptionDto {
   @Max(60)
   promiseDays?: number | null;
 
+  /**
+   * Subtotal de productos en USD a partir del cual **esta** forma de entrega
+   * no se cobra. `null` apaga la promoción. Entra en dólares —así se escribe
+   * un precio— y se guarda en céntimos.
+   */
+  @IsOptional()
+  @IsNumber({ maxDecimalPlaces: 2 })
+  @Min(0.01)
+  @Max(100000)
+  freeDeliveryThreshold?: number | null;
+
   @IsOptional()
   @IsInt()
   @Min(0)
@@ -80,6 +91,8 @@ export class DeliveryOptionResponseDto {
   description: string | null;
   fee: number;
   promiseDays: number | null;
+  /** Subtotal en USD desde el que esta entrega sale gratis; `null` si no hay. */
+  freeDeliveryThreshold: number | null;
   sortOrder: number;
   enabled: boolean;
   zones: DeliveryZoneItemDto[];
@@ -96,6 +109,10 @@ export class DeliveryOptionResponseDto {
     dto.description = option.description;
     dto.fee = Number(option.fee);
     dto.promiseDays = option.promiseDays ?? null;
+    dto.freeDeliveryThreshold =
+      option.freeDeliveryThresholdCents == null
+        ? null
+        : option.freeDeliveryThresholdCents / 100;
     dto.sortOrder = option.sortOrder;
     dto.enabled = option.enabled;
     dto.zones = zones.map((zone) => ({

@@ -127,7 +127,7 @@ describe('OrdersService', () => {
   let paymentMethodsService: { resolve: jest.Mock };
   let fulfillmentService: {
     resolveChoice: jest.Mock;
-    envioGratisPara: jest.Mock;
+    feeConPromocion: jest.Mock;
   };
   let clientAddressesService: {
     findOneForClient: jest.Mock;
@@ -225,8 +225,13 @@ describe('OrdersService', () => {
       resolve: jest.fn().mockResolvedValue({ code: 'manual' }),
     };
     fulfillmentService = {
-      // Sin promoción salvo que la prueba diga lo contrario (MxH-0043).
-      envioGratisPara: jest.fn().mockResolvedValue(false),
+      // Sin promoción salvo que la prueba diga lo contrario: devuelve la
+      // tarifa tal cual le llega (MxH-0043).
+      feeConPromocion: jest
+        .fn()
+        .mockImplementation((_id: unknown, _subtotal: number, fee: string) =>
+          Promise.resolve(fee),
+        ),
       resolveChoice: jest.fn().mockResolvedValue({
         type: 'delivery',
         fee: '0.00',

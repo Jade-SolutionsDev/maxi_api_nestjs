@@ -6,6 +6,12 @@ export class StorefrontDeliveryOptionDto {
   fee: number;
   /** Días hábiles prometidos para esta opción; null si no hay compromiso. */
   promiseDays: number | null;
+  /**
+   * Subtotal en USD desde el que **esta** opción sale gratis, o `null` si no
+   * tiene promoción. La tienda lo necesita para decir cuánto falta, y es por
+   * opción porque la promoción es del envío: la recogida no tiene ninguna.
+   */
+  freeDeliveryThreshold: number | null;
 }
 
 /** A counter the customer can collect from. */

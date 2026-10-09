@@ -37,6 +37,24 @@ export class DeliveryOption {
   @Column({ name: 'promise_days', type: 'int', nullable: true })
   promiseDays: number | null;
 
+  /**
+   * Subtotal de productos —en céntimos— a partir del cual esta forma de
+   * entrega no se cobra. Nulo = sin promoción, que es como nacen todas.
+   *
+   * Por opción y no de toda la tienda: la promoción es del envío, así que vive
+   * con el envío. Y así una Express puede regalarse a partir de 200 mientras
+   * la normal lo hace a partir de 50.
+   *
+   * En céntimos enteros: comparar dólares en coma flotante deja sin promoción
+   * a quien compra justo el importe.
+   */
+  @Column({
+    name: 'free_delivery_threshold_cents',
+    type: 'int',
+    nullable: true,
+  })
+  freeDeliveryThresholdCents: number | null;
+
   @Column({ name: 'sort_order', type: 'int', default: 0 })
   sortOrder: number;
 
