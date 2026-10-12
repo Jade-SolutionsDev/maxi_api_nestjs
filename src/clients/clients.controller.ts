@@ -19,6 +19,7 @@ import {
 import { CreateClientDto } from './dto/create-client.dto';
 import { UpdateClientDto } from './dto/update-client.dto';
 import { ClientResponseDto } from './dto/client-response.dto';
+import { ClientBeneficiariesResponseDto } from './dto/client-beneficiaries-response.dto';
 import { ListClientsQueryDto } from './dto/list-clients-query.dto';
 import type { PaginatedResponse } from '../common/dto/pagination.dto';
 import {
@@ -79,6 +80,24 @@ export class ClientsController {
   @RequirePermission({ module: 'clients', action: 'read' })
   async findOne(@Param('id') id: string): Promise<ClientResponseDto> {
     return ClientResponseDto.fromEntity(await this.clientsService.findOne(id));
+  }
+
+  /**
+   * A quién le manda pedidos este cliente.
+   *
+   * Mismo permiso que ver la ficha, y no menos: son nombre, carné y teléfono de
+   * **terceros** que no son el cliente.
+   */
+  @Get(':id/beneficiaries')
+  @RequirePermission({ module: 'clients', action: 'read' })
+  @ApiOperation({
+    summary: 'Personas a las que este cliente ha mandado pedidos',
+  })
+  @ApiOkResponse({ type: ClientBeneficiariesResponseDto })
+  async findBeneficiaries(
+    @Param('id') id: string,
+  ): Promise<ClientBeneficiariesResponseDto> {
+    return this.clientsService.findBeneficiaries(id);
   }
 
   /**
