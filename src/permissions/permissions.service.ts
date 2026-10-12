@@ -74,6 +74,10 @@ const MODULOS_DE_APOYO: Record<string, readonly string[]> = {
   // departamentos; la portada elige destacados y enseña los banners.
   'cms-banners': ['products', 'categories', 'departments'],
   'cms-home': ['products', 'departments', 'cms-banners'],
+  // La lista de cobros enseña el número de pedido y el nombre del cliente, y
+  // enlaza a la ficha del pedido. Sin estas dos lecturas la pantalla saldría
+  // con huecos y el enlace daría 403.
+  payments: ['orders', 'clients'],
 };
 
 /**
@@ -129,6 +133,11 @@ export const MODULE_ACTIONS: Record<string, readonly string[]> = {
   // separado para que alguien pueda preparar la portada y otro darla por buena.
   'cms-home': ['read', 'update', 'publish'],
   'fulfillment-settings': ['read', 'update'],
+  // MxH-0063. El dinero que entró por las ventas: una fila por pedido con
+  // actividad de pago, conciliada contra `payment_charges`. Solo lectura —
+  // cobrar sigue siendo de `orders:update-payment-status`— y por eso no hay
+  // más acción que `list`: esta pantalla no mueve dinero, lo cuenta.
+  payments: ['list'],
   dashboard: ['view'],
   uploads: ['create'],
 };
