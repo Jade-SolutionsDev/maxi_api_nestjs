@@ -17,6 +17,8 @@ import { MibilleteraGateway } from './gateways/mibilletera/mibilletera.gateway';
 import { MibilleteraWalletGateway } from './gateways/mibilletera/mibilletera-wallet.gateway';
 import { TropipayClient } from './gateways/tropipay/tropipay-client';
 import { TropipayGateway } from './gateways/tropipay/tropipay.gateway';
+import { CollectionsController } from './collections.controller';
+import { CollectionsService } from './collections.service';
 import { OrderExpiryController } from './order-expiry.controller';
 import { OrderExpiryService } from './order-expiry.service';
 import { PaymentMethodsController } from './payment-methods.controller';
@@ -45,12 +47,14 @@ import { StorefrontPaymentMethodsController } from './storefront-payment-methods
     OrderEventsModule,
   ],
   controllers: [
+    CollectionsController,
     PaymentMethodsController,
     StorefrontPaymentMethodsController,
     PaymentsWebhookController,
     OrderExpiryController,
   ],
   providers: [
+    CollectionsService,
     PaymentsService,
     PaymentMethodsService,
     OrderExpiryService,
