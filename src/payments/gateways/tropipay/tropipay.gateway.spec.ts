@@ -58,6 +58,7 @@ describe('TropipayGateway', () => {
       currency: string;
       clientId: string;
       clientSecret: string;
+      minAmount?: number;
     };
     createPaymentLink: jest.Mock;
     findMovementByReference: jest.Mock;

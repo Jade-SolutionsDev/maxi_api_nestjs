@@ -23,6 +23,7 @@ describe('ClientsService', () => {
     avatarUrl: null,
     defaultMunicipalityId: null,
     isActive: true,
+    adminInvitePending: false,
     onboardingCompleted: false,
     createdAt: new Date(),
     updatedAt: new Date(),
@@ -74,6 +75,9 @@ describe('ClientsService', () => {
             ),
             softDelete: jest.fn(),
             createQueryBuilder: jest.fn(() => qb),
+            // `findBeneficiaries` agrega sobre un campo JSON y acaba en SQL.
+            // El doble devuelve lo que se le diga por consulta, en orden.
+            manager: { query: jest.fn() },
           },
         },
       ],
@@ -190,9 +194,9 @@ describe('ClientsService', () => {
       repository.save.mockResolvedValue(client);
 
       const result = await service.createOrUpdateFromClerk(client.clerkId, {
-        email: client.email,
-        firstName: client.firstName,
-        lastName: client.lastName,
+        email: client.email ?? undefined,
+        firstName: client.firstName ?? undefined,
+        lastName: client.lastName ?? undefined,
       });
 
       expect(result).toEqual(client);
@@ -348,5 +352,207 @@ describe('ClientsService', () => {
       expect(invitaciones.listarPendientes).not.toHaveBeenCalled();
       expect(r.data.map((c) => c.id)).not.toContain('inv_1');
     });
+  });
+});
+
+describe('ClientsService · findBeneficiaries', () => {
+  let service: ClientsService;
+  let consultas: jest.Mock;
+
+  const cliente = (phone: string | null) =>
+    ({
+      id: 'c-1',
+      clerkId: 'clerk_1',
+      email: 'ana@example.com',
+      firstName: 'Ana',
+      lastName: 'Pérez',
+      phone,
+      avatarUrl: null,
+      defaultMunicipalityId: null,
+      isActive: true,
+      adminInvitePending: false,
+      onboardingCompleted: true,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+      deletedAt: null,
+    }) as Client;
+
+  const montar = async (phoneDelCliente: string | null) => {
+    consultas = jest.fn();
+    const module: TestingModule = await Test.createTestingModule({
+      providers: [
+        ClientsService,
+        {
+          provide: ClientInvitationsService,
+          useValue: { listarPendientes: jest.fn() },
+        },
+        {
+          provide: getRepositoryToken(Client),
+          useValue: {
+            findOne: jest.fn(() => Promise.resolve(cliente(phoneDelCliente))),
+            manager: { query: consultas },
+          },
+        },
+      ],
+    }).compile();
+    service = module.get<ClientsService>(ClientsService);
+  };
+
+  it('devuelve cada beneficiario con sus veces y su última fecha', async () => {
+    await montar(null);
+    const ultimo = new Date('2026-09-30T10:00:00Z');
+    consultas
+      .mockResolvedValueOnce([
+        {
+          nombre: 'Merlinda Vargas',
+          carne: '85072045678',
+          telefono: '+53 5251 9414',
+          veces: 3,
+          ultimo,
+        },
+      ])
+      .mockResolvedValueOnce([{ sin_destinatario: 7 }]);
+
+    const r = await service.findBeneficiaries('c-1');
+
+    expect(r.beneficiaries).toEqual([
+      {
+        name: 'Merlinda Vargas',
+        idCard: '85072045678',
+        phone: '+53 5251 9414',
+        timesReceived: 3,
+        lastOrderAt: ultimo,
+        samePhoneAsClient: false,
+      },
+    ]);
+    expect(r.ordersWithoutRecipient).toBe(7);
+  });
+
+  /**
+   * Lo único que se puede medir sobre «es el propio cliente». El cliente no
+   * guarda carné, y su nombre viene de Clerk mientras el del beneficiario se
+   * escribe a mano, así que comparar nombres no vale. Se comparan solo los
+   * dígitos porque los dos lados se escriben con formatos distintos.
+   */
+  it('marca el teléfono que coincide con el del cliente, con prefijo o sin él', async () => {
+    await montar('+53 5251 9414');
+    consultas
+      .mockResolvedValueOnce([
+        {
+          nombre: 'Sin prefijo',
+          carne: null,
+          telefono: '52519414',
+          veces: 1,
+          ultimo: new Date(),
+        },
+        {
+          nombre: 'Con prefijo',
+          carne: null,
+          telefono: '+53 5251 9414',
+          veces: 1,
+          ultimo: new Date(),
+        },
+        {
+          nombre: 'Otro',
+          carne: null,
+          telefono: '55667788',
+          veces: 1,
+          ultimo: new Date(),
+        },
+        {
+          nombre: 'Demasiado corto',
+          carne: null,
+          telefono: '9414',
+          veces: 1,
+          ultimo: new Date(),
+        },
+      ])
+      .mockResolvedValueOnce([{ sin_destinatario: 0 }]);
+
+    const r = await service.findBeneficiaries('c-1');
+
+    expect(r.beneficiaries.map((b) => b.samePhoneAsClient)).toEqual([
+      true,
+      true,
+      false,
+      false,
+    ]);
+  });
+
+  it('un cliente sin teléfono no marca nada', async () => {
+    await montar(null);
+    consultas
+      .mockResolvedValueOnce([
+        {
+          nombre: 'Ana',
+          carne: null,
+          telefono: null,
+          veces: 1,
+          ultimo: new Date(),
+        },
+      ])
+      .mockResolvedValueOnce([{ sin_destinatario: 0 }]);
+
+    const r = await service.findBeneficiaries('c-1');
+
+    expect(r.beneficiaries[0].samePhoneAsClient).toBe(false);
+  });
+
+  /**
+   * La agrupación es la parte que puede equivocarse en silencio: por carné
+   * cuando lo hay y por nombre+teléfono cuando no. Si alguien la cambia a solo
+   * carné, los pedidos viejos sin carné se juntarían en una fila falsa.
+   */
+  it('agrupa por carné cuando lo hay y por nombre+teléfono cuando no', async () => {
+    await montar(null);
+    consultas
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([{ sin_destinatario: 0 }]);
+
+    await service.findBeneficiaries('c-1');
+
+    const sql = consultas.mock.calls[0][0] as string;
+    expect(sql).toContain(
+      "GROUP BY coalesce(carne, lower(nombre) || '|' || coalesce(telefono, ''))",
+    );
+  });
+
+  it('no cuenta los pedidos borrados', async () => {
+    await montar(null);
+    consultas
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([{ sin_destinatario: 0 }]);
+
+    await service.findBeneficiaries('c-1');
+
+    for (const [sql] of consultas.mock.calls) {
+      expect(sql as string).toContain('o.deleted_at IS NULL');
+    }
+  });
+
+  it('404 si el cliente no existe', async () => {
+    consultas = jest.fn();
+    const module: TestingModule = await Test.createTestingModule({
+      providers: [
+        ClientsService,
+        {
+          provide: ClientInvitationsService,
+          useValue: { listarPendientes: jest.fn() },
+        },
+        {
+          provide: getRepositoryToken(Client),
+          useValue: {
+            findOne: jest.fn(() => Promise.resolve(null)),
+            manager: { query: consultas },
+          },
+        },
+      ],
+    }).compile();
+    service = module.get<ClientsService>(ClientsService);
+
+    await expect(service.findBeneficiaries('no-existe')).rejects.toBeInstanceOf(
+      NotFoundException,
+    );
+    expect(consultas).not.toHaveBeenCalled();
   });
 });

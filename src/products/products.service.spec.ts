@@ -4,10 +4,13 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { Test, TestingModule } from '@nestjs/testing';
+import { plainToInstance } from 'class-transformer';
+import { validate } from 'class-validator';
 import { getRepositoryToken } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { CategoriesService } from '../categories/categories.service';
 import { Category } from '../categories/entities/category.entity';
+import { CreateProductDto } from './dto/create-product.dto';
 import { ProductResponseDto } from './dto/product-response.dto';
 import { Product } from './entities/product.entity';
 import { RevalidationService } from '../revalidation/revalidation.service';
@@ -132,19 +135,41 @@ describe('ProductsService', () => {
       expect(result.sku).toBe('COLA-1L');
     });
 
-    it('creates without an image (optional while the file server is off)', async () => {
-      categoriesService.getChildCategoryOrThrow.mockResolvedValue(
-        makeChildCategory(),
-      );
-      repository.findOne.mockResolvedValue(null);
-
-      const result = await service.create({
+    /**
+     * Esta prueba decía «creates without an image (optional while the file
+     * server is off)» y llamaba al servicio sin `imageUrl`. Ya no es la regla:
+     * `CreateProductDto.imageUrl` es obligatorio —`@IsNotEmpty()` y
+     * `@IsImageUrl()`— desde que el servidor de ficheros entró. Pasaba porque
+     * llama al servicio directo y el `ValidationPipe` no corre ahí: el DTO
+     * rechaza ese cuerpo antes de llegar al servicio, en el controlador.
+     *
+     * Se queda lo que sí es verdad y nadie comprobaba: que la regla la pone la
+     * validación, y que la columna sigue admitiendo nulo para los productos que
+     * se crearon antes.
+     */
+    it('exige imagen al crear: el DTO rechaza un cuerpo sin ella', async () => {
+      const dto = plainToInstance(CreateProductDto, {
         categoryId: 'cat-1',
         name: 'Cola 1L',
         basePrice: 9.99,
       });
 
-      expect(result.imageUrl).toBeNull();
+      const errores = await validate(dto);
+
+      expect(errores.map((e) => e.property)).toContain('imageUrl');
+    });
+
+    it('y acepta el cuerpo completo', async () => {
+      const dto = plainToInstance(CreateProductDto, {
+        categoryId: '11111111-1111-4111-8111-111111111111',
+        name: 'Cola 1L',
+        basePrice: 9.99,
+        imageUrl: 'https://cdn.example.com/cola.png',
+      });
+
+      expect((await validate(dto)).map((e) => e.property)).not.toContain(
+        'imageUrl',
+      );
     });
 
     it('propagates BadRequest when the category is a department', async () => {
@@ -456,8 +481,13 @@ describe('ProductsService', () => {
 
 describe('ProductResponseDto', () => {
   it('computes finalPrice from a percentage discount', () => {
+    // Los argumentos van explícitos: llamarla solo con el producto dejaba
+    // `amount` en su valor por defecto, y las dos aserciones de 0 pasaban por
+    // eso y no por lo que la prueba dice medir.
     const dto = ProductResponseDto.fromEntity(
       makeProduct({ basePrice: '100.00', discount: '15.00' }),
+      0,
+      undefined,
     );
     expect(dto.finalPrice).toBe(85);
     expect(dto.amount).toBe(0);
@@ -467,6 +497,8 @@ describe('ProductResponseDto', () => {
   it('equals basePrice with no discount', () => {
     const dto = ProductResponseDto.fromEntity(
       makeProduct({ basePrice: '9.99', discount: '0.00' }),
+      0,
+      undefined,
     );
     expect(dto.finalPrice).toBe(9.99);
   });

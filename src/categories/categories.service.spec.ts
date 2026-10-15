@@ -16,7 +16,7 @@ function makeUser(overrides: Partial<User> = {}): User {
   return {
     id: '11111111-1111-1111-1111-111111111111',
     clerkId: 'clerk_provider',
-    role: Role.GROCER,
+    role: Role.STAFF,
     email: 'provider@example.com',
     firstName: 'Prov',
     lastName: 'Ider',
@@ -27,6 +27,7 @@ function makeUser(overrides: Partial<User> = {}): User {
     businessLogoUrl: null,
     clerkOrgId: null,
     isActive: true,
+    approvedAt: null,
     createdBy: null,
     createdAt: new Date(),
     updatedAt: new Date(),
@@ -82,6 +83,26 @@ function makeRawQueryBuilderStub(rawRows: { id: string; count: string }[]) {
  * Compara la intencion, no el objeto: dos llamadas a `contieneSinTildes` traen
  * funciones distintas y `toEqual` las mira por identidad.
  */
+/**
+ * El `where` con el que se llamó a `find`, como lista.
+ *
+ * `FindManyOptions.where` es opcional para TypeORM, así que cada acceso dentro
+ * de las pruebas obligaba a una aserción no nula. Se comprueba aquí una sola
+ * vez y con un mensaje que se entiende si algún día deja de ser una lista.
+ */
+const whereDeLaPrimeraLlamada = (find: {
+  mock: { calls: unknown[][] };
+}): Array<Record<string, unknown>> => {
+  const opciones = find.mock.calls[0]?.[0] as { where?: unknown } | undefined;
+  const where = opciones?.where;
+  if (!Array.isArray(where)) {
+    throw new Error(
+      `find() no recibió un where en forma de lista: ${JSON.stringify(where)}`,
+    );
+  }
+  return where as Array<Record<string, unknown>>;
+};
+
 const esperarBusquedaSinTildes = (operador: any, termino: string) => {
   expect(operador._type).toBe('raw');
   expect(operador._getSql('tabla.columna')).toContain('f_unaccent');
@@ -187,6 +208,8 @@ describe('CategoriesService', () => {
         service.createCategory(provider, {
           departmentId: 'dep-x',
           name: 'Refrescos',
+          imageDesktopUrl:
+            'https://cdn.maxihabana.com/categorias/refrescos.webp',
         }),
       ).rejects.toBeInstanceOf(NotFoundException);
     });
@@ -274,7 +297,7 @@ describe('CategoriesService', () => {
     it('filters departments by name OR slug, accents folded, when q is present', async () => {
       repository.find.mockResolvedValue([]);
       await service.listDepartments('ques');
-      const where = repository.find.mock.calls[0][0].where;
+      const where = whereDeLaPrimeraLlamada(repository.find);
       expect(where).toHaveLength(2);
       expect(where[0].parentId).toEqual(IsNull());
       expect(where[1].parentId).toEqual(IsNull());
@@ -285,7 +308,7 @@ describe('CategoriesService', () => {
     it('filters categories by name OR slug, accents folded, when q is present', async () => {
       repository.find.mockResolvedValue([]);
       await service.listCategories(provider, undefined, 'ques');
-      const where = repository.find.mock.calls[0][0].where;
+      const where = whereDeLaPrimeraLlamada(repository.find);
       expect(where).toHaveLength(2);
       expect(where[0].parentId).toEqual(Not(IsNull()));
       expect(where[1].parentId).toEqual(Not(IsNull()));

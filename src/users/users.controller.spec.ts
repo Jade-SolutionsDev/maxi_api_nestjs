@@ -28,6 +28,8 @@ describe('UsersController', () => {
     businessLogoUrl: null,
     clerkOrgId: null,
     isActive: true,
+    deletedAt: null,
+    managedRoles: [],
     createdBy: null,
     createdAt: new Date(),
     updatedAt: new Date(),
@@ -130,12 +132,13 @@ describe('UsersController', () => {
   it('should invite a user and return a response dto', async () => {
     const dto: InviteUserDto = {
       email: 'invite@example.com',
-      role: Role.KARDIST,
+      role: Role.STAFF,
     };
     const invitation: Invitation = {
       id: 'invite-id',
       email: dto.email,
       role: dto.role,
+      roleIds: [],
       invitedById: actor.id,
       invitedBy: actor,
       organizationId: null,
@@ -163,7 +166,7 @@ describe('UsersController', () => {
     const invitation = {
       id: 'invite-id',
       email: 'invite@example.com',
-      role: Role.KARDIST,
+      role: Role.STAFF,
       status: InvitationStatus.REVOKED,
       invitedById: null,
       organizationId: null,

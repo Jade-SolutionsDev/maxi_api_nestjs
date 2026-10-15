@@ -54,6 +54,10 @@ export interface FulfillmentChoice {
  * switch plus whatever addresses the storages carry. When neither yields
  * anything, checkout is blocked rather than producing an order nobody can fill.
  */
+/** Dólares escritos → céntimos guardados. `null` apaga la promoción. */
+const aCentimos = (dolares?: number | null): number | null =>
+  dolares == null ? null : Math.round(dolares * 100);
+
 @Injectable()
 export class FulfillmentService {
   constructor(
@@ -80,10 +84,81 @@ export class FulfillmentService {
   async getSettingsResponse(): Promise<FulfillmentSettingsResponseDto> {
     const data = await this.getSettings();
     const points = await this.pickupPoints();
+    const hayRecogida = data.pickupEnabled && points.length > 0;
     return {
       ...data,
       pickupEnabledWithoutAddresses: data.pickupEnabled && points.length === 0,
+      // Con recogida en pie no hace falta la consulta: cualquier municipio
+      // cubierto alcanza algún mostrador (MxH-0101).
+      municipalitiesWithoutFulfillment: hayRecogida
+        ? []
+        : await this.municipalitiesWithoutFulfillment(),
     };
+  }
+
+  /**
+   * Municipios que el catálogo da por vendibles y a los que no se puede hacer
+   * llegar nada: un almacén activo los cubre —así que la tienda les enseña
+   * productos con precio y les deja llenar el carrito— y en el checkout no hay
+   * ni recogida ni una opción de entrega que alcance esa zona.
+   *
+   * Cubrir no es poder despachar, y nada avisaba de la diferencia: se veía
+   * en el último paso de la compra y lo contaba el cliente, no el panel
+   * (MxH-0101, P-046). Solo se llama cuando la recogida no está en pie, que
+   * es cuando la diferencia puede existir.
+   */
+  async municipalitiesWithoutFulfillment(): Promise<
+    { id: string; name: string }[]
+  > {
+    return this.settingsRepository.manager.query(
+      `SELECT DISTINCT m.id, m.name
+         FROM municipalities m
+         JOIN stock_location_coverage c
+           ON c.municipality_id = m.id
+           OR (c.coverage_type = 'province' AND c.province_id = m.province_id)
+         JOIN stock_locations sl
+           ON sl.id = c.location_id
+          AND sl.is_active = true
+          AND sl.deleted_at IS NULL
+        WHERE NOT EXISTS (
+          SELECT 1
+            FROM delivery_options o
+            LEFT JOIN delivery_option_zones z ON z.option_id = o.id
+           WHERE o.enabled = true
+             AND o.deleted_at IS NULL
+             AND (z.id IS NULL
+                  OR z.municipality_id = m.id
+                  OR (z.municipality_id IS NULL AND z.province_id = m.province_id))
+        )
+        ORDER BY m.name`,
+    );
+  }
+
+  /**
+   * El envío que de verdad se cobra por esta opción con este subtotal
+   * (MxH-0043). Cero si la compra alcanza el umbral de **esa** forma de
+   * entrega; su tarifa, si no.
+   *
+   * Se compara en **céntimos enteros**: con dólares en coma flotante, una
+   * compra de 20,01 contra un umbral de 20,01 puede salir falsa por el
+   * redondeo del binario —`9.51 + 10.50` da `20.009999999999998`—, y eso es un
+   * cliente que paga el envío con la cuenta dándole justo.
+   *
+   * El subtotal es el de productos, con sus rebajas aplicadas: el envío no
+   * cuenta para ganarse el envío.
+   */
+  async feeConPromocion(
+    optionId: string | null | undefined,
+    subtotal: number,
+    fee: string,
+  ): Promise<string> {
+    if (!optionId) return fee;
+    const option = await this.optionRepository.findOne({
+      where: { id: optionId },
+    });
+    const umbral = option?.freeDeliveryThresholdCents;
+    if (!umbral) return fee;
+    return Math.round(subtotal * 100) >= umbral ? '0.00' : fee;
   }
 
   async updateSettings(
@@ -143,6 +218,7 @@ export class FulfillmentService {
         description: dto.description ?? null,
         fee: (dto.fee ?? 0).toFixed(2),
         promiseDays: dto.promiseDays ?? null,
+        freeDeliveryThresholdCents: aCentimos(dto.freeDeliveryThreshold),
         sortOrder: dto.sortOrder ?? 0,
         enabled: dto.enabled ?? false,
       }),
@@ -164,6 +240,9 @@ export class FulfillmentService {
     if (dto.fee !== undefined) option.fee = dto.fee.toFixed(2);
     if (dto.promiseDays !== undefined) {
       option.promiseDays = dto.promiseDays ?? null;
+    }
+    if (dto.freeDeliveryThreshold !== undefined) {
+      option.freeDeliveryThresholdCents = aCentimos(dto.freeDeliveryThreshold);
     }
     if (dto.sortOrder !== undefined) option.sortOrder = dto.sortOrder;
     if (dto.enabled !== undefined) option.enabled = dto.enabled;
@@ -222,16 +301,10 @@ export class FulfillmentService {
 
   // ---------------- Storefront ----------------
 
-  /**
-   * Pickup points of active storages. Scoped to the storages covering the
-   * customer's municipality when one is known — a customer buying in Matanzas
-   * has no business seeing Guantánamo's counter. Without a municipality the
-   * full list stays available so checkout never dead-ends.
-   */
-  private async pickupPoints(
-    municipalityId?: string,
-  ): Promise<StorefrontPickupPointDto[]> {
-    const qb = this.pickupRepository
+  // Pickup counters of active storages, unfiltered. Kept apart so the
+  // near-first lookup below can ask the same question twice.
+  private pickupPointsQuery() {
+    return this.pickupRepository
       .createQueryBuilder('pickup')
       .innerJoin(
         'stock_locations',
@@ -243,18 +316,43 @@ export class FulfillmentService {
       .addSelect('location.name', 'locationName')
       .addSelect('pickup.label', 'label')
       .addSelect('pickup.address', 'address')
+      .addSelect('pickup.hours', 'hours')
       .orderBy('location.name')
       .addOrderBy('pickup.label');
+  }
 
+  /**
+   * Pickup points of active storages. Scoped to the storages covering the
+   * customer's municipality when one is known — a customer buying in Matanzas
+   * has no business seeing Guantánamo's counter. Without a municipality the
+   * full list stays available so checkout never dead-ends.
+   *
+   * MxH-0101: that scoping used to return nothing when the covering storages
+   * had no counter of their own, and the customer — who had just been shown
+   * the product in the catalogue, priced and in stock — hit a checkout with no
+   * way through. Collecting is the customer travelling, not the shop
+   * delivering, so a counter outside the delivery area is a worse offer than a
+   * near one but a far better one than none. The order already knows how to
+   * finish it: it reserves in the covering storages and flags the transfer to
+   * the chosen counter (`orders.service`, `resolveAllowedLocationIds`).
+   */
+  private async pickupPoints(
+    municipalityId?: string,
+  ): Promise<StorefrontPickupPointDto[]> {
     if (municipalityId) {
       const serving = await this.productsService.coveringLocationIds({
         municipalityId,
       });
+      // Nothing serves the place: there is no stock to collect either.
       if (serving.length === 0) return [];
-      qb.andWhere('pickup.location_id IN (:...serving)', { serving });
+
+      const cercanos = await this.pickupPointsQuery()
+        .andWhere('pickup.location_id IN (:...serving)', { serving })
+        .getRawMany<StorefrontPickupPointDto>();
+      if (cercanos.length > 0) return cercanos;
     }
 
-    return qb.getRawMany<StorefrontPickupPointDto>();
+    return this.pickupPointsQuery().getRawMany<StorefrontPickupPointDto>();
   }
 
   /**
@@ -318,6 +416,10 @@ export class FulfillmentService {
         description: option.description,
         fee: Number(option.fee),
         promiseDays: option.promiseDays ?? null,
+        freeDeliveryThreshold:
+          option.freeDeliveryThresholdCents == null
+            ? null
+            : option.freeDeliveryThresholdCents / 100,
       })),
       pickupPoints: points,
       pickupEnabled: settings.pickupEnabled,
@@ -375,10 +477,14 @@ export class FulfillmentService {
         deliveryOptionLabel: null,
         pickupLocationId: point.locationId,
         pickupAddressId: point.id,
+        // El horario se congela con la dirección, por lo mismo que ella: el
+        // pedido guarda lo que se le dijo al cliente al comprar. Si el mostrador
+        // cambia de horario, los pedidos nuevos llevan el nuevo.
         pickupAddressSnapshot: {
           locationName: point.locationName,
           label: point.label,
           address: point.address,
+          hours: point.hours ?? null,
         },
       };
     }

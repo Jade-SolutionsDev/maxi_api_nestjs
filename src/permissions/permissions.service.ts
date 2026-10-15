@@ -33,6 +33,18 @@ export interface UserPermissionsPayload {
 const CRUD = ['list', 'read', 'create', 'update', 'delete'] as const;
 
 /**
+ * El nombre de un rol, limpio.
+ *
+ * Sin esto, «jefe de almacenes » —con el espacio del final— y «Jefe de
+ * almacenes» son dos roles distintos para la base y el mismo para cualquier
+ * persona. Pasó: staging acabó con dos roles de almacén, uno sembrado y otro
+ * hecho a mano un día después, y la comprobación de duplicados no los vio
+ * porque comparaba las cadenas tal cual.
+ */
+export const nombreDeRolNormalizado = (nombre: string): string =>
+  nombre.trim().replace(/\s+/g, ' ');
+
+/**
  * Las dos acciones que solo miran. Todas las demás son trabajar sobre el
  * módulo, y trabajar sobre algo que no puedes ver no significa nada: el menú
  * lateral enseña un módulo cuando el rol tiene `list`, así que un rol con solo
@@ -62,6 +74,10 @@ const MODULOS_DE_APOYO: Record<string, readonly string[]> = {
   // departamentos; la portada elige destacados y enseña los banners.
   'cms-banners': ['products', 'categories', 'departments'],
   'cms-home': ['products', 'departments', 'cms-banners'],
+  // La lista de cobros enseña el número de pedido y el nombre del cliente, y
+  // enlaza a la ficha del pedido. Sin estas dos lecturas la pantalla saldría
+  // con huecos y el enlace daría 403.
+  payments: ['orders', 'clients'],
 };
 
 /**
@@ -117,6 +133,11 @@ export const MODULE_ACTIONS: Record<string, readonly string[]> = {
   // separado para que alguien pueda preparar la portada y otro darla por buena.
   'cms-home': ['read', 'update', 'publish'],
   'fulfillment-settings': ['read', 'update'],
+  // MxH-0063. El dinero que entró por las ventas: una fila por pedido con
+  // actividad de pago, conciliada contra `payment_charges`. Solo lectura —
+  // cobrar sigue siendo de `orders:update-payment-status`— y por eso no hay
+  // más acción que `list`: esta pantalla no mueve dinero, lo cuenta.
+  payments: ['list'],
   dashboard: ['view'],
   uploads: ['create'],
 };
@@ -127,7 +148,8 @@ export const isSystemAdmin = (role: string | null): boolean =>
 
 /**
  * Seeded, EDITABLE starter roles — templates an admin can assign, rename,
- * regrant or delete. Created exactly once: the first boot where no role with
+ * regrant or delete. Sin sufijo «— base» en el nombre: la clasificación la
+ * lleva `systemKey`, que el panel enseña como etiqueta (MxH-0103). Created exactly once: the first boot where no role with
  * that `systemKey` has ever existed; the seeder never reasserts anything.
  *
  * The systemKeys are historical (they were the pre-collapse GROCER/KARDIST
@@ -142,9 +164,13 @@ const BASE_ROLES: ReadonlyArray<{
 }> = [
   {
     systemKey: 'GROCER',
-    name: 'Almacenero — base',
+    // El nombre lo decidió Jade el 9-oct-2026: un solo rol de almacén, y en
+    // singular. `systemKey` se queda en 'GROCER' porque es la llave histórica
+    // con la que se identifica la plantilla y renombrarla rompería el índice
+    // único y el sembrador de cualquier base existente.
+    name: 'Jefe de almacén',
     description:
-      'Permisos iniciales del rol Almacenero. Ajústalos o retíralos según lo que necesite tu equipo.',
+      'Permisos iniciales del rol Jefe de almacén. Ajústalos o retíralos según lo que necesite tu equipo.',
     // Lo que MxH-0036 define para el Jefe de almacenes: almacenes e inventario
     // los opera, el catálogo solo lo consulta. En concreto, y porque la tarjeta
     // lo dice con todas las letras: **el catálogo es de solo lectura** (no crea,
@@ -163,7 +189,7 @@ const BASE_ROLES: ReadonlyArray<{
   },
   {
     systemKey: 'KARDIST',
-    name: 'Kardista — base',
+    name: 'Kardista',
     description:
       'Permisos iniciales del rol Kardista. Ajústalos o retíralos según lo que necesite tu equipo.',
     grants: {
@@ -175,7 +201,7 @@ const BASE_ROLES: ReadonlyArray<{
   },
   {
     systemKey: 'WEB_MANAGER',
-    name: 'Responsable de la web — base',
+    name: 'Responsable de la web',
     description:
       'Prepara, revisa y publica la portada, los textos legales y los avisos de la tienda. Ajusta sus permisos según lo que necesite tu equipo.',
     // La portada entera y sus banners, los textos de la tienda, más las
@@ -473,16 +499,13 @@ export class PermissionsService implements OnModuleInit {
     data: { name: string; description?: string; permissionIds?: string[] },
     createdBy: string | null = null,
   ): Promise<ManagedRole> {
-    const existing = await this.roleRepository.findOne({
-      where: { name: data.name },
-      withDeleted: true,
-    });
-    if (existing) {
-      throw new ConflictException(`Role "${data.name}" already exists`);
+    const name = nombreDeRolNormalizado(data.name);
+    if (await this.nombreYaUsado(name)) {
+      throw new ConflictException(`Role "${name}" already exists`);
     }
 
     const role = await this.roleRepository.save({
-      name: data.name,
+      name,
       description: data.description ?? null,
       isSystem: false,
       isActive: true,
@@ -518,12 +541,43 @@ export class PermissionsService implements OnModuleInit {
     return role;
   }
 
+  /**
+   * Hay un rol con ese nombre, sin mirar mayúsculas ni espacios.
+   *
+   * Compara en minúsculas porque «Jefe de almacenes» y «jefe de almacenes» son
+   * el mismo rol para quien los lee en una lista, y dos distintos para la
+   * base: `roles.name` no tiene índice único. Incluye los borrados, igual que
+   * antes: un nombre reutilizado reviviría el rol viejo al restaurarlo.
+   */
+  private async nombreYaUsado(
+    nombre: string,
+    excepto?: string,
+  ): Promise<boolean> {
+    const consulta = this.roleRepository
+      .createQueryBuilder('rol')
+      .withDeleted()
+      .where('LOWER(rol.name) = LOWER(:nombre)', { nombre });
+    if (excepto) consulta.andWhere('rol.id <> :excepto', { excepto });
+    return (await consulta.getCount()) > 0;
+  }
+
   async updateRole(roleId: string, data: UpdateRoleDto): Promise<ManagedRole> {
     const role = await this.getRole(roleId);
     if (role.isSystem) {
       throw new ConflictException('System roles cannot be modified');
     }
-    Object.assign(role, data);
+
+    // Renombrar también puede chocar, y antes no se comprobaba: se podía
+    // dejar un rol con el nombre exacto de otro.
+    const cambios = { ...data };
+    if (cambios.name !== undefined) {
+      cambios.name = nombreDeRolNormalizado(cambios.name);
+      if (await this.nombreYaUsado(cambios.name, roleId)) {
+        throw new ConflictException(`Role "${cambios.name}" already exists`);
+      }
+    }
+
+    Object.assign(role, cambios);
     return this.roleRepository.save(role);
   }
 

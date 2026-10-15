@@ -11,9 +11,14 @@ import {
   type PaginatedResponse,
   type PaginationQueryDto,
 } from '../common/dto/pagination.dto';
-import { contieneTexto, sinTildes } from '../common/search/accent-insensitive';
+import {
+  comoBusquedaParcial,
+  contieneTexto,
+  sinTildes,
+} from '../common/search/accent-insensitive';
 import { ClientInvitationsService } from './client-invitations.service';
 import { CAMPOS_ORDENABLES } from './dto/list-clients-query.dto';
+import { ClientBeneficiariesResponseDto } from './dto/client-beneficiaries-response.dto';
 import { CreateClientDto } from './dto/create-client.dto';
 import { UpdateClientDto } from './dto/update-client.dto';
 import { Client } from './entities/client.entity';
@@ -54,7 +59,7 @@ export class ClientsService {
         `(${sinTildes('client.firstName')} OR ${sinTildes('client.lastName')}
           OR ${sinTildes("concat_ws(' ', client.firstName, client.lastName)")}
           OR ${sinTildes('client.email')} OR ${sinTildes('client.phone')})`,
-        { q: `%${filtro.q}%` },
+        { q: comoBusquedaParcial(filtro.q) },
       );
     }
 
@@ -108,6 +113,107 @@ export class ClientsService {
       throw new NotFoundException(`Client with id "${id}" not found`);
     }
     return client;
+  }
+
+  /**
+   * Las personas a las que este cliente ha mandado pedidos.
+   *
+   * Sale del **historial de pedidos** y no de la libreta de direcciones del
+   * cliente, y el motivo es del negocio: en una recogida no hay dirección
+   * ninguna, y la recogida es casi toda la venta, así que una lista sacada de la
+   * libreta estaría casi siempre vacía. La fuente es `orders.contact_snapshot`,
+   * que se congela al comprar.
+   *
+   * **Se agrupa por carné cuando lo hay y por nombre+teléfono cuando no.** Los
+   * pedidos viejos pueden traer el carné vacío, y agrupar solo por carné los
+   * juntaría todos en una fila falsa; agrupar solo por nombre separaría a la
+   * misma persona escrita de dos maneras.
+   *
+   * Va en SQL y no en TypeORM porque es una agregación sobre un campo JSON con
+   * una clave compuesta: el constructor de consultas no lo expresa sin acabar
+   * en `query()` de todas formas.
+   */
+  async findBeneficiaries(
+    clientId: string,
+  ): Promise<ClientBeneficiariesResponseDto> {
+    // Que el cliente exista, y con el mismo 404 que el resto del módulo.
+    await this.findOne(clientId);
+
+    const filas: {
+      nombre: string;
+      carne: string | null;
+      telefono: string | null;
+      veces: number;
+      ultimo: Date;
+    }[] = await this.clientsRepository.manager.query(
+      `WITH entregas AS (
+         SELECT
+           trim(o.contact_snapshot->>'recipientName')                     AS nombre,
+           nullif(trim(o.contact_snapshot->>'idCard'), '')                AS carne,
+           nullif(trim(o.contact_snapshot->>'contactPhone'), '')          AS telefono,
+           o.created_at
+           FROM orders o
+          WHERE o.client_id = $1
+            AND o.deleted_at IS NULL
+            AND o.contact_snapshot IS NOT NULL
+            AND nullif(trim(o.contact_snapshot->>'recipientName'), '') IS NOT NULL
+       )
+       SELECT
+         (array_agg(nombre ORDER BY created_at DESC))[1]   AS nombre,
+         (array_agg(carne ORDER BY created_at DESC))[1]    AS carne,
+         (array_agg(telefono ORDER BY created_at DESC))[1] AS telefono,
+         count(*)::int                                     AS veces,
+         max(created_at)                                   AS ultimo
+         FROM entregas
+        GROUP BY coalesce(carne, lower(nombre) || '|' || coalesce(telefono, ''))
+        ORDER BY max(created_at) DESC`,
+      [clientId],
+    );
+
+    const [{ sin_destinatario: sinDestinatario }]: {
+      sin_destinatario: number;
+    }[] = await this.clientsRepository.manager.query(
+      `SELECT count(*)::int AS sin_destinatario
+           FROM orders o
+          WHERE o.client_id = $1
+            AND o.deleted_at IS NULL
+            AND (o.contact_snapshot IS NULL
+                 OR nullif(trim(o.contact_snapshot->>'recipientName'), '') IS NULL)`,
+      [clientId],
+    );
+
+    const cliente = await this.findOne(clientId);
+    /**
+     * Los **últimos ocho dígitos**, que es un móvil cubano completo.
+     *
+     * No vale comparar los dígitos enteros: el teléfono del cliente suele
+     * venir con el prefijo del país («+53 5251 9414» → `5352519414`) y el del
+     * beneficiario se escribe a mano en el checkout, muchas veces sin él
+     * («52519414»). Comparando enteros, dos formas del mismo número no
+     * coincidían nunca — lo cazó una prueba antes de desplegarlo.
+     *
+     * Se exigen ocho dígitos en los dos lados: con menos no hay número que
+     * comparar, y recortar algo más corto produciría coincidencias falsas.
+     */
+    const ochoFinales = (valor: string | null) => {
+      const digitos = (valor ?? '').replace(/\D/g, '');
+      return digitos.length >= 8 ? digitos.slice(-8) : null;
+    };
+    const telefonoDelCliente = ochoFinales(cliente.phone);
+
+    return {
+      beneficiaries: filas.map((f) => ({
+        name: f.nombre,
+        idCard: f.carne,
+        phone: f.telefono,
+        timesReceived: f.veces,
+        lastOrderAt: f.ultimo,
+        samePhoneAsClient:
+          telefonoDelCliente !== null &&
+          ochoFinales(f.telefono) === telefonoDelCliente,
+      })),
+      ordersWithoutRecipient: sinDestinatario,
+    };
   }
 
   async findByClerkId(

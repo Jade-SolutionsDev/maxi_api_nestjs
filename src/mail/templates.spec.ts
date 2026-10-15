@@ -15,6 +15,7 @@ const order: OrderMailData = {
   total: '60.00',
   currency: 'USD',
   pickupAddress: 'Calle 23 esq. 43, Cárdenas',
+  trackingUrl: null,
   whatsapp: '+53 5251 9414',
   storeUrl: null,
   orderUrl: null,

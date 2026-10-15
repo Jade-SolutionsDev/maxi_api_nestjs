@@ -184,7 +184,7 @@ describe('StockLocationsService', () => {
     });
 
     it('rejects assigning a user without any stock-locations grant', async () => {
-      userRepo.find.mockResolvedValue([{ id: 'u-1', role: Role.KARDIST }]);
+      userRepo.find.mockResolvedValue([{ id: 'u-1', role: Role.STAFF }]);
       permissions.getUserIdsWithModuleGrant.mockResolvedValue(['someone-else']);
 
       await expect(
@@ -199,7 +199,7 @@ describe('StockLocationsService', () => {
     });
 
     it('accepts any non-admin with a stock-locations grant (not only GROCER)', async () => {
-      userRepo.find.mockResolvedValue([{ id: 'u-1', role: Role.KARDIST }]);
+      userRepo.find.mockResolvedValue([{ id: 'u-1', role: Role.STAFF }]);
       permissions.getUserIdsWithModuleGrant.mockResolvedValue(['u-1']);
       locationRepo.save.mockResolvedValue(makeLocation());
 
@@ -224,7 +224,7 @@ describe('StockLocationsService', () => {
           firstName: 'Ana',
           lastName: null,
           email: 'a@x.com',
-          role: Role.KARDIST,
+          role: Role.STAFF,
         },
         // Defensive: an admin id in the grant set is still filtered out.
         {
@@ -243,7 +243,7 @@ describe('StockLocationsService', () => {
           firstName: 'Ana',
           lastName: null,
           email: 'a@x.com',
-          role: Role.KARDIST,
+          role: Role.STAFF,
         },
       ]);
     });
@@ -257,7 +257,7 @@ describe('StockLocationsService', () => {
 
   describe('findAll (grocer scoping)', () => {
     it('returns only assigned locations for a grocer', async () => {
-      const grocer = makeUser({ id: 'g-1', role: Role.GROCER });
+      const grocer = makeUser({ id: 'g-1', role: Role.STAFF });
       grocerRepo.find.mockResolvedValueOnce([{ locationId: 'loc-1' }]); // assignedLocationIds
       locationRepo.find.mockResolvedValue([makeLocation()]);
       coverageRepo.find.mockResolvedValue([]);
@@ -269,7 +269,7 @@ describe('StockLocationsService', () => {
     });
 
     it('returns empty when the grocer has no assignments', async () => {
-      const grocer = makeUser({ id: 'g-1', role: Role.GROCER });
+      const grocer = makeUser({ id: 'g-1', role: Role.STAFF });
       grocerRepo.find.mockResolvedValue([]);
 
       const result = await service.findAll(grocer);
@@ -278,7 +278,7 @@ describe('StockLocationsService', () => {
     });
 
     it('returns every location for a non-admin with view-all', async () => {
-      const viewer = makeUser({ id: 'v-1', role: Role.KARDIST });
+      const viewer = makeUser({ id: 'v-1', role: Role.STAFF });
       permissions.hasPermission.mockResolvedValue(true);
       locationRepo.find.mockResolvedValue([makeLocation()]);
 
@@ -287,7 +287,7 @@ describe('StockLocationsService', () => {
       // No assignment lookup — the id filter was never applied.
       expect(permissions.hasPermission).toHaveBeenCalledWith(
         'v-1',
-        Role.KARDIST,
+        Role.STAFF,
         'stock-locations',
         'view-all',
       );
@@ -300,7 +300,7 @@ describe('StockLocationsService', () => {
       grocerRepo.findOne.mockResolvedValue(null); // not assigned
 
       await expect(
-        service.findOne(makeUser({ id: 'g-1', role: Role.GROCER }), 'loc-1'),
+        service.findOne(makeUser({ id: 'g-1', role: Role.STAFF }), 'loc-1'),
       ).rejects.toBeInstanceOf(ForbiddenException);
     });
 
@@ -310,7 +310,7 @@ describe('StockLocationsService', () => {
       grocerRepo.findOne.mockResolvedValue(null); // not assigned
 
       await expect(
-        service.findOne(makeUser({ id: 'v-1', role: Role.KARDIST }), 'loc-1'),
+        service.findOne(makeUser({ id: 'v-1', role: Role.STAFF }), 'loc-1'),
       ).resolves.toBeTruthy();
     });
   });
@@ -323,7 +323,7 @@ describe('StockLocationsService', () => {
 
       await expect(
         service.assertCanManage(
-          makeUser({ id: 'v-1', role: Role.KARDIST }),
+          makeUser({ id: 'v-1', role: Role.STAFF }),
           'loc-1',
         ),
       ).rejects.toBeInstanceOf(ForbiddenException);
@@ -332,7 +332,7 @@ describe('StockLocationsService', () => {
 
   describe('update', () => {
     it('ignores grocerIds when the actor is a grocer', async () => {
-      const grocer = makeUser({ id: 'g-1', role: Role.GROCER });
+      const grocer = makeUser({ id: 'g-1', role: Role.STAFF });
       locationRepo.findOne.mockResolvedValue(makeLocation());
       grocerRepo.findOne.mockResolvedValue({ id: 'a-1' }); // assigned
 

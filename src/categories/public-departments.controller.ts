@@ -1,4 +1,11 @@
-import { Controller, Get, Header, Param, Query } from '@nestjs/common';
+import {
+  Controller,
+  Get,
+  Header,
+  Param,
+  ParseUUIDPipe,
+  Query,
+} from '@nestjs/common';
 import { TAXONOMY_CACHE } from '../common/constants/cache-control';
 import { Public } from '../common/decorators/public.decorator';
 import {
@@ -54,7 +61,9 @@ export class PublicDepartmentsController {
   /** Get a single active department by id (404 if missing or inactive). */
   @Get(':id')
   @Header('Cache-Control', TAXONOMY_CACHE)
-  async findOne(@Param('id') id: string): Promise<CategoryResponseDto> {
+  async findOne(
+    @Param('id', ParseUUIDPipe) id: string,
+  ): Promise<CategoryResponseDto> {
     const department = await this.categoriesService.getPublicDepartment(id);
     const dto = CategoryResponseDto.fromEntity(department);
     dto.childrenCount =

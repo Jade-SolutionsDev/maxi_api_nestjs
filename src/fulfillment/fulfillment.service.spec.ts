@@ -29,6 +29,7 @@ const point = (overrides = {}) => ({
   locationName: 'Almacén Centro',
   label: 'Mostrador',
   address: 'Calle 1 #2',
+  hours: '9:00 am a 3:00 pm, de lunes a viernes',
   ...overrides,
 });
 
@@ -46,7 +47,12 @@ describe('FulfillmentService', () => {
     save: jest.Mock;
     create: jest.Mock;
   };
-  let settingsRepo: { findOne: jest.Mock; save: jest.Mock; create: jest.Mock };
+  let settingsRepo: {
+    findOne: jest.Mock;
+    save: jest.Mock;
+    create: jest.Mock;
+    manager: { query: jest.Mock };
+  };
   let pickupPoints: ReturnType<typeof point>[];
   let geography: { getMunicipalityOrThrow: jest.Mock };
   let products: { coveringLocationIds: jest.Mock };
@@ -69,6 +75,7 @@ describe('FulfillmentService', () => {
       findOne: jest.fn().mockResolvedValue(null),
       save: jest.fn().mockImplementation((s: unknown) => Promise.resolve(s)),
       create: jest.fn().mockImplementation((s: unknown) => s),
+      manager: { query: jest.fn().mockResolvedValue([]) },
     };
     geography = {
       getMunicipalityOrThrow: jest
@@ -79,21 +86,35 @@ describe('FulfillmentService', () => {
       coveringLocationIds: jest.fn().mockResolvedValue(['loc-1']),
     };
 
-    // Chainable stub for the pickup-points query builder.
-    const chain: Record<string, unknown> = {
-      getRawMany: () => Promise.resolve(pickupPoints),
+    // Chainable stub for the pickup-points query builder. `andWhere` is not a
+    // no-op: it applies the storage filter the service asks for, so a test that
+    // claims a counter was filtered out is actually measuring the filter.
+    const nuevaCadena = () => {
+      let serving: string[] | null = null;
+      const chain: Record<string, unknown> = {
+        getRawMany: () =>
+          Promise.resolve(
+            serving === null
+              ? pickupPoints
+              : pickupPoints.filter((p) => serving?.includes(p.locationId)),
+          ),
+        andWhere: (_sql: string, params?: { serving?: string[] }) => {
+          if (params?.serving) serving = params.serving;
+          return chain;
+        },
+      };
+      for (const method of [
+        'innerJoin',
+        'select',
+        'addSelect',
+        'orderBy',
+        'addOrderBy',
+      ]) {
+        chain[method] = () => chain;
+      }
+      return chain;
     };
-    for (const method of [
-      'innerJoin',
-      'andWhere',
-      'select',
-      'addSelect',
-      'orderBy',
-      'addOrderBy',
-    ]) {
-      chain[method] = () => chain;
-    }
-    const pickupRepo = { createQueryBuilder: () => chain };
+    const pickupRepo = { createQueryBuilder: () => nuevaCadena() };
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
@@ -135,6 +156,33 @@ describe('FulfillmentService', () => {
       expect(products.coveringLocationIds).toHaveBeenCalledWith({
         municipalityId: 'mun-1',
       });
+    });
+
+    /**
+     * MxH-0101. El catálogo enseña el producto porque un almacén con cobertura
+     * tiene stock; si ese almacén no tiene mostrador, el checkout se quedaba
+     * sin una sola vía y mandaba a escribir por privado. El pedido sí sabe
+     * resolverlo: reserva en los almacenes con cobertura y marca el traslado
+     * al mostrador elegido (orders.service, resolveAllowedLocationIds).
+     */
+    it('ofrece los demás mostradores cuando el almacén que cubre la zona no tiene ninguno', async () => {
+      pickupPoints = [point({ id: 'pick-2', locationId: 'loc-2' })];
+      products.coveringLocationIds.mockResolvedValue(['loc-1']);
+
+      const offer = await service.availableForClient('mun-1');
+
+      expect(offer.pickupPoints).toHaveLength(1);
+      expect(offer.pickupPoints[0].locationId).toBe('loc-2');
+      expect(offer.unavailableMessage).toBeNull();
+    });
+
+    it('prefiere el mostrador de la zona cuando lo hay, y no enseña los lejanos', async () => {
+      pickupPoints = [point(), point({ id: 'pick-2', locationId: 'loc-2' })];
+      products.coveringLocationIds.mockResolvedValue(['loc-1']);
+
+      const offer = await service.availableForClient('mun-1');
+
+      expect(offer.pickupPoints.map((p) => p.locationId)).toEqual(['loc-1']);
     });
 
     it('keeps the full pickup list when the customer has no municipality', async () => {
@@ -270,9 +318,132 @@ describe('FulfillmentService', () => {
         },
       });
 
-      const oferta = await service.availableForClient({});
+      const oferta = await service.availableForClient();
 
       expect(oferta.pickupPromiseDays).toBe(2);
+    });
+  });
+
+  /**
+   * P-046: cubrir un municipio no es poder despachar en él. El catálogo enseña
+   * productos donde hay cobertura y stock; el checkout exige además una vía.
+   * Nada avisaba de la diferencia hasta que la contaba un cliente.
+   */
+  describe('municipios sin forma de despacho', () => {
+    it('no los busca siquiera cuando la recogida está en pie', async () => {
+      const respuesta = await service.getSettingsResponse();
+
+      expect(respuesta.municipalitiesWithoutFulfillment).toEqual([]);
+      // La consulta cuesta y sobra: con un mostrador en pie, cualquier
+      // municipio cubierto lo alcanza (MxH-0101).
+      expect(settingsRepo.manager.query).not.toHaveBeenCalled();
+    });
+
+    it('los enseña cuando la recogida está apagada', async () => {
+      settingsRepo.findOne.mockResolvedValue({
+        data: { pickupEnabled: false, supportMessage: 'Escríbenos' },
+      });
+      settingsRepo.manager.query.mockResolvedValue([
+        { id: 'mun-1', name: 'Contramaestre' },
+      ]);
+
+      const respuesta = await service.getSettingsResponse();
+
+      expect(respuesta.municipalitiesWithoutFulfillment).toEqual([
+        { id: 'mun-1', name: 'Contramaestre' },
+      ]);
+    });
+
+    it('también cuando la recogida está activada pero no hay un solo mostrador', async () => {
+      pickupPoints = [];
+      settingsRepo.manager.query.mockResolvedValue([
+        { id: 'mun-1', name: 'Contramaestre' },
+      ]);
+
+      const respuesta = await service.getSettingsResponse();
+
+      expect(respuesta.pickupEnabledWithoutAddresses).toBe(true);
+      expect(respuesta.municipalitiesWithoutFulfillment).toHaveLength(1);
+    });
+  });
+
+  /**
+   * MxH-0043. El umbral vive en **cada forma de entrega**, no en los ajustes
+   * generales: la promoción es del envío, así que la recogida —que no tiene
+   * envío— no la tiene, y una Express puede regalarse a partir de otro importe
+   * que la normal.
+   *
+   * En céntimos a propósito: comparar dólares en coma flotante deja sin
+   * promoción a quien compra justo el importe.
+   */
+  describe('envío gratis a partir de un importe, por forma de entrega', () => {
+    const conUmbral = (centimos: number | null) =>
+      optionRepo.findOne.mockResolvedValue(
+        option({
+          freeDeliveryThresholdCents: centimos,
+        }),
+      );
+
+    it('sin opción elegida no hay promoción que aplicar: es una recogida', async () => {
+      await expect(service.feeConPromocion(null, 500, '5.00')).resolves.toBe(
+        '5.00',
+      );
+      expect(optionRepo.findOne).not.toHaveBeenCalled();
+    });
+
+    it('sin umbral en esa opción, se cobra su tarifa', async () => {
+      conUmbral(null);
+
+      await expect(
+        service.feeConPromocion('opt-1', 10_000, '5.00'),
+      ).resolves.toBe('5.00');
+    });
+
+    it('por debajo del umbral se cobra', async () => {
+      conUmbral(5000);
+
+      await expect(
+        service.feeConPromocion('opt-1', 49.99, '5.00'),
+      ).resolves.toBe('5.00');
+    });
+
+    it('justo en el umbral ya es gratis', async () => {
+      conUmbral(5000);
+
+      await expect(service.feeConPromocion('opt-1', 50, '5.00')).resolves.toBe(
+        '0.00',
+      );
+    });
+
+    /**
+     * El caso que obliga a los céntimos: `9.51 + 10.50` da
+     * `20.009999999999998`, que en dólares queda por debajo de 20,01 y en
+     * céntimos enteros empata. Sin esto, quien compra justo paga el envío.
+     */
+    it('un subtotal que la coma flotante deja corto no pierde la promoción', async () => {
+      conUmbral(2001);
+
+      await expect(
+        service.feeConPromocion('opt-1', 9.51 + 10.5, '5.00'),
+      ).resolves.toBe('0.00');
+    });
+
+    it('un umbral en cero no enciende la promoción: es «apagada», no «todo gratis»', async () => {
+      conUmbral(0);
+
+      await expect(service.feeConPromocion('opt-1', 1, '5.00')).resolves.toBe(
+        '5.00',
+      );
+    });
+
+    it('el umbral sale en dólares aunque se guarde en céntimos', async () => {
+      optionRepo.findOne.mockResolvedValue(
+        option({ freeDeliveryThresholdCents: 4550 }),
+      );
+
+      const respuesta = await service.findOneOption('opt-1');
+
+      expect(respuesta.freeDeliveryThreshold).toBe(45.5);
     });
   });
 
@@ -293,6 +464,35 @@ describe('FulfillmentService', () => {
       expect(choice.pickupAddressSnapshot).toMatchObject({
         address: 'Calle 1 #2',
       });
+    });
+
+    /**
+     * MxH-0160. El horario se congela con la dirección por lo mismo que ella: el
+     * pedido guarda lo que se le dijo al cliente al comprar, y de ahí lo leen la
+     * ficha del pedido y los correos sin volver a preguntar.
+     */
+    it('congela el horario del mostrador junto a su dirección', async () => {
+      const choice = await service.resolveChoice({
+        fulfillmentType: FulfillmentType.PICKUP,
+        pickupAddressId: 'pick-1',
+        municipalityId: 'mun-1',
+      });
+
+      expect(choice.pickupAddressSnapshot).toMatchObject({
+        hours: '9:00 am a 3:00 pm, de lunes a viernes',
+      });
+    });
+
+    it('un mostrador sin horario deja el campo en nulo, no en undefined', async () => {
+      pickupPoints = [point({ hours: null })];
+
+      const choice = await service.resolveChoice({
+        fulfillmentType: FulfillmentType.PICKUP,
+        pickupAddressId: 'pick-1',
+        municipalityId: 'mun-1',
+      });
+
+      expect(choice.pickupAddressSnapshot).toMatchObject({ hours: null });
     });
 
     it('refuses a pickup point that is not on offer', async () => {

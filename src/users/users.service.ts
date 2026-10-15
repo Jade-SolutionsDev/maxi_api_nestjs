@@ -1,4 +1,8 @@
-import { contieneTexto, sinTildes } from '../common/search/accent-insensitive';
+import {
+  comoBusquedaParcial,
+  contieneTexto,
+  sinTildes,
+} from '../common/search/accent-insensitive';
 import {
   BadRequestException,
   ConflictException,
@@ -114,7 +118,7 @@ export class UsersService {
     if (filter.q) {
       qb.andWhere(
         `(${sinTildes('user.firstName')} OR ${sinTildes('user.lastName')} OR ${sinTildes('user.email')} OR ${sinTildes('user.phone')} OR ${sinTildes('user.businessName')})`,
-        { q: `%${filter.q}%` },
+        { q: comoBusquedaParcial(filter.q) },
       );
     }
     if (tierFilter) {

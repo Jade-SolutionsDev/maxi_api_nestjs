@@ -3,6 +3,7 @@ import {
   Get,
   NotFoundException,
   Param,
+  ParseUUIDPipe,
   Query,
 } from '@nestjs/common';
 import { ApiOkResponse, ApiOperation, ApiTags } from '@nestjs/swagger';
@@ -88,7 +89,11 @@ export class PublicProductsController {
   })
   @ApiOkResponse({ type: ProductResponseDto })
   async findOne(
-    @Param('id') id: string,
+    // Sin validar, un id que no es un UUID llegaba hasta Postgres y la ruta
+    // devolvía 500 en vez de 400. La tienda nunca manda uno —extrae el UUID del
+    // final del slug y si no lo hay no llama—, así que esto solo lo veían los
+    // buscadores, los bots y quien escribe la dirección a mano.
+    @Param('id', ParseUUIDPipe) id: string,
     @Query() query: PublicProductDetailQueryDto,
   ): Promise<ProductResponseDto> {
     const product = await this.productsService.findOne(id);

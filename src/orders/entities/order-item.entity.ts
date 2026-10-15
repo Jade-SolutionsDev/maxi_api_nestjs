@@ -39,6 +39,37 @@ export class OrderItem {
   @Column({ name: 'product_name_snapshot', type: 'varchar', length: 255 })
   productNameSnapshot: string;
 
+  /**
+   * El precio de lista del producto el día de la compra, antes de la rebaja.
+   *
+   * `unitPrice` guarda lo que se cobró, que es el resultado; esto y `discount`
+   * guardan **de dónde salió**. Sin ellos, dentro de un año no hay forma de
+   * saber si una línea se vendió a 80 porque valía 80 o porque valía 100 con
+   * un 20% de rebaja: el producto habrá cambiado de precio y el dato no se
+   * recupera (MxH-0056).
+   *
+   * Nulo en las líneas anteriores al 8-oct-2026, y nulo a propósito: ese dato
+   * no se registró y rellenarlo sería inventarlo.
+   */
+  @Column({
+    name: 'list_price',
+    type: 'decimal',
+    precision: 12,
+    scale: 2,
+    nullable: true,
+  })
+  listPrice: string | null;
+
+  /** El porcentaje de rebaja aplicado, congelado igual que el precio. */
+  @Column({
+    type: 'decimal',
+    precision: 5,
+    scale: 2,
+    nullable: true,
+  })
+  discount: string | null;
+
+  /** Lo que de verdad se cobró por unidad. */
   @Column({ name: 'unit_price', type: 'decimal', precision: 12, scale: 2 })
   unitPrice: string;
 

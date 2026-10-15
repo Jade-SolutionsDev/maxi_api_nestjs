@@ -41,6 +41,7 @@ function makeOrder(overrides: Partial<Order> = {}): Order {
 }
 
 function makeCharge(overrides: Partial<PaymentCharge> = {}): PaymentCharge {
+  // Ver makeOrder: el spread de un Partial afloja los campos obligatorios.
   return {
     id: 'charge-1',
     orderId: 'order-1',
@@ -61,7 +62,7 @@ function makeCharge(overrides: Partial<PaymentCharge> = {}): PaymentCharge {
     createdAt: new Date(),
     updatedAt: new Date(),
     ...overrides,
-  };
+  } as PaymentCharge;
 }
 
 // A gateway whose every call is a jest mock, so the tests exercise the

@@ -49,6 +49,12 @@ export interface OrderMailData {
   currency: string;
   /** Dirección del mostrador donde se recoge, ya formateada. */
   pickupAddress: string | null;
+  /**
+   * Cuándo se puede pasar a recogerlo, tal cual se le dice al cliente. Nulo si
+   * el mostrador no tiene horario publicado, y entonces no sale ninguna línea
+   * (MxH-0160): el hueco no informa y la pregunta vuelve por correo.
+   */
+  pickupHours?: string | null;
   whatsapp: string;
   storeUrl: string | null;
   /** La ficha del pedido en la tienda, para pagarlo. Exige iniciar sesión. */
@@ -367,6 +373,9 @@ export const orderReceived = (order: OrderMailData): RenderedEmail => {
             [string, string]
           >)
         : []),
+      ...(order.pickupAddress && order.pickupHours
+        ? ([['Horario', esc(order.pickupHours)]] as Array<[string, string]>)
+        : []),
     ]),
     destacado(
       'TOTAL A PAGAR',
@@ -422,6 +431,9 @@ export const paymentReceived = (order: OrderMailData): RenderedEmail => {
         ? ([['Se recoge en', esc(order.pickupAddress)]] as Array<
             [string, string]
           >)
+        : []),
+      ...(order.pickupAddress && order.pickupHours
+        ? ([['Horario', esc(order.pickupHours)]] as Array<[string, string]>)
         : []),
       ...(order.recipient
         ? ([
@@ -481,7 +493,12 @@ export const pickupReminder = (
       `${greeting(order.customerName)} tu pedido <strong>${esc(order.orderNumber)}</strong> sigue esperando en nuestro mostrador. Lo pagaste hace ${daysSincePayment} días.`,
     ),
     order.pickupAddress
-      ? box(`<strong>Dónde recogerlo</strong><br>${esc(order.pickupAddress)}`)
+      ? box(
+          `<strong>Dónde recogerlo</strong><br>${esc(order.pickupAddress)}` +
+            (order.pickupHours
+              ? `<br><br><strong>Horario</strong><br>${esc(order.pickupHours)}`
+              : ''),
+        )
       : '',
     p(
       `Te quedan <strong>${remaining} días</strong> para recogerlo. Pasados los ${PICKUP_CUSTODY_DAYS} días desde el pago, el pedido sigue siendo tuyo, pero te lo entregamos en el estado en que esté y ya no podemos reponerlo ni devolverte el importe.`,
@@ -781,7 +798,9 @@ export const orderCancelled = (
       p(
         `Los productos que tenías apartados volvieron a la venta. No se te cobró nada.`,
       ),
-      p(`Si todavía lo quieres, puedes hacer el pedido otra vez.`),
+      p(
+        `Los dejamos otra vez en tu carrito, así que si todavía lo quieres no tienes que armar el pedido de nuevo: entra, revísalo y págalo.`,
+      ),
     ],
     paid_after_expiry_out_of_stock: [
       p(

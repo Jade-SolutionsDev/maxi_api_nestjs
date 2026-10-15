@@ -11,6 +11,7 @@ import { FulfillmentSettings } from './entities/fulfillment-settings.entity';
 import { FulfillmentSettingsController } from './fulfillment-settings.controller';
 import { FulfillmentController } from './fulfillment.controller';
 import { FulfillmentService } from './fulfillment.service';
+import { PublicFulfillmentController } from './public-fulfillment.controller';
 import { StorefrontFulfillmentController } from './storefront-fulfillment.controller';
 
 @Module({
@@ -29,6 +30,7 @@ import { StorefrontFulfillmentController } from './storefront-fulfillment.contro
     DeliveryOptionsController,
     FulfillmentController,
     FulfillmentSettingsController,
+    PublicFulfillmentController,
     StorefrontFulfillmentController,
   ],
   providers: [FulfillmentService],

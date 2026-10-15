@@ -42,6 +42,19 @@ jobs:
       - name: Compilar
         run: pnpm exec nest build
 
+      # `nest build` usa `tsconfig.build.json`, que deja FUERA los ficheros de
+      # prueba. Por eso los tipos de las pruebas llevaban meses derivando sin
+      # que nada chillara: 56 errores el 6-oct-2026, y entre ellos pruebas que
+      # usaban roles borrados del enum —`Role.GROCER`, `Role.KARDIST`— y que por
+      # tanto corrían con el rol en `undefined`. Una de ellas era la del
+      # default-deny del guard de permisos: decía comprobar que un no-admin es
+      # denegado y comprobaba que un rol inexistente lo es.
+      #
+      # Este paso mira el proyecto entero, pruebas incluidas, para que no vuelva
+      # a pasar. Tarda segundos.
+      - name: Comprobación de tipos (pruebas incluidas)
+        run: pnpm exec tsc --noEmit -p tsconfig.json
+
       - name: Linter
         # Sin --fix: en un servidor de integración se comprueba, no se corrige.
         run: pnpm exec eslint "src/**/*.ts"

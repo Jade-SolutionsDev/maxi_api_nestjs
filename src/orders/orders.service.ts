@@ -1,5 +1,8 @@
 import { randomBytes } from 'node:crypto';
-import { sinTildes } from '../common/search/accent-insensitive';
+import {
+  comoBusquedaParcial,
+  sinTildes,
+} from '../common/search/accent-insensitive';
 import {
   BadRequestException,
   ConflictException,
@@ -20,6 +23,7 @@ import {
 } from 'typeorm';
 import { CartService } from '../cart/cart.service';
 import { CartItem } from '../cart/entities/cart-item.entity';
+import { devolverAlCarrito } from '../cart/devolver-al-carrito';
 import { Client } from '../clients/entities/client.entity';
 import {
   buildPaginatedResponse,
@@ -191,12 +195,24 @@ const contactoDesdeDireccion = (
   };
 };
 
+/** Un decimal con dos cifras, o nulo si no hay dato que congelar. */
+const dosCifrasONulo = (valor: number | undefined): string | null =>
+  valor === undefined || Number.isNaN(valor) ? null : valor.toFixed(2);
+
 /** Una línea ya valorada: el núcleo no vuelve a mirar el catálogo. */
 interface LineaResuelta {
   productId: string;
   name: string;
   quantity: number;
   unitPrice: number;
+  /**
+   * De dónde salió `unitPrice`: el precio de lista y la rebaja del día de la
+   * compra. Opcionales porque no todos los caminos los conocen —una línea que
+   * llega con el precio ya puesto a mano no tiene desglose que congelar—, y
+   * en ese caso se guardan nulos antes que inventados (MxH-0056).
+   */
+  listPrice?: number;
+  discount?: number;
 }
 
 interface CrearPedidoParams {
@@ -370,6 +386,9 @@ export class OrdersService {
         name: line.name,
         quantity: line.quantity,
         unitPrice: line.unitPrice,
+        // El carrito ya trae los dos: se congelan tal cual, sin recalcular.
+        listPrice: line.basePrice,
+        discount: line.discount,
       })),
       fulfillment,
       deliveryMunicipalityId,
@@ -700,7 +719,21 @@ export class OrdersService {
           (c, l) => c + Math.round(l.unitPrice * l.quantity * 100),
           0,
         ) / 100;
-      const total = (subtotal + Number(params.fulfillment.fee)).toFixed(2);
+      /**
+       * MxH-0043: pasado el umbral de **esa forma de entrega**, no se cobra.
+       *
+       * Aquí y no en la pantalla: este es el único sitio donde nace un pedido
+       * —lo usan el checkout de la tienda y la creación desde el panel—, así
+       * que la promesa se cumple venga de donde venga. Y el pedido guarda la
+       * tarifa ya rebajada, así que cambiar el umbral mañana no reescribe lo
+       * que se le cobró hoy a nadie.
+       */
+      const deliveryFee = await this.fulfillmentService.feeConPromocion(
+        params.fulfillment.deliveryOptionId,
+        subtotal,
+        params.fulfillment.fee,
+      );
+      const total = (subtotal + Number(deliveryFee)).toFixed(2);
 
       const orderRepo = manager.getRepository(Order);
       const order = await orderRepo.save(
@@ -709,7 +742,7 @@ export class OrdersService {
           status: OrderStatus.PENDING,
           paymentStatus: PaymentStatus.PENDING,
           subtotal: subtotal.toFixed(2),
-          deliveryFee: params.fulfillment.fee,
+          deliveryFee,
           total,
           fulfillmentType: params.fulfillment.type,
           deliveryOptionId: params.fulfillment.deliveryOptionId,
@@ -763,6 +796,8 @@ export class OrdersService {
             orderId: order.id,
             productId: line.productId,
             productNameSnapshot: line.name,
+            listPrice: dosCifrasONulo(line.listPrice),
+            discount: dosCifrasONulo(line.discount),
             unitPrice: line.unitPrice.toFixed(2),
             quantity: line.quantity,
             lineTotal,
@@ -904,8 +939,11 @@ export class OrdersService {
     clientId: string,
     id: string,
   ): Promise<OrderResponseDto> {
+    // Con las líneas: al cancelar vuelven al carrito (MxH-0099), para que el
+    // cliente no tenga que rearmar la compra desde el catálogo.
     const order = await this.orderRepository.findOne({
       where: { id, clientId },
+      relations: { items: true },
     });
     if (!order) {
       throw new NotFoundException(`Order with id "${id}" not found`);
@@ -920,6 +958,13 @@ export class OrdersService {
       const previous = order.status;
       order.status = OrderStatus.CANCELLED;
       await manager.getRepository(Order).save(order);
+      // Lo que apartó vuelve a su carrito: el pedido deja de existir como
+      // compra y el carrito es donde estaba su trabajo.
+      const devueltas = await devolverAlCarrito(
+        manager,
+        clientId,
+        order.items ?? [],
+      );
       await this.orderEvents.record(manager, {
         orderId: order.id,
         kind: OrderEventKind.STATUS_CHANGED,
@@ -927,7 +972,9 @@ export class OrdersService {
         field: 'status',
         previousValue: previous,
         nextValue: OrderStatus.CANCELLED,
-        reason: 'Cancelado por el cliente desde la tienda',
+        reason: devueltas
+          ? `Cancelado por el cliente desde la tienda; ${devueltas} ${devueltas === 1 ? 'línea' : 'líneas'} de vuelta en su carrito`
+          : 'Cancelado por el cliente desde la tienda',
       });
     });
     return this.findOneForClient(clientId, id);
@@ -975,7 +1022,7 @@ export class OrdersService {
           OR ${sinTildes("(order.contact_snapshot)->>'recipientName'")}
           OR ${sinTildes("(order.contact_snapshot)->>'idCard'")}
           OR ${sinTildes("(order.contact_snapshot)->>'contactPhone'")})`,
-        { q: `%${query.q}%` },
+        { q: comoBusquedaParcial(query.q) },
       );
     }
     if (query.status) {
@@ -1913,6 +1960,18 @@ export class OrdersService {
           Math.round(line.unitPrice * line.quantity * 100) / 100
         ).toFixed(2);
         if (existing) {
+          /**
+           * El desglose solo vale mientras explique el precio. Cambiar la
+           * cantidad no lo toca —el precio por unidad sigue siendo el mismo—,
+           * pero si la administración pone otro precio a mano, el precio de
+           * lista y la rebaja guardados dejan de cuadrar con lo cobrado y se
+           * anulan: un desglose que no explica su propio resultado miente
+           * (MxH-0056).
+           */
+          if (existing.unitPrice !== line.unitPrice.toFixed(2)) {
+            existing.listPrice = null;
+            existing.discount = null;
+          }
           existing.quantity = line.quantity;
           existing.unitPrice = line.unitPrice.toFixed(2);
           existing.lineTotal = lineTotal;
@@ -1923,6 +1982,8 @@ export class OrdersService {
               orderId: order.id,
               productId: line.productId,
               productNameSnapshot: line.name,
+              listPrice: dosCifrasONulo(line.listPrice),
+              discount: dosCifrasONulo(line.discount),
               unitPrice: line.unitPrice.toFixed(2),
               quantity: line.quantity,
               lineTotal,
@@ -1989,15 +2050,8 @@ export class OrdersService {
   private async resolveLines(
     lines: UpdateOrderItemsDto['items'],
     current: Map<string, OrderItem>,
-  ): Promise<
-    { productId: string; name: string; quantity: number; unitPrice: number }[]
-  > {
-    const resolved: {
-      productId: string;
-      name: string;
-      quantity: number;
-      unitPrice: number;
-    }[] = [];
+  ): Promise<LineaResuelta[]> {
+    const resolved: LineaResuelta[] = [];
     for (const line of lines) {
       const existing = current.get(line.productId);
       if (existing) {
@@ -2015,18 +2069,26 @@ export class OrdersService {
           `"${product.name}" no está a la venta; no se puede añadir al pedido`,
         );
       }
+      const deCatalogo =
+        Math.round(
+          Number(product.basePrice) *
+            (1 - Number(product.discount) / 100) *
+            100,
+        ) / 100;
+      /**
+       * Si el precio viene puesto desde fuera, no hay desglose que congelar:
+       * ese número no sale del catálogo y afirmar que sí sería falso. Se
+       * guarda nulo, que es lo que de verdad se sabe.
+       */
+      const esDelCatalogo = line.unitPrice === undefined;
       resolved.push({
         productId: line.productId,
         name: product.name,
         quantity: line.quantity,
         // Misma fórmula que el carrito y la ficha de producto.
-        unitPrice:
-          line.unitPrice ??
-          Math.round(
-            Number(product.basePrice) *
-              (1 - Number(product.discount) / 100) *
-              100,
-          ) / 100,
+        unitPrice: line.unitPrice ?? deCatalogo,
+        listPrice: esDelCatalogo ? Number(product.basePrice) : undefined,
+        discount: esDelCatalogo ? Number(product.discount) : undefined,
       });
     }
     return resolved;

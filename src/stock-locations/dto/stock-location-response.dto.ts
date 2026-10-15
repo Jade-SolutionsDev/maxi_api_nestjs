@@ -16,6 +16,7 @@ export class PickupAddressResponseItem {
   id: string;
   label: string | null;
   address: string;
+  hours: string | null;
 }
 
 export class StockLocationResponseDto {
@@ -48,6 +49,7 @@ export class StockLocationResponseDto {
       id: a.id,
       label: a.label,
       address: a.address,
+      hours: a.hours ?? null,
     }));
     dto.createdAt = location.createdAt;
     dto.updatedAt = location.updatedAt;

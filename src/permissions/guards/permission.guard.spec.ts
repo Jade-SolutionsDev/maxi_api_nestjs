@@ -59,7 +59,7 @@ describe('PermissionGuard (default-deny)', () => {
 
   it('DENIES a non-admin on an undecorated route — the default-deny flip', async () => {
     await expect(
-      guard.canActivate(buildContext({ id: 'u1', role: Role.GROCER })),
+      guard.canActivate(buildContext({ id: 'u1', role: Role.STAFF })),
     ).rejects.toBeInstanceOf(ForbiddenException);
   });
 
@@ -68,11 +68,11 @@ describe('PermissionGuard (default-deny)', () => {
     permissionsService.hasPermission.mockResolvedValue(true);
 
     await expect(
-      guard.canActivate(buildContext({ id: 'u1', role: Role.KARDIST })),
+      guard.canActivate(buildContext({ id: 'u1', role: Role.STAFF })),
     ).resolves.toBe(true);
     expect(permissionsService.hasPermission).toHaveBeenCalledWith(
       'u1',
-      Role.KARDIST,
+      Role.STAFF,
       'products',
       'update',
     );
@@ -83,14 +83,14 @@ describe('PermissionGuard (default-deny)', () => {
     permissionsService.hasPermission.mockResolvedValue(false);
 
     await expect(
-      guard.canActivate(buildContext({ id: 'u1', role: Role.KARDIST })),
+      guard.canActivate(buildContext({ id: 'u1', role: Role.STAFF })),
     ).rejects.toBeInstanceOf(ForbiddenException);
   });
 
   it('passes @Roles-gated routes (RolesGuard already enforced the enum)', async () => {
     metadata[ROLES_KEY] = [Role.SUPER_ADMIN, Role.ADMIN];
     await expect(
-      guard.canActivate(buildContext({ id: 'u1', role: Role.GROCER })),
+      guard.canActivate(buildContext({ id: 'u1', role: Role.STAFF })),
     ).resolves.toBe(true);
     expect(permissionsService.hasPermission).not.toHaveBeenCalled();
   });
@@ -98,7 +98,7 @@ describe('PermissionGuard (default-deny)', () => {
   it('passes @AnyAuthenticated routes (the /auth/me bootstrap)', async () => {
     metadata[ANY_AUTHENTICATED_KEY] = true;
     await expect(
-      guard.canActivate(buildContext({ id: 'u1', role: Role.KARDIST })),
+      guard.canActivate(buildContext({ id: 'u1', role: Role.STAFF })),
     ).resolves.toBe(true);
   });
 });

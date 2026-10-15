@@ -17,6 +17,15 @@ export class OrderItemResponseDto {
   /** Live catalog image (null if the product was removed). */
   imageUrl: string | null;
   quantity: number;
+  /**
+   * El precio de lista y la rebaja del día de la compra: de dónde salió
+   * `unitPrice`. Nulos en las líneas anteriores a MxH-0056 y en las que
+   * alguien puso el precio a mano, porque entonces no hay desglose que
+   * contar. No son datos reservados: la tienda ya enseña los dos en la ficha
+   * del producto.
+   */
+  listPrice: number | null;
+  discount: number | null;
   unitPrice: number;
   lineTotal: number;
 
@@ -26,6 +35,8 @@ export class OrderItemResponseDto {
     dto.name = item.productNameSnapshot;
     dto.imageUrl = item.product?.imageUrl ?? null;
     dto.quantity = item.quantity;
+    dto.listPrice = item.listPrice === null ? null : Number(item.listPrice);
+    dto.discount = item.discount === null ? null : Number(item.discount);
     dto.unitPrice = Number(item.unitPrice);
     dto.lineTotal = Number(item.lineTotal);
     return dto;

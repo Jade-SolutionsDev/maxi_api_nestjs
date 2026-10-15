@@ -43,6 +43,8 @@ function makeUser(role: Role): User {
 }
 
 function makeOrder(overrides: Partial<Order> = {}): Order {
+  // `as Order` al final: el spread de un Partial vuelve opcional lo que la
+  // entidad exige, y entonces el objeto ya no es un Order a ojos de TypeScript.
   return {
     id: 'order-1',
     orderNumber: 'ORD-20260001',
@@ -61,7 +63,7 @@ function makeOrder(overrides: Partial<Order> = {}): Order {
     updatedAt: new Date(),
     deletedAt: null,
     ...overrides,
-  };
+  } as Order;
 }
 
 const cartLine = {
@@ -123,13 +125,21 @@ describe('OrdersService', () => {
     toDto: jest.Mock;
   };
   let paymentMethodsService: { resolve: jest.Mock };
-  let fulfillmentService: { resolveChoice: jest.Mock };
+  let fulfillmentService: {
+    resolveChoice: jest.Mock;
+    feeConPromocion: jest.Mock;
+  };
   let clientAddressesService: {
     findOneForClient: jest.Mock;
     create: jest.Mock;
   };
   let permissionsService: { hasPermission: jest.Mock };
   let orderEvents: { record: jest.Mock; listForOrder: jest.Mock };
+  // Faltaba declararlo: la asignación creaba una global y TypeScript no la veía.
+  let geographyService: {
+    getMunicipalityOrThrow: jest.Mock;
+    getProvinceOrThrow: jest.Mock;
+  };
   let mailer: {
     orderReceived: jest.Mock;
     paymentReceived: jest.Mock;
@@ -143,7 +153,12 @@ describe('OrdersService', () => {
     find: jest.Mock;
     remove: jest.Mock;
   };
-  let cartItemRepo: { delete: jest.Mock };
+  let cartItemRepo: {
+    delete: jest.Mock;
+    find: jest.Mock;
+    create: jest.Mock;
+    save: jest.Mock;
+  };
 
   beforeEach(async () => {
     orderRepo = {
@@ -171,7 +186,12 @@ describe('OrdersService', () => {
       find: jest.fn().mockResolvedValue([]),
       remove: jest.fn().mockResolvedValue(undefined),
     };
-    cartItemRepo = { delete: jest.fn() };
+    cartItemRepo = {
+      delete: jest.fn(),
+      find: jest.fn().mockResolvedValue([]),
+      create: jest.fn((datos: unknown) => datos),
+      save: jest.fn((filas: unknown) => Promise.resolve(filas)),
+    };
     cartService = { getCart: jest.fn() };
     inventoryService = {
       reserve: jest.fn(),
@@ -205,6 +225,13 @@ describe('OrdersService', () => {
       resolve: jest.fn().mockResolvedValue({ code: 'manual' }),
     };
     fulfillmentService = {
+      // Sin promoción salvo que la prueba diga lo contrario: devuelve la
+      // tarifa tal cual le llega (MxH-0043).
+      feeConPromocion: jest
+        .fn()
+        .mockImplementation((_id: unknown, _subtotal: number, fee: string) =>
+          Promise.resolve(fee),
+        ),
       resolveChoice: jest.fn().mockResolvedValue({
         type: 'delivery',
         fee: '0.00',
@@ -2225,6 +2252,50 @@ describe('OrdersService', () => {
       expect(inventoryService.releaseReservations).toHaveBeenCalledWith(
         expect.anything(),
         'order-1',
+      );
+    });
+
+    /**
+     * MxH-0099. El carrito se vacía al crear el pedido, así que cancelarlo
+     * dejaba al cliente sin pedido y sin carrito: tenía que armar la compra
+     * otra vez desde el catálogo.
+     */
+    it('devuelve al carrito lo que el pedido se había llevado', async () => {
+      orderRepo.findOne
+        .mockResolvedValueOnce(
+          makeOrder({
+            items: [
+              { productId: 'ibc-diesel', quantity: 2 },
+              { productId: 'panel-solar', quantity: 1 },
+            ] as OrderItem[],
+          }),
+        )
+        .mockResolvedValue(makeOrder({ items: [] }));
+
+      await service.cancelByClient('client-1', 'order-1');
+
+      expect(cartItemRepo.save).toHaveBeenCalledWith([
+        { clientId: 'client-1', productId: 'ibc-diesel', quantity: 2 },
+        { clientId: 'client-1', productId: 'panel-solar', quantity: 1 },
+      ]);
+    });
+
+    it('lo deja escrito en el historial del pedido', async () => {
+      orderRepo.findOne
+        .mockResolvedValueOnce(
+          makeOrder({
+            items: [{ productId: 'ibc-diesel', quantity: 2 }] as OrderItem[],
+          }),
+        )
+        .mockResolvedValue(makeOrder({ items: [] }));
+
+      await service.cancelByClient('client-1', 'order-1');
+
+      expect(orderEvents.record).toHaveBeenCalledWith(
+        expect.anything(),
+        expect.objectContaining({
+          reason: expect.stringContaining('1 línea de vuelta en su carrito'),
+        }),
       );
     });
 

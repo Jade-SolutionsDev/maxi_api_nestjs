@@ -7,7 +7,10 @@ import {
 import { InjectRepository } from '@nestjs/typeorm';
 import { In, Repository } from 'typeorm';
 import { Client } from '../clients/entities/client.entity';
-import { sinTildes } from '../common/search/accent-insensitive';
+import {
+  comoBusquedaParcial,
+  sinTildes,
+} from '../common/search/accent-insensitive';
 import {
   PaginatedResponse,
   buildPaginatedResponse,
@@ -148,7 +151,7 @@ export class ContactService {
       // "reparación".
       qb.andWhere(
         `(${sinTildes('m.name')} OR ${sinTildes('m.lastName')} OR ${sinTildes('m.email')} OR ${sinTildes('m.phone')} OR ${sinTildes('m.message')})`,
-        { q: `%${query.q}%` },
+        { q: comoBusquedaParcial(query.q) },
       );
     }
     if (query.motiveId) {
