@@ -62,6 +62,14 @@ describe('InventoryService', () => {
     operationRepo = repoMock();
     itemRepo = repoMock();
     productRepo = repoMock();
+    // El servicio valida los productos y se queda con sus nombres en la misma
+    // consulta: el mock devuelve un producto por cada id pedido.
+    productRepo.find.mockImplementation((opts: unknown) => {
+      const ids =
+        ((opts as { where?: { id?: { _value?: string[] } } })?.where?.id
+          ?._value as string[]) ?? [];
+      return Promise.resolve(ids.map((id) => ({ id, name: `Producto ${id}` })));
+    });
     stockLocations = {
       assertCanManage: jest.fn().mockResolvedValue({ id: 'loc-1' }),
       getActiveLocationOrThrow: jest.fn().mockResolvedValue({ id: 'loc-2' }),
@@ -180,7 +188,7 @@ describe('InventoryService', () => {
   });
 
   it('rejects operations referencing unknown products', async () => {
-    productRepo.count.mockResolvedValue(0); // product not found
+    productRepo.find.mockResolvedValue([]); // product not found
 
     await expect(
       service.createOperation(makeUser(), {
@@ -205,6 +213,46 @@ describe('InventoryService', () => {
         items: [{ productId: 'p-1', quantity: 4 }], // only 2 unreserved
       }),
     ).rejects.toBeInstanceOf(BadRequestException);
+  });
+
+  it('el aviso dice el nombre del producto y de dónde sale el número', async () => {
+    // Es el caso de MxH-0173: el panel enseñaba 1000 y la operación fallaba
+    // por 990, sin nada que explicara la diferencia.
+    inventoryRepo.findOne.mockResolvedValue({
+      id: 'inv-1',
+      quantity: 1000,
+      reservedQuantity: 10,
+    });
+
+    await expect(
+      service.createOperation(makeUser(), {
+        locationId: 'loc-1',
+        type: OperationType.OUT,
+        items: [{ productId: 'p-1', quantity: 1000 }],
+      }),
+    ).rejects.toThrow(
+      'No hay suficiente «Producto p-1» en este almacén: pides 1000 y solo ' +
+        'puedes sacar 990 (hay 1000 en el almacén, pero 10 están reservadas ' +
+        'para pedidos sin entregar).',
+    );
+  });
+
+  it('sin reservas el aviso no habla de reservas', async () => {
+    inventoryRepo.findOne.mockResolvedValue({
+      id: 'inv-1',
+      quantity: 3,
+      reservedQuantity: 0,
+    });
+
+    await expect(
+      service.createOperation(makeUser(), {
+        locationId: 'loc-1',
+        type: OperationType.OUT,
+        items: [{ productId: 'p-1', quantity: 5 }],
+      }),
+    ).rejects.toThrow(
+      'No hay suficiente «Producto p-1» en este almacén: pides 5 y solo puedes sacar 3.',
+    );
   });
 
   describe('order reservations', () => {

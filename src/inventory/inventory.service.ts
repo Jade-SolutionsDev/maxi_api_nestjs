@@ -417,7 +417,9 @@ export class InventoryService {
   ): Promise<OperationResponseDto> {
     // Source access: managers always; a grocer must be assigned to it.
     await this.stockLocationsService.assertCanManage(user, dto.locationId);
-    await this.assertProductsExist(dto.items.map((i) => i.productId));
+    const nombres = await this.loadProductNames(
+      dto.items.map((i) => i.productId),
+    );
 
     // Collapse duplicate product lines so each product is applied once.
     const items = this.mergeItems(dto.items);
@@ -453,6 +455,7 @@ export class InventoryService {
             dto.locationId,
             item.productId,
             item.quantity,
+            nombres.get(item.productId),
           );
         } else {
           // TRANSFER: remove from the source, add to the destination.
@@ -461,6 +464,7 @@ export class InventoryService {
             dto.locationId,
             item.productId,
             item.quantity,
+            nombres.get(item.productId),
           );
           await this.addStock(
             manager,
@@ -981,14 +985,25 @@ export class InventoryService {
     }));
   }
 
-  private async assertProductsExist(productIds: string[]): Promise<void> {
+  /**
+   * Valida que todos los productos existan y, de paso, devuelve sus nombres.
+   *
+   * Los nombres hacen falta para el aviso de existencias insuficientes: antes
+   * decía el UUID, que no le dice nada a quien está delante de la pantalla. Se
+   * sacan de la misma consulta que ya hacía falta para validar.
+   */
+  private async loadProductNames(
+    productIds: string[],
+  ): Promise<Map<string, string>> {
     const unique = [...new Set(productIds)];
-    const count = await this.productRepository.count({
+    const rows = await this.productRepository.find({
       where: { id: In(unique) },
+      select: { id: true, name: true },
     });
-    if (count !== unique.length) {
+    if (rows.length !== unique.length) {
       throw new BadRequestException('One or more products do not exist');
     }
+    return new Map(rows.map((p) => [p.id, p.name]));
   }
 
   // Locks the existing row for the transaction so concurrent operations can't
@@ -1018,6 +1033,7 @@ export class InventoryService {
     locationId: string,
     productId: string,
     quantity: number,
+    productName?: string,
   ): Promise<void> {
     const repo = manager.getRepository(Inventory);
     const row = await repo.findOne({
@@ -1026,10 +1042,21 @@ export class InventoryService {
     });
     // Reserved stock is spoken for by pending orders — manual OUT/TRANSFER
     // operations can only move what is not on hold.
-    const current = (row?.quantity ?? 0) - (row?.reservedQuantity ?? 0);
+    const enAlmacen = row?.quantity ?? 0;
+    const reservado = row?.reservedQuantity ?? 0;
+    const current = enAlmacen - reservado;
     if (current < quantity) {
+      // El aviso dice de dónde sale el número. Antes decía solo «have N
+      // available» con el UUID del producto, y quien lo leía veía en la
+      // pantalla de al lado otra cifra mayor —la física— sin nada que
+      // explicara la diferencia.
+      const nombre = productName ?? productId;
+      const porQue =
+        reservado > 0
+          ? ` (hay ${enAlmacen} en el almacén, pero ${reservado} están reservadas para pedidos sin entregar)`
+          : '';
       throw new BadRequestException(
-        `Insufficient stock for product ${productId}: have ${current} available, need ${quantity}`,
+        `No hay suficiente «${nombre}» en este almacén: pides ${quantity} y solo puedes sacar ${current}${porQue}.`,
       );
     }
     // row is guaranteed non-null here (current >= quantity >= 1).
