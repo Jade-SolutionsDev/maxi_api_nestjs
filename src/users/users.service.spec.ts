@@ -39,6 +39,7 @@ describe('UsersService', () => {
     skip: jest.Mock;
     take: jest.Mock;
     getManyAndCount: jest.Mock;
+    getCount: jest.Mock;
   };
 
   const user: User = {
@@ -72,6 +73,7 @@ describe('UsersService', () => {
       skip: jest.fn().mockReturnThis(),
       take: jest.fn().mockReturnThis(),
       getManyAndCount: jest.fn(),
+      getCount: jest.fn(() => Promise.resolve(1)),
     };
 
     const module: TestingModule = await Test.createTestingModule({
@@ -185,6 +187,51 @@ describe('UsersService', () => {
       expect(result.data).toHaveLength(2);
       expect(result.data[0].email).toBe('pending@example.com');
       expect(result.data[0].isActive).toBe(false);
+    });
+
+    it('descuenta las invitaciones del límite de la página', async () => {
+      qb.getManyAndCount.mockResolvedValue([[user], 1]);
+      invitationRepository.find.mockResolvedValue([
+        {
+          id: 'inv-1',
+          email: 'pending@example.com',
+          role: Role.STAFF,
+          firstName: null,
+          lastName: null,
+          createdAt: new Date(),
+          updatedAt: new Date(),
+        } as Invitation,
+      ]);
+
+      await service.findAll({ includeInvitations: true }, { limit: 10 });
+
+      // Con 1 invitación delante se piden 9 filas y no 10: si no, la página
+      // devuelve 11 y el pie del listado dice «1 - 10».
+      expect(qb.skip).toHaveBeenCalledWith(0);
+      expect(qb.take).toHaveBeenCalledWith(9);
+    });
+
+    it('la página 2 arranca donde acabó la 1, no en el límite', async () => {
+      qb.getManyAndCount.mockResolvedValue([[user], 1]);
+      invitationRepository.find.mockResolvedValue([
+        {
+          id: 'inv-1',
+          email: 'pending@example.com',
+          role: Role.STAFF,
+          firstName: null,
+          lastName: null,
+          createdAt: new Date(),
+          updatedAt: new Date(),
+        } as Invitation,
+      ]);
+
+      await service.findAll(
+        { includeInvitations: true },
+        { page: 2, limit: 10 },
+      );
+
+      expect(qb.skip).toHaveBeenCalledWith(9);
+      expect(qb.take).toHaveBeenCalledWith(10);
     });
 
     it('la búsqueda también filtra las invitaciones pendientes, sin tildes', async () => {

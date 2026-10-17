@@ -43,6 +43,7 @@ describe('ClientsService', () => {
     skip: jest.Mock;
     take: jest.Mock;
     getManyAndCount: jest.Mock;
+    getCount: jest.Mock;
   };
 
   beforeEach(async () => {
@@ -54,6 +55,7 @@ describe('ClientsService', () => {
       skip: jest.fn(() => qb),
       take: jest.fn(() => qb),
       getManyAndCount: jest.fn(() => Promise.resolve([[client], 1])),
+      getCount: jest.fn(() => Promise.resolve(1)),
     };
 
     const module: TestingModule = await Test.createTestingModule({
@@ -313,6 +315,48 @@ describe('ClientsService', () => {
       // repiten en cada página.
       expect(r.data.map((c) => c.id)).not.toContain('inv_1');
       expect(r.meta.total).toBe(2);
+    });
+
+    it('descuenta las invitaciones del límite de la página', async () => {
+      invitaciones.listarPendientes.mockResolvedValue([pendiente]);
+
+      await service.findAll({ includeInvitations: true }, { limit: 10 });
+
+      // Con 1 invitación delante, a la tabla se le piden 9 filas y no 10: si
+      // no, la página devuelve 11 y el pie del listado dice «1 - 10».
+      expect(qb.skip).toHaveBeenCalledWith(0);
+      expect(qb.take).toHaveBeenCalledWith(9);
+    });
+
+    it('la página 2 arranca donde acabó la 1, no en el límite', async () => {
+      invitaciones.listarPendientes.mockResolvedValue([pendiente]);
+
+      await service.findAll(
+        { includeInvitations: true },
+        { page: 2, limit: 10 },
+      );
+
+      // La página 1 enseñó la invitación y 9 clientes, así que la 2 empieza en
+      // el 10.º cliente. Saltar 10 se habría comido uno.
+      expect(qb.skip).toHaveBeenCalledWith(9);
+      expect(qb.take).toHaveBeenCalledWith(10);
+    });
+
+    it('si las invitaciones llenan la página no se pide nada a la tabla', async () => {
+      invitaciones.listarPendientes.mockResolvedValue([
+        pendiente,
+        { ...pendiente, id: 'inv_2' },
+      ]);
+
+      const r = await service.findAll(
+        { includeInvitations: true },
+        { limit: 2 },
+      );
+
+      expect(qb.getManyAndCount).not.toHaveBeenCalled();
+      expect(r.data.map((c) => c.id)).toEqual(['inv_1', 'inv_2']);
+      // El total sigue contando los clientes que hay detrás.
+      expect(r.meta.total).toBe(3);
     });
 
     it('el buscador también filtra las invitaciones', async () => {

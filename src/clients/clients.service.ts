@@ -16,6 +16,7 @@ import {
   contieneTexto,
   sinTildes,
 } from '../common/search/accent-insensitive';
+import { repartirPagina } from '../common/pagina-con-prefijo';
 import { ClientInvitationsService } from './client-invitations.service';
 import { CAMPOS_ORDENABLES } from './dto/list-clients-query.dto';
 import { ClientBeneficiariesResponseDto } from './dto/client-beneficiaries-response.dto';
@@ -47,7 +48,7 @@ export class ClientsService {
     filtro: FiltroDeClientes = {},
     paginacion: PaginationQueryDto = {},
   ): Promise<PaginatedResponse<Client>> {
-    const { page, limit, skip } = getPaginationParams(paginacion);
+    const { page, limit } = getPaginationParams(paginacion);
     const qb = this.clientsRepository.createQueryBuilder('client');
 
     if (filtro.ids?.length) {
@@ -77,34 +78,45 @@ export class ClientsService {
       : 'createdAt';
     const sentido = paginacion.sortOrder === 'asc' ? 'ASC' : 'DESC';
 
-    qb.orderBy(`client.${campo}`, sentido)
-      .addOrderBy('client.id', 'DESC')
-      .skip(skip)
-      .take(limit);
-
-    const [clients, total] = await qb.getManyAndCount();
+    qb.orderBy(`client.${campo}`, sentido).addOrderBy('client.id', 'DESC');
 
     // Las invitaciones no son clientes todavía, así que no están en la tabla:
-    // se piden a Clerk y se anteponen. Filtrar por estado las deja fuera —son
-    // facetas excluyentes—, y solo aparecen en la primera página, aunque
-    // cuenten en el total para que la paginación no mienta.
+    // se piden a Clerk y van delante de todo. Filtrar por estado las deja
+    // fuera: son facetas excluyentes.
+    let pendientes: Client[] = [];
     if (filtro.includeInvitations && filtro.isActive === undefined) {
-      let pendientes = await this.invitaciones.listarPendientes();
+      pendientes = await this.invitaciones.listarPendientes();
       if (filtro.q) {
         const q = filtro.q;
         pendientes = pendientes.filter((p) =>
           contieneTexto(q, p.firstName, p.lastName, p.email),
         );
       }
-      return buildPaginatedResponse(
-        page === 1 ? [...pendientes, ...clients] : clients,
-        total + pendientes.length,
-        page,
-        limit,
-      );
     }
 
-    return buildPaginatedResponse(clients, total, page, limit);
+    // Una sola lista: las invitaciones ocupan sus primeras posiciones y el
+    // SQL aporta el resto, de modo que cada página tiene exactamente `limit`
+    // filas. Anteponerlas sin descontarlas devolvía `limit + pendientes` en la
+    // primera y el pie del listado decía otra cosa.
+    const reparto = repartirPagina(pendientes.length, page, limit);
+    const enPagina = pendientes.slice(
+      reparto.prefijoDesde,
+      reparto.prefijoHasta,
+    );
+
+    // Con la página llena de invitaciones no hay nada que traer, pero el total
+    // sigue haciendo falta para que el pie cuente bien.
+    const [clients, total] =
+      reparto.take > 0
+        ? await qb.skip(reparto.skip).take(reparto.take).getManyAndCount()
+        : [[] as Client[], await qb.getCount()];
+
+    return buildPaginatedResponse(
+      [...enPagina, ...clients],
+      total + pendientes.length,
+      page,
+      limit,
+    );
   }
 
   async findOne(id: string): Promise<Client> {
