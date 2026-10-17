@@ -11,15 +11,34 @@ import { OrderEventsService } from './order-events.service';
 
 describe('OrderEventsService', () => {
   let service: OrderEventsService;
-  let eventRepo: { create: jest.Mock; save: jest.Mock; find: jest.Mock };
+  let eventRepo: {
+    create: jest.Mock;
+    save: jest.Mock;
+    find: jest.Mock;
+    createQueryBuilder: jest.Mock;
+  };
+  let consulta: Record<string, jest.Mock>;
   let userRepo: { find: jest.Mock };
   let clientRepo: { find: jest.Mock };
 
   beforeEach(async () => {
+    consulta = {
+      select: jest.fn(),
+      addSelect: jest.fn(),
+      where: jest.fn(),
+      andWhere: jest.fn(),
+      orderBy: jest.fn(),
+      addOrderBy: jest.fn(),
+      getRawMany: jest.fn().mockResolvedValue([]),
+    };
+    for (const metodo of Object.keys(consulta)) {
+      if (metodo !== 'getRawMany') consulta[metodo].mockReturnValue(consulta);
+    }
     eventRepo = {
       create: jest.fn().mockImplementation((o: unknown) => o),
       save: jest.fn().mockImplementation((o: unknown) => Promise.resolve(o)),
       find: jest.fn().mockResolvedValue([]),
+      createQueryBuilder: jest.fn().mockReturnValue(consulta),
     };
     userRepo = { find: jest.fn().mockResolvedValue([]) };
     clientRepo = { find: jest.fn().mockResolvedValue([]) };
@@ -150,5 +169,66 @@ describe('OrderEventsService', () => {
     expect(await service.listForOrder('o1')).toEqual([]);
     expect(userRepo.find).not.toHaveBeenCalled();
     expect(clientRepo.find).not.toHaveBeenCalled();
+  });
+  /**
+   * MxH-0133, punto 3: de aquí sale el método de pago de los pedidos que se
+   * cobraron sin pasar por ninguna pasarela.
+   */
+  describe('latestPaymentMethodsFor', () => {
+    const condiciones = () =>
+      [
+        ...(consulta.where.mock.calls as [string, unknown][]),
+        ...(consulta.andWhere.mock.calls as [string, unknown][]),
+      ].map(([c]) => c);
+
+    it('devuelve el método de cada pedido', async () => {
+      consulta.getRawMany.mockResolvedValue([
+        { orderId: 'o1', code: 'efectivo' },
+        { orderId: 'o2', code: 'tropipay' },
+      ]);
+
+      const metodos = await service.latestPaymentMethodsFor(['o1', 'o2']);
+
+      expect(metodos.get('o1')).toBe('efectivo');
+      expect(metodos.get('o2')).toBe('tropipay');
+    });
+
+    // El evento `created` también lleva un `paymentMethod`: el que el cliente
+    // eligió al encargar. Un pedido que nunca llegó a pagarse no se cobró con
+    // nada, y decir que sí sería inventar un cobro.
+    it('solo mira el cambio de estado de pago, no la creación', async () => {
+      await service.latestPaymentMethodsFor(['o1']);
+
+      const kind = (consulta.andWhere.mock.calls as [string, unknown][]).find(
+        ([c]) => c.includes('event.kind'),
+      );
+      expect(kind?.[1]).toEqual({
+        kind: OrderEventKind.PAYMENT_STATUS_CHANGED,
+      });
+    });
+
+    // Un método guardado como cadena vacía no es un método.
+    it('descarta el método vacío', async () => {
+      await service.latestPaymentMethodsFor(['o1']);
+
+      expect(condiciones().some((c) => c.includes('nullif'))).toBe(true);
+    });
+
+    // Una consulta por pedido convertiría el listado en N+1: son hasta 5000
+    // pedidos en el reporte.
+    it('resuelve todos los pedidos en una sola consulta', async () => {
+      await service.latestPaymentMethodsFor(['o1', 'o2', 'o3']);
+
+      expect(eventRepo.createQueryBuilder).toHaveBeenCalledTimes(1);
+      const dentro = (consulta.where.mock.calls as [string, unknown][])[0];
+      expect(dentro[1]).toEqual({ orderIds: ['o1', 'o2', 'o3'] });
+    });
+
+    it('sin pedidos no consulta nada', async () => {
+      const metodos = await service.latestPaymentMethodsFor([]);
+
+      expect(metodos.size).toBe(0);
+      expect(eventRepo.createQueryBuilder).not.toHaveBeenCalled();
+    });
   });
 });

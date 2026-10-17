@@ -112,13 +112,19 @@ describe('PaymentsService', () => {
   let service: PaymentsService;
   let gateway: FakeGateway;
   let chargeRepo: {
+    find: jest.Mock;
     findOne: jest.Mock;
     count: jest.Mock;
     create: jest.Mock;
     save: jest.Mock;
   };
   let orderRepo: { findOne: jest.Mock; save: jest.Mock };
-  let methods: { gatewayFor: jest.Mock; resolve: jest.Mock };
+  let methods: {
+    gatewayFor: jest.Mock;
+    resolve: jest.Mock;
+    labelsByCode: jest.Mock;
+  };
+  let eventos: { record: jest.Mock; latestPaymentMethodsFor: jest.Mock };
   let orderItemRepo: { find: jest.Mock };
   let inventory: { reserve: jest.Mock };
   let refunds: { requestForLatePaymentWithoutStock: jest.Mock };
@@ -130,6 +136,7 @@ describe('PaymentsService', () => {
   beforeEach(async () => {
     gateway = new FakeGateway();
     chargeRepo = {
+      find: jest.fn().mockResolvedValue([]),
       findOne: jest.fn().mockResolvedValue(null),
       count: jest.fn().mockResolvedValue(0),
       create: jest.fn().mockImplementation((c: unknown) => c),
@@ -142,6 +149,16 @@ describe('PaymentsService', () => {
     methods = {
       gatewayFor: jest.fn().mockReturnValue(gateway),
       resolve: jest.fn().mockResolvedValue({ gateway, method: methodRow() }),
+      labelsByCode: jest.fn().mockResolvedValue(
+        new Map([
+          ['tropipay', 'Tarjeta (Tropipay)'],
+          ['efectivo', 'Efectivo'],
+        ]),
+      ),
+    };
+    eventos = {
+      record: jest.fn().mockResolvedValue(undefined),
+      latestPaymentMethodsFor: jest.fn().mockResolvedValue(new Map()),
     };
     orderItemRepo = {
       find: jest.fn().mockResolvedValue([{ productId: 'prod-1', quantity: 2 }]),
@@ -163,10 +180,7 @@ describe('PaymentsService', () => {
         { provide: getRepositoryToken(OrderItem), useValue: orderItemRepo },
         { provide: PaymentMethodsService, useValue: methods },
         { provide: InventoryService, useValue: inventory },
-        {
-          provide: OrderEventsService,
-          useValue: { record: jest.fn().mockResolvedValue(undefined) },
-        },
+        { provide: OrderEventsService, useValue: eventos },
         {
           provide: ProductsService,
           useValue: { coveringLocationIds: jest.fn().mockResolvedValue([]) },
@@ -590,6 +604,93 @@ describe('PaymentsService', () => {
         service.createChargeForOrder(makeOrder(), resolved()),
       ).rejects.toBe(boom);
       expect(chargeRepo.findOne).not.toHaveBeenCalled();
+    });
+  });
+
+  /**
+   * MxH-0133, punto 3. El método con el que se cobró un pedido vive en dos
+   * sitios distintos según cómo se cobrara: en `payment_charges` si lo hizo
+   * una pasarela, y solo en el historial si alguien lo apuntó desde el panel.
+   * La columna del listado leía nada más el primero.
+   */
+  describe('latestMethodsFor', () => {
+    it('usa el proveedor del último intento cuando lo hay', async () => {
+      chargeRepo.find.mockResolvedValue([
+        makeCharge({ orderId: 'order-1', provider: 'tropipay' }),
+      ]);
+
+      const metodos = await service.latestMethodsFor(['order-1']);
+
+      expect(metodos.get('order-1')).toEqual({
+        code: 'tropipay',
+        label: 'Tarjeta (Tropipay)',
+      });
+      expect(eventos.latestPaymentMethodsFor).not.toHaveBeenCalled();
+    });
+
+    it('cae al historial para un pedido sin ningún intento', async () => {
+      chargeRepo.find.mockResolvedValue([]);
+      eventos.latestPaymentMethodsFor.mockResolvedValue(
+        new Map([['order-1', 'efectivo']]),
+      );
+
+      const metodos = await service.latestMethodsFor(['order-1']);
+
+      expect(eventos.latestPaymentMethodsFor).toHaveBeenCalledWith(['order-1']);
+      expect(metodos.get('order-1')).toEqual({
+        code: 'efectivo',
+        label: 'Efectivo',
+      });
+    });
+
+    // El historial se consulta solo para los que lo necesitan: preguntar por
+    // todos traería el método de pedidos que sí tienen intento y abriría la
+    // puerta a que las dos fuentes se contradigan.
+    it('pregunta al historial únicamente por los que no tienen intento', async () => {
+      chargeRepo.find.mockResolvedValue([
+        makeCharge({ orderId: 'order-1', provider: 'tropipay' }),
+      ]);
+      eventos.latestPaymentMethodsFor.mockResolvedValue(
+        new Map([['order-2', 'efectivo']]),
+      );
+
+      const metodos = await service.latestMethodsFor(['order-1', 'order-2']);
+
+      expect(eventos.latestPaymentMethodsFor).toHaveBeenCalledWith(['order-2']);
+      expect(metodos.get('order-1')?.code).toBe('tropipay');
+      expect(metodos.get('order-2')?.code).toBe('efectivo');
+    });
+
+    // Un código que no está en el catálogo se enseña tal cual, no en blanco:
+    // es lo que ya hacía con los intentos.
+    it('sin nombre en el catálogo, enseña el código', async () => {
+      chargeRepo.find.mockResolvedValue([]);
+      eventos.latestPaymentMethodsFor.mockResolvedValue(
+        new Map([['order-1', 'trueque']]),
+      );
+
+      const metodos = await service.latestMethodsFor(['order-1']);
+
+      expect(metodos.get('order-1')).toEqual({
+        code: 'trueque',
+        label: 'trueque',
+      });
+    });
+
+    it('sin pedidos no consulta nada', async () => {
+      const metodos = await service.latestMethodsFor([]);
+
+      expect(metodos.size).toBe(0);
+      expect(chargeRepo.find).not.toHaveBeenCalled();
+      expect(eventos.latestPaymentMethodsFor).not.toHaveBeenCalled();
+    });
+
+    it('sin intento y sin historial, el pedido se queda sin método', async () => {
+      chargeRepo.find.mockResolvedValue([]);
+
+      const metodos = await service.latestMethodsFor(['order-1']);
+
+      expect(metodos.size).toBe(0);
     });
   });
 

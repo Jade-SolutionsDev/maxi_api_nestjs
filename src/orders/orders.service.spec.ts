@@ -33,6 +33,7 @@ import { PaymentsService } from '../payments/payments.service';
 import { OrderEventsService } from '../order-events/order-events.service';
 import { OrderMailerService } from '../mail/order-mailer.service';
 import { OrderEventKind } from '../order-events/entities/order-event.entity';
+import { SIN_METODO_DE_PAGO } from './dto/admin-orders-query.dto';
 
 function makeClient(): Client {
   return { id: 'client-1', defaultMunicipalityId: 'mun-1' } as Client;
@@ -785,6 +786,60 @@ describe('OrdersService', () => {
       expect(fin.getDate()).toBe(24);
       expect(fin.getHours()).toBe(23);
       expect(fin.getMinutes()).toBe(59);
+    });
+  });
+
+  // MxH-0133, punto 3. Un cobro apuntado desde el panel marca el pedido como
+  // pagado y escribe el método en el historial, pero no abre ningún intento
+  // contra una pasarela. Filtrar solo por `payment_charges` dejaba ese pedido
+  // fuera de su método y dentro de «sin método de pago», mientras la columna
+  // —ya conciliada— enseñaba el método. El filtro y la columna tienen que leer
+  // lo mismo.
+  describe('el filtro por método de pago', () => {
+    const condicionDelMetodo = (qb: { andWhere: jest.Mock }) =>
+      (qb.andWhere.mock.calls as [string, unknown][])
+        .map(([c]) => c)
+        .find((c) => c.includes('payment_charges')) ?? '';
+
+    it('cae al historial cuando el pedido no dejó ningún intento', async () => {
+      const qb = filtrosFalsos();
+      orderRepo.createQueryBuilder.mockReturnValue(qb);
+
+      await service.findAllAdmin({ paymentMethod: 'tropipay' });
+
+      const condicion = condicionDelMetodo(qb);
+      expect(condicion).toContain('payment_charges');
+      expect(condicion).toContain("e.meta->>'paymentMethod'");
+      expect(condicion).toContain('coalesce');
+    });
+
+    // Y solo del cambio a «pagado»: el evento `created` lleva el método que el
+    // cliente eligió, y un pedido que nunca pagó no se cobró con nada. En
+    // staging hay 14 pedidos pendientes que saldrían con método inventado.
+    it('no lee el método del evento de creación', async () => {
+      const qb = filtrosFalsos();
+      orderRepo.createQueryBuilder.mockReturnValue(qb);
+
+      await service.findAllAdmin({ paymentMethod: 'tropipay' });
+
+      expect(condicionDelMetodo(qb)).toContain(
+        "e.kind = 'payment_status_changed'",
+      );
+    });
+
+    // «Sin método» es el complemento exacto del filtro anterior: si uno mira
+    // el historial y el otro no, hay pedidos que no salen en ninguno de los
+    // dos, o salen en los dos.
+    it('«sin método» es no tener ninguno de los dos', async () => {
+      const qb = filtrosFalsos();
+      orderRepo.createQueryBuilder.mockReturnValue(qb);
+
+      await service.findAllAdmin({ paymentMethod: SIN_METODO_DE_PAGO });
+
+      const condicion = condicionDelMetodo(qb);
+      expect(condicion).toContain('IS NULL');
+      expect(condicion).toContain("e.meta->>'paymentMethod'");
+      expect(condicion).not.toContain('NOT EXISTS');
     });
   });
 
