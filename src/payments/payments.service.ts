@@ -13,6 +13,7 @@ import { quitarDelCarrito } from '../cart/devolver-al-carrito';
 import { InventoryService } from '../inventory/inventory.service';
 import { OrderEventKind } from '../order-events/entities/order-event.entity';
 import { OrderEventsService } from '../order-events/order-events.service';
+import { OrderConfirmationService } from '../order-confirmation/order-confirmation.service';
 import { OrderMailerService } from '../mail/order-mailer.service';
 import { RefundsService } from '../refunds/refunds.service';
 import { ProductsService } from '../products/products.service';
@@ -72,6 +73,7 @@ export class PaymentsService {
     private readonly dataSource: DataSource,
     private readonly refunds: RefundsService,
     private readonly orderMailer: OrderMailerService,
+    private readonly orderConfirmation: OrderConfirmationService,
   ) {}
 
   /** Todos los intentos de un pedido, del más reciente al más antiguo. */
@@ -532,6 +534,11 @@ export class PaymentsService {
 
     if (order.paymentStatus === PaymentStatus.PAID) {
       await this.reinstateIfExpired(order);
+      // El pago confirma el pedido (MxH-0170). Va después de reinstaurar: un
+      // pago que llega tarde primero recupera su reserva —o se queda
+      // cancelado si ya no hay mercancía— y solo entonces puede confirmarse.
+      // Lo firma el sistema: detrás de un webhook no hay ningún usuario.
+      await this.orderConfirmation.confirmarPorPago(order, null);
       // Un pedido que quedó cancelado por falta de mercancía no está listo
       // para recoger: ese cliente recibe el aviso de su devolución, no este.
       if (order.status !== OrderStatus.CANCELLED) {

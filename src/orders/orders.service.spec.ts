@@ -34,6 +34,7 @@ import { OrderEventsService } from '../order-events/order-events.service';
 import { OrderMailerService } from '../mail/order-mailer.service';
 import { OrderEventKind } from '../order-events/entities/order-event.entity';
 import { SIN_METODO_DE_PAGO } from './dto/admin-orders-query.dto';
+import { OrderConfirmationService } from '../order-confirmation/order-confirmation.service';
 
 function makeClient(): Client {
   return { id: 'client-1', defaultMunicipalityId: 'mun-1' } as Client;
@@ -117,6 +118,7 @@ describe('OrdersService', () => {
     availableForArea: jest.Mock;
   };
   let clientRepo: { findOne: jest.Mock };
+  let confirmacion: { confirmarPorPago: jest.Mock };
   let paymentsService: {
     createChargeForOrder: jest.Mock;
     latestChargeDto: jest.Mock;
@@ -214,6 +216,7 @@ describe('OrdersService', () => {
       availableForArea: jest.fn().mockResolvedValue(new Map()),
     };
     clientRepo = { findOne: jest.fn() };
+    confirmacion = { confirmarPorPago: jest.fn().mockResolvedValue(true) };
     paymentsService = {
       createChargeForOrder: jest.fn().mockResolvedValue({ id: 'charge-1' }),
       latestChargeDto: jest.fn().mockResolvedValue(undefined),
@@ -302,6 +305,7 @@ describe('OrdersService', () => {
         { provide: CartService, useValue: cartService },
         { provide: InventoryService, useValue: inventoryService },
         { provide: PaymentsService, useValue: paymentsService },
+        { provide: OrderConfirmationService, useValue: confirmacion },
         { provide: PaymentMethodsService, useValue: paymentMethodsService },
         { provide: FulfillmentService, useValue: fulfillmentService },
         { provide: ProductsService, useValue: productsService },
@@ -1305,6 +1309,37 @@ describe('OrdersService', () => {
       expect(orderRepo.save).toHaveBeenCalledWith(
         expect.objectContaining({ paymentStatus: PaymentStatus.PAID }),
       );
+    });
+
+    it('cobrar confirma el pedido y lo firma quien cobró (MxH-0170)', async () => {
+      orderRepo.findOne
+        .mockResolvedValueOnce(makeOrder())
+        .mockResolvedValue(makeOrder({ items: [] }));
+
+      await service.updatePaymentStatus(
+        makeUser(Role.ADMIN),
+        'order-1',
+        PaymentStatus.PAID,
+      );
+
+      expect(confirmacion.confirmarPorPago).toHaveBeenCalledWith(
+        expect.objectContaining({ paymentStatus: PaymentStatus.PAID }),
+        expect.any(String),
+      );
+    });
+
+    it('marcar fallido no confirma nada', async () => {
+      orderRepo.findOne
+        .mockResolvedValueOnce(makeOrder())
+        .mockResolvedValue(makeOrder({ items: [] }));
+
+      await service.updatePaymentStatus(
+        makeUser(Role.ADMIN),
+        'order-1',
+        PaymentStatus.FAILED,
+      );
+
+      expect(confirmacion.confirmarPorPago).not.toHaveBeenCalled();
     });
 
     it('rejects nonsense transitions like paid -> pending', async () => {

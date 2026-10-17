@@ -661,11 +661,13 @@ export class InventoryService {
 
   // Order confirmed: the hold becomes a physical decrement, recorded as an OUT
   // operation in the movement ledger (so sales are reconstructable, not just
-  // the manual in/out/transfer wizard). `userId` is the confirming admin.
+  // the manual in/out/transfer wizard). `userId` is the confirming admin, or
+  // null when the payment confirmed the order by itself (MxH-0170): a webhook
+  // has no user behind it.
   async confirmReservations(
     manager: EntityManager,
     orderId: string,
-    userId: string,
+    userId: string | null,
   ): Promise<void> {
     // Capture what will be confirmed BEFORE settle flips their status.
     const toConfirm = await manager.getRepository(InventoryReservation).find({
@@ -761,7 +763,7 @@ export class InventoryService {
     params: {
       type: OperationType;
       orderId: string;
-      userId: string;
+      userId: string | null;
       reservations: InventoryReservation[];
     },
   ): Promise<void> {

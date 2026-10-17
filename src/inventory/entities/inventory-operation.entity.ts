@@ -41,8 +41,9 @@ export class InventoryOperation {
   @Column({ type: 'varchar', length: 500, nullable: true })
   note: string | null;
 
-  @Column({ name: 'created_by', type: 'uuid' })
-  createdBy: string;
+  /** Nulo cuando el movimiento lo provocó el sistema, no una persona. */
+  @Column({ name: 'created_by', type: 'uuid', nullable: true })
+  createdBy: string | null;
 
   @CreateDateColumn({ name: 'created_at', type: 'timestamptz' })
   createdAt: Date;
