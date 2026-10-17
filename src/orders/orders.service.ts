@@ -76,6 +76,7 @@ import {
   ResolvedPaymentMethod,
 } from '../payments/payment-methods.service';
 import { PaymentsService } from '../payments/payments.service';
+import { OrderConfirmationService } from '../order-confirmation/order-confirmation.service';
 import { deshacerCobro, sellarCobro } from './payment-sealing';
 
 /**
@@ -266,6 +267,7 @@ export class OrdersService {
     private readonly cartService: CartService,
     private readonly inventoryService: InventoryService,
     private readonly paymentsService: PaymentsService,
+    private readonly orderConfirmation: OrderConfirmationService,
     private readonly paymentMethodsService: PaymentMethodsService,
     private readonly fulfillmentService: FulfillmentService,
     private readonly productsService: ProductsService,
@@ -676,6 +678,18 @@ export class OrdersService {
           }
         : undefined,
     });
+
+    // Un pedido que nace cobrado nace confirmado (MxH-0170): es el mismo
+    // criterio que cuando el cobro llega después, y sin esto el alta desde el
+    // panel sería la única vía que todavía pide confirmar a mano.
+    if (cobro) {
+      const recienCreado = await this.orderRepository.findOne({
+        where: { id: orderId },
+      });
+      if (recienCreado) {
+        await this.orderConfirmation.confirmarPorPago(recienCreado, user.id);
+      }
+    }
 
     // El canal importa: sin cobro, el aviso sale bajo la clave del
     // back-office, que no comparte el apagado de la tienda. Quien encarga por
@@ -1572,6 +1586,11 @@ export class OrdersService {
       nextValue: paymentStatus,
       reason: 'Marcado a mano desde la administración',
     });
+    // El pago confirma el pedido, venga de donde venga (MxH-0170). Aquí sí
+    // hay una persona detrás, y es ella quien firma la salida de mercancía.
+    if (paymentStatus === PaymentStatus.PAID) {
+      await this.orderConfirmation.confirmarPorPago(order, user.id);
+    }
     // Marcar pagado a mano es hoy la vía normal —la pasarela lleva semanas
     // rechazando—, así que el cliente tiene que enterarse igual que si hubiera
     // entrado por webhook. La corrección de superadmin no avisa: ahí se está

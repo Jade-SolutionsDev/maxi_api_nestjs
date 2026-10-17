@@ -24,6 +24,7 @@ import { PaymentMethodsService } from '../payments/payment-methods.service';
 import { PaymentsService } from '../payments/payments.service';
 import { OrderEventsService } from '../order-events/order-events.service';
 import { OrderMailerService } from '../mail/order-mailer.service';
+import { OrderConfirmationService } from '../order-confirmation/order-confirmation.service';
 
 // Montaje calcado del `beforeEach` de orders.service.spec.ts (es largo, pero
 // una prueba que depende del montaje de otro fichero es peor). Cualquier
@@ -279,6 +280,10 @@ describe('la tienda y el panel crean el mismo pedido', () => {
         { provide: CartService, useValue: cartService },
         { provide: InventoryService, useValue: inventoryService },
         { provide: PaymentsService, useValue: paymentsService },
+        {
+          provide: OrderConfirmationService,
+          useValue: { confirmarPorPago: jest.fn().mockResolvedValue(false) },
+        },
         { provide: PaymentMethodsService, useValue: paymentMethodsService },
         { provide: FulfillmentService, useValue: fulfillmentService },
         { provide: ProductsService, useValue: productsService },

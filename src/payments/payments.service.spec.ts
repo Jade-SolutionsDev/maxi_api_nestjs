@@ -27,6 +27,7 @@ import { PaymentMethodsService } from './payment-methods.service';
 import { OrderMailerService } from '../mail/order-mailer.service';
 import { RefundsService } from '../refunds/refunds.service';
 import { PaymentsService } from './payments.service';
+import { OrderConfirmationService } from '../order-confirmation/order-confirmation.service';
 
 function makeOrder(overrides: Partial<Order> = {}): Order {
   return {
@@ -125,6 +126,7 @@ describe('PaymentsService', () => {
     labelsByCode: jest.Mock;
   };
   let eventos: { record: jest.Mock; latestPaymentMethodsFor: jest.Mock };
+  let confirmacion: { confirmarPorPago: jest.Mock };
   let orderItemRepo: { find: jest.Mock };
   let inventory: { reserve: jest.Mock };
   let refunds: { requestForLatePaymentWithoutStock: jest.Mock };
@@ -156,6 +158,7 @@ describe('PaymentsService', () => {
         ]),
       ),
     };
+    confirmacion = { confirmarPorPago: jest.fn().mockResolvedValue(true) };
     eventos = {
       record: jest.fn().mockResolvedValue(undefined),
       latestPaymentMethodsFor: jest.fn().mockResolvedValue(new Map()),
@@ -181,6 +184,7 @@ describe('PaymentsService', () => {
         { provide: PaymentMethodsService, useValue: methods },
         { provide: InventoryService, useValue: inventory },
         { provide: OrderEventsService, useValue: eventos },
+        { provide: OrderConfirmationService, useValue: confirmacion },
         {
           provide: ProductsService,
           useValue: { coveringLocationIds: jest.fn().mockResolvedValue([]) },
@@ -256,6 +260,39 @@ describe('PaymentsService', () => {
       await service.syncCharge(makeCharge({ status: ChargeStatus.SUCCEEDED }));
 
       expect(gateway.syncCharge).not.toHaveBeenCalled();
+    });
+
+    it('un cobro confirmado confirma el pedido, firmado por el sistema (MxH-0170)', async () => {
+      gateway.syncCharge.mockResolvedValue({
+        reference: 'REF123',
+        status: ChargeStatus.SUCCEEDED,
+        amount: '30.00',
+        currency: 'USD',
+        rawPayload: {},
+      });
+
+      await service.syncCharge(makeCharge());
+
+      // null: detrás de un webhook no hay ningún usuario a quien atribuir la
+      // salida de mercancía.
+      expect(confirmacion.confirmarPorPago).toHaveBeenCalledWith(
+        expect.objectContaining({ paymentStatus: PaymentStatus.PAID }),
+        null,
+      );
+    });
+
+    it('un cobro fallido no confirma el pedido', async () => {
+      gateway.syncCharge.mockResolvedValue({
+        reference: 'REF123',
+        status: ChargeStatus.FAILED,
+        amount: '30.00',
+        currency: 'USD',
+        rawPayload: {},
+      });
+
+      await service.syncCharge(makeCharge());
+
+      expect(confirmacion.confirmarPorPago).not.toHaveBeenCalled();
     });
 
     it('marks the order paid ONLY on SUCCEEDED', async () => {

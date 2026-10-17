@@ -104,7 +104,8 @@ export class OperationResponseDto {
    */
   orderNumber: string | null;
   note: string | null;
-  createdBy: string;
+  /** Nulo cuando el movimiento lo provocó el sistema y no una persona. */
+  createdBy: string | null;
   createdAt: Date;
   items: { productId: string; quantity: number }[];
 

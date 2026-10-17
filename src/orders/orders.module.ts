@@ -19,6 +19,7 @@ import { UserRole } from '../permissions/entities/user-role.entity';
 import { Order } from './entities/order.entity';
 import { OrdersController } from './orders.controller';
 import { OrderPdfModule } from './order-pdf.module';
+import { OrderConfirmationModule } from '../order-confirmation/order-confirmation.module';
 import { OrdersService } from './orders.service';
 import { ReportMailerService } from './report-mailer.service';
 import { ReportRecipientsService } from './report-recipients.service';
@@ -39,6 +40,7 @@ import { StorefrontOrdersController } from './storefront-orders.controller';
     UploadsModule,
     PermissionsModule,
     OrderEventsModule,
+    OrderConfirmationModule,
     MailModule,
     CmsModule,
     ProductsModule,

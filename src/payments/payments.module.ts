@@ -3,6 +3,7 @@ import { TypeOrmModule } from '@nestjs/typeorm';
 import { AuthModule } from '../auth/auth.module';
 import { InventoryModule } from '../inventory/inventory.module';
 import { MailModule } from '../mail/mail.module';
+import { OrderConfirmationModule } from '../order-confirmation/order-confirmation.module';
 import { OrderEventsModule } from '../order-events/order-events.module';
 import { RefundsModule } from '../refunds/refunds.module';
 import { ProductsModule } from '../products/products.module';
@@ -45,6 +46,7 @@ import { StorefrontPaymentMethodsController } from './storefront-payment-methods
     RefundsModule,
     MailModule,
     OrderEventsModule,
+    OrderConfirmationModule,
   ],
   controllers: [
     CollectionsController,
