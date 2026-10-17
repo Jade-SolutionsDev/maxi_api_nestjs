@@ -109,6 +109,22 @@ const PAYMENT_TRANSITIONS: Record<PaymentStatus, PaymentStatus[]> = {
   [PaymentStatus.REFUNDED]: [],
 };
 
+// Con qué se pagó un pedido, en SQL: el último intento de cobro y, cuando no
+// hubo ninguno, el método que dejó escrito el cambio a «pagado». Misma regla
+// que `PaymentsService.latestMethodsFor`, que es lo que pinta la columna.
+const METODO_DEL_PEDIDO = `coalesce(
+  (SELECT c.provider FROM payment_charges c
+    WHERE c.order_id = "order"."id"
+    ORDER BY c.created_at DESC, c.id DESC
+    LIMIT 1),
+  (SELECT e.meta->>'paymentMethod' FROM order_events e
+    WHERE e.order_id = "order"."id"
+      AND e.kind = 'payment_status_changed'
+      AND nullif(e.meta->>'paymentMethod', '') IS NOT NULL
+    ORDER BY e.created_at DESC, e.id DESC
+    LIMIT 1)
+)`;
+
 // Fulfillment steps non-admin staff may drive; confirm/cancel (which move
 // stock and commit the sale) and payment stay with ADMIN+.
 const STAFF_TARGETS = [
@@ -1039,15 +1055,18 @@ export class OrdersService {
       // intento sería más corto y mentiría: hay pedidos que probaron Tropipay y
       // reintentaron con otra cosa, y saldrían al filtrar por una pasarela
       // mientras la tabla muestra la otra.
+      //
+      // Y cuando no hay intento ninguno, el método sale del historial, igual
+      // que en la columna: un cobro apuntado desde el panel no abre intento
+      // (MxH-0133, punto 3). Filtro y columna leen lo mismo o el listado se
+      // contradice consigo mismo.
+      //
+      // `"order"` entrecomillado: es palabra reservada en SQL, y aquí dentro
+      // no pasa por la sustitución de alias de TypeORM.
       qb.andWhere(
         query.paymentMethod === SIN_METODO_DE_PAGO
-          ? // `"order"` entrecomillado: es palabra reservada en SQL, y aquí dentro
-            // no pasa por la sustitución de alias de TypeORM.
-            `NOT EXISTS (SELECT 1 FROM payment_charges c WHERE c.order_id = "order"."id")`
-          : `(SELECT c.provider FROM payment_charges c
-                WHERE c.order_id = "order"."id"
-                ORDER BY c.created_at DESC, c.id DESC
-                LIMIT 1) = :paymentMethod`,
+          ? `${METODO_DEL_PEDIDO} IS NULL`
+          : `${METODO_DEL_PEDIDO} = :paymentMethod`,
         query.paymentMethod === SIN_METODO_DE_PAGO
           ? {}
           : { paymentMethod: query.paymentMethod },

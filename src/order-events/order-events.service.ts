@@ -133,6 +133,50 @@ export class OrderEventsService {
       ),
     );
   }
+
+  /**
+   * El método con el que se cobró cada pedido **según su historial**, para los
+   * pedidos que no dejaron ningún intento en `payment_charges`.
+   *
+   * Un cobro apuntado a mano al crear el pedido desde el panel marca el pedido
+   * como pagado y escribe este evento, pero no abre ningún intento contra una
+   * pasarela — porque no lo hubo. Sin este respaldo, ese pedido sale sin
+   * método de pago en el listado y el filtro no lo encuentra (MxH-0133,
+   * punto 3).
+   *
+   * Solo cuenta `payment_status_changed`: el `created` también lleva el método
+   * que el cliente **eligió**, y un pedido pendiente que nunca llegó a pagar
+   * no tiene método con el que se cobrara. Decirlo sería inventar un cobro:
+   * en staging hay 14 pedidos así.
+   */
+  async latestPaymentMethodsFor(
+    orderIds: string[],
+  ): Promise<Map<string, string>> {
+    if (orderIds.length === 0) return new Map();
+
+    const rows = await this.eventRepository
+      .createQueryBuilder('event')
+      // Las columnas van entrecomilladas y no como `event.propiedad` porque
+      // `DISTINCT ON` exige que su expresión sea **la misma cadena** que abre
+      // el `ORDER BY`, y ahí TypeORM no sustituye alias.
+      .select('DISTINCT ON ("event"."order_id") "event"."order_id"', 'orderId')
+      .addSelect(`"event"."meta"->>'paymentMethod'`, 'code')
+      .where('event.orderId IN (:...orderIds)', { orderIds })
+      .andWhere('event.kind = :kind', {
+        kind: OrderEventKind.PAYMENT_STATUS_CHANGED,
+      })
+      // `->>` ya da NULL cuando la clave no está; el `nullif` descarta además
+      // el método guardado como cadena vacía.
+      .andWhere(`nullif("event"."meta"->>'paymentMethod', '') IS NOT NULL`)
+      // Mismo desempate que `latestChargesFor`: dos eventos del mismo instante
+      // dejaban el «último» al azar del orden que devolviera la base.
+      .orderBy('"event"."order_id"')
+      .addOrderBy('event.createdAt', 'DESC')
+      .addOrderBy('event.id', 'DESC')
+      .getRawMany<{ orderId: string; code: string }>();
+
+    return new Map(rows.map((r) => [r.orderId, r.code]));
+  }
 }
 
 const fullName = (

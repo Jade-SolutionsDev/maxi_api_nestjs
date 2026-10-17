@@ -152,23 +152,43 @@ export class PaymentsService {
   /**
    * The method each of these orders was last paid with, named for display.
    * Newest attempt wins, so switching method is reflected.
+   *
+   * Un pedido cobrado desde el panel no deja intento en `payment_charges`:
+   * nadie llamó a ninguna pasarela, alguien apuntó que el dinero entró. Para
+   * esos se lee el método del historial, que es donde quedó (MxH-0133, punto
+   * 3). El intento manda cuando lo hay: es lo que de verdad se intentó cobrar.
    */
   async latestMethodsFor(
     orderIds: string[],
   ): Promise<Map<string, OrderPaymentMethodDto>> {
+    if (orderIds.length === 0) return new Map();
+
     const charges = await this.latestChargesFor(orderIds);
-    if (charges.size === 0) return new Map();
+    const sinIntento = orderIds.filter((id) => !charges.has(id));
+    const delHistorial =
+      sinIntento.length > 0
+        ? await this.orderEvents.latestPaymentMethodsFor(sinIntento)
+        : new Map<string, string>();
+    if (charges.size === 0 && delHistorial.size === 0) return new Map();
 
     const labels = await this.methodsService.labelsByCode();
-    return new Map(
-      [...charges].map(([orderId, charge]) => [
-        orderId,
-        {
-          code: charge.provider,
-          label: labels.get(charge.provider) ?? charge.provider,
-        },
-      ]),
-    );
+    const conNombre = (code: string): OrderPaymentMethodDto => ({
+      code,
+      label: labels.get(code) ?? code,
+    });
+    return new Map([
+      ...[...charges].map(
+        ([orderId, charge]) =>
+          [orderId, conNombre(charge.provider)] as [
+            string,
+            OrderPaymentMethodDto,
+          ],
+      ),
+      ...[...delHistorial].map(
+        ([orderId, code]) =>
+          [orderId, conNombre(code)] as [string, OrderPaymentMethodDto],
+      ),
+    ]);
   }
 
   toDto(charge: PaymentCharge): PaymentChargeResponseDto {
