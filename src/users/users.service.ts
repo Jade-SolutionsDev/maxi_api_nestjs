@@ -16,6 +16,7 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { createClerkClient } from '@clerk/backend';
 import { IsNull, Repository } from 'typeorm';
 import { CustomerProvisioningService } from '../clients/customer-provisioning.service';
+import { repartirPagina } from '../common/pagina-con-prefijo';
 import { PermissionsService } from '../permissions/permissions.service';
 import {
   buildPaginatedResponse,
@@ -151,21 +152,14 @@ export class UsersService {
     }
     // id is a unique PK — a deterministic tiebreaker so rows keep a stable
     // total order across refetches (createdAt alone ties on same-instant seeds).
-    qb.orderBy('user.createdAt', 'DESC')
-      .addOrderBy('user.id', 'DESC')
-      .skip(skip)
-      .take(limit);
+    qb.orderBy('user.createdAt', 'DESC').addOrderBy('user.id', 'DESC');
 
-    const [users, usersTotal] = await qb.getManyAndCount();
-
-    let items = users;
-    let total = usersTotal;
-
-    // Only the unfiltered ("all") view mixes in pending invitations, pinned to
-    // the first page. Status facets are exclusive. The role filter applies to
-    // invitations too — by tier, or by invited managed role.
+    // Only the unfiltered ("all") view mixes in pending invitations, which go
+    // ahead of everything. Status facets are exclusive. The role filter applies
+    // to invitations too — by tier, or by invited managed role.
+    let pendingUsers: User[] = [];
     if (!filter.status && filter.includeInvitations) {
-      let pendingUsers = await this.loadPendingInvitationUsers();
+      pendingUsers = await this.loadPendingInvitationUsers();
       // Invitations never went through the SQL search above, so they stuck to
       // page 1 no matter what was typed. Same columns, same accent rule.
       if (filter.q) {
@@ -182,11 +176,25 @@ export class UsersService {
           u.managedRoles?.some((r) => r.id === managedRoleFilter),
         );
       }
-      total += pendingUsers.length;
-      if (page === 1) {
-        items = [...pendingUsers, ...users];
-      }
     }
+
+    // One list: invitations take its first slots and SQL supplies the rest, so
+    // every page holds exactly `limit` rows. Pinning them on top of a full page
+    // returned `limit + pending` rows while the footer still said `1 - limit`.
+    const reparto = repartirPagina(pendingUsers.length, page, limit);
+    const invitadosEnPagina = pendingUsers.slice(
+      reparto.prefijoDesde,
+      reparto.prefijoHasta,
+    );
+
+    // A page filled with invitations needs no rows, but still needs the count.
+    const [users, usersTotal] =
+      reparto.take > 0
+        ? await qb.skip(reparto.skip).take(reparto.take).getManyAndCount()
+        : [[] as User[], await qb.getCount()];
+
+    const items = [...invitadosEnPagina, ...users];
+    const total = usersTotal + pendingUsers.length;
 
     await this.attachManagedRoles(
       items.filter((u) => u.managedRoles === undefined),
