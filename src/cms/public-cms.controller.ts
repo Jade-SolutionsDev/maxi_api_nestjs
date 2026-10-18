@@ -9,12 +9,14 @@ import { CmsService } from './cms.service';
 import { CmsPagesService } from './cms-pages.service';
 import { CmsFaqService } from './cms-faq.service';
 import { CmsHomeService } from './cms-home.service';
+import { CmsPopupsService } from './cms-popups.service';
 import { PublicCmsBannerResponseDto } from './dto/cms-banner.dto';
 import { PublicHomeResponseDto } from './dto/cms-home.dto';
 import {
   PublicCmsPageResponseDto,
   PublicHomeNoticeDto,
 } from './dto/cms-page.dto';
+import { PublicCmsPopupDto } from './dto/cms-popup.dto';
 import { CmsServiceResponseDto } from './dto/cms-service.dto';
 import { SiteSettingsData } from './entities/cms-site-settings.entity';
 import { CmsStaffMemberResponseDto } from './dto/cms-staff-member.dto';
@@ -35,6 +37,7 @@ export class PublicCmsController {
     private readonly faqService: CmsFaqService,
     private readonly homeService: CmsHomeService,
     private readonly pagesService: CmsPagesService,
+    private readonly popupsService: CmsPopupsService,
   ) {}
 
   @Get('settings')
@@ -108,6 +111,18 @@ export class PublicCmsController {
   async homeNotices(): Promise<PublicHomeNoticeDto[]> {
     const notices = await this.pagesService.listVisibleHomeNotices();
     return notices.map(PublicHomeNoticeDto.fromEntity);
+  }
+
+  @Get('popup')
+  @Header('Cache-Control', SCHEDULED_CONTENT_CACHE)
+  @ApiOperation({
+    summary: 'El aviso emergente vigente ahora mismo, o null',
+    description:
+      'Publicado, activo y dentro de fechas. La misma caché corta que los ' +
+      'avisos de la portada: se enciende y se apaga a la hora que diga.',
+  })
+  popup(): Promise<PublicCmsPopupDto | null> {
+    return this.popupsService.vigente();
   }
 
   @Get('pages')
