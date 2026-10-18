@@ -119,6 +119,64 @@ describe('WebhooksService', () => {
       );
     });
 
+    it('toma el nombre de la invitación cuando el cliente no lo escribió', async () => {
+      verifyWebhookMock.mockResolvedValueOnce({
+        type: 'user.created',
+        data: {
+          id: 'client_clerk_id',
+          email_addresses: [
+            { id: 'email_1', email_address: 'invitado@example.com' },
+          ],
+          primary_email_address_id: 'email_1',
+          first_name: null,
+          last_name: null,
+          public_metadata: {
+            invitadoDesde: 'back-office',
+            firstName: 'Mirta',
+            lastName: 'Pérez',
+          },
+        },
+      } as never);
+
+      await service.handleStoreWebhook('raw-body', {});
+
+      expect(clientsService.createOrUpdateFromClerk).toHaveBeenCalledWith(
+        'client_clerk_id',
+        {
+          email: 'invitado@example.com',
+          firstName: 'Mirta',
+          lastName: 'Pérez',
+        },
+      );
+    });
+
+    it('respeta el nombre que puso el cliente por encima del de la invitación', async () => {
+      verifyWebhookMock.mockResolvedValueOnce({
+        type: 'user.created',
+        data: {
+          id: 'client_clerk_id',
+          email_addresses: [
+            { id: 'email_1', email_address: 'invitado@example.com' },
+          ],
+          primary_email_address_id: 'email_1',
+          first_name: 'Mirtha',
+          last_name: 'Pérez Luna',
+          public_metadata: { firstName: 'Mirta', lastName: 'Pérez' },
+        },
+      } as never);
+
+      await service.handleStoreWebhook('raw-body', {});
+
+      expect(clientsService.createOrUpdateFromClerk).toHaveBeenCalledWith(
+        'client_clerk_id',
+        {
+          email: 'invitado@example.com',
+          firstName: 'Mirtha',
+          lastName: 'Pérez Luna',
+        },
+      );
+    });
+
     it('da la bienvenida a la cuenta recién creada', async () => {
       const cliente = { id: 'cli-1', email: 'client@example.com' };
       clientsService.createOrUpdateFromClerk.mockResolvedValueOnce(
