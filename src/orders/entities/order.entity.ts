@@ -57,6 +57,13 @@ export enum PaymentStatus {
 // cancellation.
 @Entity('orders')
 @Index(['clientId'])
+// Un reintento del mismo checkout no puede acabar en dos pedidos: el par
+// (cliente, clave) es único entre los que traen clave. Parcial, porque los
+// pedidos sin clave —los de antes y los del panel— son muchos y todos nulos.
+@Index('ux_orders_client_idempotency', ['clientId', 'idempotencyKey'], {
+  unique: true,
+  where: '"idempotency_key" IS NOT NULL',
+})
 export class Order {
   @PrimaryGeneratedColumn('uuid')
   id: string;
@@ -191,6 +198,28 @@ export class Order {
    */
   @Column({ name: 'contact_snapshot', type: 'jsonb', nullable: true })
   contactSnapshot: Record<string, unknown> | null;
+
+  /**
+   * La clave que manda la tienda para que un reintento no cree un pedido
+   * nuevo (MxH-0176).
+   *
+   * La tienda abandona cualquier llamada a los 8 segundos, pero ese corte es
+   * **solo del lado del cliente**: la API sigue trabajando y el pedido puede
+   * nacer igual. Sin esta clave, el cliente ve un error, reintenta —que es lo
+   * que el aviso le pide— y compra dos veces.
+   *
+   * Nula en los pedidos anteriores y en los que crea el panel, que no pasan
+   * por ese límite. El índice único es **sobre el par con el cliente**, nunca
+   * sobre la clave sola: la genera quien compra, así que dos clientes podrían
+   * mandar la misma, y buscar solo por ella enseñaría el pedido de otro.
+   */
+  @Column({
+    name: 'idempotency_key',
+    type: 'varchar',
+    length: 64,
+    nullable: true,
+  })
+  idempotencyKey: string | null;
 
   @Column({ name: 'customer_notes', type: 'text', nullable: true })
   customerNotes: string | null;

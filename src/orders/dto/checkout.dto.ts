@@ -7,6 +7,8 @@ import {
   IsOptional,
   IsString,
   IsUUID,
+  Length,
+  Matches,
   MaxLength,
   ValidateNested,
 } from 'class-validator';
@@ -85,6 +87,25 @@ export class CheckoutDto {
   @IsOptional()
   @IsObject()
   deliveryAddress?: Record<string, unknown>;
+
+  /**
+   * Clave del intento de compra, para que un reintento no cree otro pedido
+   * (MxH-0176).
+   *
+   * La tienda corta a los 8 segundos y ese corte no detiene a la API: el
+   * pedido puede haberse creado igual. Mandando la misma clave, el segundo
+   * intento **devuelve el mismo pedido** en vez de uno nuevo.
+   *
+   * Opcional: un cliente antiguo que no la mande sigue funcionando como
+   * siempre, sin protección pero sin romperse.
+   */
+  @IsOptional()
+  @IsString()
+  @Length(16, 64)
+  @Matches(/^[A-Za-z0-9_-]+$/, {
+    message: 'idempotencyKey solo admite letras, números, guion y guion bajo',
+  })
+  idempotencyKey?: string;
 
   /** Municipality the order ships to. Derived from the address when given. */
   @IsOptional()

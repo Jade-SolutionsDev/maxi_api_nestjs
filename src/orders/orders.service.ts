@@ -266,6 +266,11 @@ interface CrearPedidoParams {
   /** Lo que cada llamador quiera dejar en el `meta` del evento de creación. */
   metaExtra?: Record<string, unknown>;
   /**
+   * Clave del intento, solo la manda el checkout de la tienda: es el único
+   * camino que pasa por el límite de 8 segundos del navegador.
+   */
+  idempotencyKey?: string | null;
+  /**
    * Trabajo extra que tiene que caber en la MISMA transacción. La tienda vacía
    * aquí el carrito; el panel sella aquí el cobro. El núcleo no sabe de
    * carritos ni de cobros.
@@ -351,6 +356,18 @@ export class OrdersService {
   // commit: an outbound gateway call must not hold the inventory row locks,
   // and a gateway failure must not lose the order.
   async checkout(client: Client, dto: CheckoutDto): Promise<OrderResponseDto> {
+    /**
+     * Lo primero de todo: si este intento ya creó un pedido, se devuelve ese
+     * (MxH-0176). Antes de resolver direcciones, de mirar el carrito y de
+     * tocar el inventario, porque un reintento tiene que ser barato y, sobre
+     * todo, no puede volver a reservar existencias.
+     */
+    const yaCreado = await this.pedidoDeEsteIntento(
+      client.id,
+      dto.idempotencyKey,
+    );
+    if (yaCreado) return yaCreado;
+
     // Where the order is going, and how. Both are settled before anything is
     // written: a choice the shop cannot honour must 400, not become an order
     // nobody can fill.
@@ -415,7 +432,7 @@ export class OrdersService {
       fulfillment,
     );
 
-    const orderId = await this.crearPedido({
+    const creado = await this.crearPedidoDeLaTienda(client, dto, {
       clientId: client.id,
       lineas: cart.items.map((line) => ({
         productId: line.productId,
@@ -436,12 +453,24 @@ export class OrdersService {
       allowedLocationIds,
       actor: { clientId: client.id },
       paymentMethodCode: dto.paymentMethod ?? null,
+      idempotencyKey: dto.idempotencyKey ?? null,
       // El carrito se vacía DENTRO de la transacción, como hasta ahora: si la
       // reserva falla, el cliente conserva su carrito.
       alFinalizar: async (manager) => {
         await manager.getRepository(CartItem).delete({ clientId: client.id });
       },
     });
+
+    /**
+     * Si la carrera se perdió, el pedido ya existe y **lo demás ya pasó**: la
+     * primera petición vació el carrito, abrió el cobro y mandó el correo. Se
+     * sale aquí para no repetir nada de eso (MxH-0176).
+     */
+    if (creado.yaExistia) {
+      return this.findOneForClient(client.id, creado.orderId);
+    }
+
+    const orderId = creado.orderId;
 
     // Deliberately NOT awaited. Creating the attempt is a live call to the
     // gateway — seconds, sometimes many — and the order is already committed
@@ -756,6 +785,73 @@ export class OrdersService {
    *
    * No toca carritos y no manda correos: eso lo decide cada llamador.
    */
+  /**
+   * El pedido que ya creó este mismo intento, si lo hay (MxH-0176).
+   *
+   * Se busca por el **par cliente + clave**, nunca por la clave sola: la
+   * genera quien compra, así que dos clientes podrían mandar la misma y
+   * buscarla suelta acabaría devolviéndole a uno el pedido del otro.
+   */
+  private async pedidoDeEsteIntento(
+    clientId: string,
+    idempotencyKey: string | undefined,
+  ): Promise<OrderResponseDto | null> {
+    if (!idempotencyKey) return null;
+
+    const existente = await this.orderRepository.findOne({
+      where: { clientId, idempotencyKey },
+      select: { id: true },
+    });
+
+    return existente ? this.findOneForClient(clientId, existente.id) : null;
+  }
+
+  /**
+   * `23505` es el código de Postgres para «índice único violado», y aquí solo
+   * puede venir del índice del intento.
+   */
+  private esChoqueDeIntento(error: unknown): boolean {
+    const causa = error as { code?: string; constraint?: string } | null;
+    return (
+      causa?.code === '23505' &&
+      causa?.constraint === 'ux_orders_client_idempotency'
+    );
+  }
+
+  /**
+   * Crea el pedido de la tienda resolviendo la carrera.
+   *
+   * Dos peticiones del mismo checkout pueden llegar **a la vez** —es
+   * exactamente lo que provoca el límite de 8 segundos: el cliente no espera a
+   * que termine la primera y reintenta—, así que la comprobación del principio
+   * no basta: cuando la segunda mira, la primera aún no ha escrito. Quien
+   * pierde choca contra el índice único, y entonces se devuelve el pedido del
+   * ganador en vez de un error.
+   */
+  private async crearPedidoDeLaTienda(
+    client: Client,
+    dto: CheckoutDto,
+    params: CrearPedidoParams,
+  ): Promise<{ orderId: string; yaExistia: boolean }> {
+    try {
+      return { orderId: await this.crearPedido(params), yaExistia: false };
+    } catch (error) {
+      if (!this.esChoqueDeIntento(error)) throw error;
+
+      const ganador = await this.orderRepository.findOne({
+        where: { clientId: client.id, idempotencyKey: dto.idempotencyKey },
+        select: { id: true },
+      });
+      // Sin ganador no hay explicación posible: el índice dijo que existe.
+      if (!ganador) throw error;
+
+      this.logger.warn(
+        `Checkout repetido del cliente ${client.id} con la misma clave: se devuelve el pedido ${ganador.id} en vez de crear otro`,
+      );
+      return { orderId: ganador.id, yaExistia: true };
+    }
+  }
+
   private async crearPedido(params: CrearPedidoParams): Promise<string> {
     return this.dataSource.transaction(async (manager) => {
       // En céntimos y dividiendo al final: la misma cuenta que hace cada
@@ -810,6 +906,7 @@ export class OrdersService {
           // puede llevar meses ahí con otro destinatario.
           contactSnapshot: params.contactSnapshot,
           customerNotes: params.customerNotes,
+          idempotencyKey: params.idempotencyKey ?? null,
         }),
       );
       order.orderNumber = `ORD-${new Date().getFullYear()}${String(order.seq).padStart(4, '0')}`;

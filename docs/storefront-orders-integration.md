@@ -30,7 +30,8 @@ POST /api/storefront/orders
 {
   "deliveryMunicipalityId": "…uuid…",        // optional; defaults to the client's default municipality
   "deliveryAddress": { "street": "…", "…": "…" },  // optional free-form JSON
-  "customerNotes": "ring the bell"           // optional
+  "customerNotes": "ring the bell",          // optional
+  "idempotencyKey": "a7f54e2e-7cd6-…"        // optional, but send it — see below
 }
 ```
 
@@ -45,6 +46,33 @@ POST /api/storefront/orders
     current `available`. Refresh the cart (GET `/api/cart`), fix the flagged
     lines, retry.
 - On success (`201`) the cart is cleared and the order returned.
+
+#### `idempotencyKey` — send it, or a retry buys twice
+
+The storefront gives up on any API call after **8 seconds**, and that cut is
+**client-side only**: it abandons the wait, not the request. The API keeps
+working, so an order created on second 9 exists while the shop is telling the
+customer it failed. If they retry — which is exactly what the message asks them
+to do — they get **two orders**.
+
+Send the same `idempotencyKey` on every attempt of the same purchase and the
+API returns the **same order** instead of creating another one. Generate it when
+the checkout opens (a UUID is fine), keep it for as long as that cart is being
+paid for, and throw it away once the order is placed.
+
+- 16 to 64 characters, letters, digits, `-` and `_`.
+- Scoped **per customer**: the API looks the order up by `(client, key)`, never
+  by the key alone, so two customers picking the same string can never see each
+  other's orders.
+- Works for the racing case too. Two requests of the same checkout can land at
+  the same time — that is precisely what the 8-second limit produces, because
+  the customer doesn't wait for the first one. The loser is answered with the
+  winner's order, and nothing is charged, mailed or cleared twice.
+- **Optional**: an older client that doesn't send it keeps working exactly as
+  before, with no protection.
+
+A different purchase needs a different key. Reusing one would return the old
+order and silently drop the new cart.
 
 ### Order shape
 

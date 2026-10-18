@@ -332,6 +332,155 @@ describe('OrdersService', () => {
       orderRepo.findOne.mockResolvedValue(makeOrder({ items: [] }));
     });
 
+    /**
+     * MxH-0176. La tienda abandona la llamada a los 8 segundos y ese corte no
+     * detiene a la API: el pedido puede nacer igual. Lo que estas pruebas
+     * vigilan es que el reintento **devuelva el mismo pedido** en vez de
+     * cobrar dos veces.
+     */
+    describe('la clave del intento', () => {
+      const CLAVE = 'intento-0123456789abcdef';
+
+      /** `findOne` responde distinto según se pregunte por la clave o no. */
+      const conIntentoPrevio = (previo: { id: string } | null) => {
+        orderRepo.findOne.mockImplementation(
+          (opciones: { where?: { idempotencyKey?: string } }) =>
+            opciones?.where?.idempotencyKey !== undefined
+              ? Promise.resolve(previo)
+              : Promise.resolve(makeOrder({ items: [] })),
+        );
+      };
+
+      it('guarda la clave en el pedido', async () => {
+        conIntentoPrevio(null);
+
+        await service.checkout(makeClient(), { idempotencyKey: CLAVE });
+
+        expect(orderRepo.save).toHaveBeenCalledWith(
+          expect.objectContaining({ idempotencyKey: CLAVE }),
+        );
+      });
+
+      it('sin clave, el pedido nace sin ella y todo sigue igual', async () => {
+        await service.checkout(makeClient(), {});
+
+        expect(orderRepo.save).toHaveBeenCalledWith(
+          expect.objectContaining({ idempotencyKey: null }),
+        );
+      });
+
+      it('un reintento con la misma clave NO crea un segundo pedido', async () => {
+        conIntentoPrevio({ id: 'order-ya-creado' });
+
+        const resultado = await service.checkout(makeClient(), {
+          idempotencyKey: CLAVE,
+        });
+
+        expect(resultado).toBeDefined();
+        // Lo que de verdad importa: no se escribe nada nuevo.
+        expect(orderRepo.save).not.toHaveBeenCalled();
+        expect(inventoryService.reserve).not.toHaveBeenCalled();
+      });
+
+      it('el reintento no vuelve a cobrar ni a avisar por correo', async () => {
+        conIntentoPrevio({ id: 'order-ya-creado' });
+
+        await service.checkout(makeClient(), { idempotencyKey: CLAVE });
+
+        expect(paymentsService.createChargeForOrder).not.toHaveBeenCalled();
+        expect(mailer.orderReceived).not.toHaveBeenCalled();
+      });
+
+      it('el reintento no vacía otra vez el carrito', async () => {
+        conIntentoPrevio({ id: 'order-ya-creado' });
+        cartItemRepo.delete.mockClear();
+
+        await service.checkout(makeClient(), { idempotencyKey: CLAVE });
+
+        expect(cartItemRepo.delete).not.toHaveBeenCalled();
+      });
+
+      it('busca por cliente Y clave, nunca por la clave sola', async () => {
+        // La clave la elige quien compra: buscarla suelta le enseñaría a un
+        // cliente el pedido de otro que mandara la misma.
+        conIntentoPrevio(null);
+
+        await service.checkout(makeClient(), { idempotencyKey: CLAVE });
+
+        expect(orderRepo.findOne).toHaveBeenCalledWith(
+          expect.objectContaining({
+            where: { clientId: 'client-1', idempotencyKey: CLAVE },
+          }),
+        );
+      });
+
+      describe('cuando las dos peticiones llegan a la vez', () => {
+        const choque = Object.assign(new Error('duplicate key'), {
+          code: '23505',
+          constraint: 'ux_orders_client_idempotency',
+        });
+
+        it('quien pierde la carrera recibe el pedido del ganador', async () => {
+          let yaEscrito = false;
+          orderRepo.findOne.mockImplementation(
+            (opciones: { where?: { idempotencyKey?: string } }) => {
+              if (opciones?.where?.idempotencyKey === undefined) {
+                return Promise.resolve(makeOrder({ items: [] }));
+              }
+              // La primera mirada no ve nada —la otra petición todavía no ha
+              // escrito—; después del choque, sí.
+              return Promise.resolve(
+                yaEscrito ? { id: 'order-ganador' } : null,
+              );
+            },
+          );
+          orderRepo.save.mockImplementationOnce(() => {
+            yaEscrito = true;
+            return Promise.reject(choque);
+          });
+
+          const resultado = await service.checkout(makeClient(), {
+            idempotencyKey: CLAVE,
+          });
+
+          expect(resultado).toBeDefined();
+          expect(paymentsService.createChargeForOrder).not.toHaveBeenCalled();
+          expect(mailer.orderReceived).not.toHaveBeenCalled();
+        });
+
+        it('un choque de OTRO índice se propaga, no se traga', async () => {
+          /**
+           * El escenario tiene que tener **un ganador que devolver**: si no lo
+           * hubiera, el error se propagaría de todas formas y la prueba pasaría
+           * sin comprobar nada. Comprobado por mutación: aflojar el filtro a
+           * «cualquier 23505» tumba esta prueba solo gracias a esto.
+           */
+          let yaEscrito = false;
+          orderRepo.findOne.mockImplementation(
+            (opciones: { where?: { idempotencyKey?: string } }) => {
+              if (opciones?.where?.idempotencyKey === undefined) {
+                return Promise.resolve(makeOrder({ items: [] }));
+              }
+              return Promise.resolve(yaEscrito ? { id: 'order-otro' } : null);
+            },
+          );
+          orderRepo.save.mockImplementationOnce(() => {
+            yaEscrito = true;
+            return Promise.reject(
+              Object.assign(new Error('duplicate key'), {
+                code: '23505',
+                constraint: 'ux_orders_tracking_id',
+              }),
+            );
+          });
+
+          await expect(
+            service.checkout(makeClient(), { idempotencyKey: CLAVE }),
+          ).rejects.toThrow('duplicate key');
+        });
+      });
+    });
+
     it('creates a pending order, reserves stock and clears the cart', async () => {
       const result = await service.checkout(makeClient(), {});
 
