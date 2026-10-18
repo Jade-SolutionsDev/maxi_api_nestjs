@@ -98,6 +98,9 @@ export class DeliveryOptionResponseDto {
   zones: DeliveryZoneItemDto[];
   createdAt: Date;
   updatedAt: Date;
+  /** Quién creó y quién tocó por última vez la tarifa (MxH-0041). */
+  createdBy: string | null;
+  updatedBy: string | null;
 
   static fromEntity(
     option: DeliveryOption,
@@ -105,6 +108,8 @@ export class DeliveryOptionResponseDto {
   ): DeliveryOptionResponseDto {
     const dto = new DeliveryOptionResponseDto();
     dto.id = option.id;
+    dto.createdBy = option.createdBy ?? null;
+    dto.updatedBy = option.updatedBy ?? null;
     dto.label = option.label;
     dto.description = option.description;
     dto.fee = Number(option.fee);

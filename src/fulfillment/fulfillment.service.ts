@@ -211,9 +211,12 @@ export class FulfillmentService {
 
   async createOption(
     dto: CreateDeliveryOptionDto,
+    userId?: string,
   ): Promise<DeliveryOptionResponseDto> {
     const option = await this.optionRepository.save(
       this.optionRepository.create({
+        createdBy: userId ?? null,
+        updatedBy: userId ?? null,
         label: dto.label,
         description: dto.description ?? null,
         fee: (dto.fee ?? 0).toFixed(2),
@@ -230,6 +233,7 @@ export class FulfillmentService {
   async updateOption(
     id: string,
     dto: UpdateDeliveryOptionDto,
+    userId?: string,
   ): Promise<DeliveryOptionResponseDto> {
     const option = await this.optionRepository.findOne({ where: { id } });
     if (!option) {
@@ -246,6 +250,7 @@ export class FulfillmentService {
     }
     if (dto.sortOrder !== undefined) option.sortOrder = dto.sortOrder;
     if (dto.enabled !== undefined) option.enabled = dto.enabled;
+    option.updatedBy = userId ?? option.updatedBy;
     await this.optionRepository.save(option);
 
     if (dto.zones !== undefined) await this.replaceZones(id, dto.zones);

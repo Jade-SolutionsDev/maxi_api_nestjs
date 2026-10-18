@@ -8,8 +8,10 @@ import {
   ParseUUIDPipe,
   Patch,
   Post,
+  Req,
 } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
+import type { AuthenticatedUserRequest } from '../auth/types/authenticated-request';
 import { RequirePermission } from '../permissions/decorators/require-permission.decorator';
 import {
   CreateDeliveryOptionDto,
@@ -52,8 +54,9 @@ export class DeliveryOptionsController {
   })
   create(
     @Body() dto: CreateDeliveryOptionDto,
+    @Req() request: AuthenticatedUserRequest,
   ): Promise<DeliveryOptionResponseDto> {
-    return this.fulfillmentService.createOption(dto);
+    return this.fulfillmentService.createOption(dto, request.user.id);
   }
 
   @Patch(':id')
@@ -62,8 +65,9 @@ export class DeliveryOptionsController {
   update(
     @Param('id', ParseUUIDPipe) id: string,
     @Body() dto: UpdateDeliveryOptionDto,
+    @Req() request: AuthenticatedUserRequest,
   ): Promise<DeliveryOptionResponseDto> {
-    return this.fulfillmentService.updateOption(id, dto);
+    return this.fulfillmentService.updateOption(id, dto, request.user.id);
   }
 
   @Delete(':id')

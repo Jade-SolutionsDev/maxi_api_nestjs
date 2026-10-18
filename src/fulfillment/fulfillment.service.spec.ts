@@ -595,4 +595,42 @@ describe('FulfillmentService', () => {
       );
     });
   });
+
+  describe('quién tocó la tarifa', () => {
+    it('crear una opción deja al autor en las dos columnas', async () => {
+      zoneRepo.find.mockResolvedValue([]);
+      optionRepo.findOne.mockResolvedValue(option());
+
+      await service.createOption(
+        { label: 'Mensajería', fee: 5, zones: [] },
+        'user-1',
+      );
+
+      expect(optionRepo.create).toHaveBeenCalledWith(
+        expect.objectContaining({ createdBy: 'user-1', updatedBy: 'user-1' }),
+      );
+    });
+
+    it('editar la tarifa anota quién la tocó, sin perder a quien la creó', async () => {
+      const existente = option({ createdBy: 'user-1', updatedBy: 'user-1' });
+      optionRepo.findOne.mockResolvedValue(existente);
+      zoneRepo.find.mockResolvedValue([]);
+
+      await service.updateOption('opt-1', { fee: 9 }, 'user-2');
+
+      expect(existente.updatedBy).toBe('user-2');
+      expect(existente.createdBy).toBe('user-1');
+      expect(existente.fee).toBe('9.00');
+    });
+
+    it('sin usuario no se borra el autor que ya había', async () => {
+      const existente = option({ createdBy: 'user-1', updatedBy: 'user-1' });
+      optionRepo.findOne.mockResolvedValue(existente);
+      zoneRepo.find.mockResolvedValue([]);
+
+      await service.updateOption('opt-1', { fee: 9 });
+
+      expect(existente.updatedBy).toBe('user-1');
+    });
+  });
 });
