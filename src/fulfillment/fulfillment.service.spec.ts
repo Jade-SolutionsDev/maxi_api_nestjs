@@ -616,7 +616,11 @@ describe('FulfillmentService', () => {
       optionRepo.findOne.mockResolvedValue(existente);
       zoneRepo.find.mockResolvedValue([]);
 
-      await service.updateOption('opt-1', { fee: 9 }, 'user-2');
+      await service.updateOption(
+        'opt-1',
+        { label: 'Mensajería', fee: 9 },
+        'user-2',
+      );
 
       expect(existente.updatedBy).toBe('user-2');
       expect(existente.createdBy).toBe('user-1');
@@ -628,7 +632,7 @@ describe('FulfillmentService', () => {
       optionRepo.findOne.mockResolvedValue(existente);
       zoneRepo.find.mockResolvedValue([]);
 
-      await service.updateOption('opt-1', { fee: 9 });
+      await service.updateOption('opt-1', { label: 'Mensajería', fee: 9 });
 
       expect(existente.updatedBy).toBe('user-1');
     });
