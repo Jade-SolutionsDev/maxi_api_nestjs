@@ -14,6 +14,9 @@ export interface ErrorDetail {
   // Machine-readable stock count on cart 409s, so the frontend can clamp its
   // quantity stepper without parsing the message.
   available?: number;
+  // Id del usuario borrado en el 409 de invitar a su correo, para que el
+  // panel ofrezca restaurarlo (MxH-0122).
+  userId?: string;
 }
 
 export interface ErrorEnvelope {

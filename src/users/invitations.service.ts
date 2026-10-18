@@ -10,7 +10,7 @@ import {
 import { ConfigService } from '@nestjs/config';
 import { InjectRepository } from '@nestjs/typeorm';
 import { createClerkClient } from '@clerk/backend';
-import { Repository } from 'typeorm';
+import { IsNull, Not, Repository } from 'typeorm';
 import {
   isSystemAdmin,
   PermissionsService,
@@ -18,6 +18,7 @@ import {
 import { InviteUserDto } from './dto/invite-user.dto';
 import { Invitation, InvitationStatus } from './entities/invitation.entity';
 import { Role, User } from './entities/user.entity';
+import { UsuarioBorradoException } from './usuario-borrado.exception';
 
 /**
  * Forma de un error del SDK de Clerk. No se importa su tipo a propósito: el
@@ -83,6 +84,19 @@ export class InvitationsService {
       throw new ConflictException(
         `Ya hay un usuario activo con el correo ${normalizedEmail}. Si lo borraste, revisa la lista de usuarios: puede seguir ahí desactivado.`,
       );
+    }
+
+    // Un usuario borrado conserva su cuenta de Clerk, y Clerk rechazaría la
+    // invitación por correo repetido. Mejor decirlo aquí, con su id, para que
+    // el panel ofrezca restaurarlo (MxH-0122). Si hubiera varios borrados con
+    // el mismo correo, el más reciente es el que alguien querrá recuperar.
+    const borrado = await this.userRepository.findOne({
+      where: { email: normalizedEmail, deletedAt: Not(IsNull()) },
+      withDeleted: true,
+      order: { deletedAt: 'DESC' },
+    });
+    if (borrado) {
+      throw new UsuarioBorradoException(normalizedEmail, borrado.id);
     }
 
     const existingPending = await this.invitationRepository.findOne({

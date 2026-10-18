@@ -14,6 +14,7 @@ import { InviteUserDto } from './dto/invite-user.dto';
 import { Invitation, InvitationStatus } from './entities/invitation.entity';
 import { Role, User } from './entities/user.entity';
 import { InvitationsService } from './invitations.service';
+import { UsuarioBorradoException } from './usuario-borrado.exception';
 
 jest.mock('@clerk/backend', () => ({
   createClerkClient: jest.fn(),
@@ -235,6 +236,45 @@ describe('InvitationsService', () => {
       await expect(
         service.createAndSendInvitation(dto, inviter),
       ).rejects.toBeInstanceOf(ConflictException);
+    });
+
+    it('rechaza invitar a un correo de usuario borrado sin llamar a Clerk, y dice a quién restaurar', async () => {
+      userRepository.findOne
+        .mockResolvedValueOnce(null) // no hay usuario activo
+        .mockResolvedValueOnce({
+          ...inviter,
+          id: 'usuario-borrado',
+          email: 'borrado@example.com',
+          isActive: false,
+          deletedAt: new Date('2026-09-26T00:00:00Z'),
+        });
+
+      const dto: InviteUserDto = {
+        email: 'Borrado@Example.com',
+        role: Role.ADMIN,
+      };
+
+      const error: unknown = await service
+        .createAndSendInvitation(dto, inviter)
+        .catch((e: unknown) => e);
+
+      expect(error).toBeInstanceOf(UsuarioBorradoException);
+      expect(error).toBeInstanceOf(ConflictException);
+      // El filtro global usa `name` como `code` del sobre: es lo que el panel lee.
+      expect((error as Error).name).toBe('UsuarioBorradoException');
+      expect((error as ConflictException).getResponse()).toMatchObject({
+        details: [{ userId: 'usuario-borrado' }],
+      });
+      expect(userRepository.findOne).toHaveBeenNthCalledWith(
+        2,
+        expect.objectContaining({
+          withDeleted: true,
+          where: expect.objectContaining({ email: 'borrado@example.com' }),
+        }),
+      );
+      // Antes llegaba hasta Clerk y fallaba allí.
+      expect(createClerkClientMock).not.toHaveBeenCalled();
+      expect(invitationRepository.save).not.toHaveBeenCalled();
     });
 
     it('should throw ConflictException when a pending invitation already exists', async () => {
