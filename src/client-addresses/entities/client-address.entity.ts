@@ -8,6 +8,34 @@ import {
   UpdateDateColumn,
 } from 'typeorm';
 
+/**
+ * De dónde salió el punto en el mapa. No merecen la misma confianza: la
+ * posición del dispositivo la da el GPS, y la marcada a mano puede estar a dos
+ * cuadras. Quien va a entregar necesita saber cuál de las dos está mirando.
+ *
+ * Se guarda como texto y no como tipo enum de Postgres a propósito: añadir un
+ * valor —un punto importado, o corregido por el repartidor— sería un
+ * `ALTER TYPE` en vez de nada.
+ */
+export enum LocationSource {
+  /** La dio el navegador del cliente con permiso de geolocalización. */
+  DEVICE = 'device',
+  /** La marcó alguien arrastrando el marcador en el mapa. */
+  MANUAL = 'manual',
+}
+
+/**
+ * TypeORM devuelve `decimal` como **cadena**, que es lo correcto para dinero
+ * —los importes del pedido se tratan así— y un estorbo para una coordenada:
+ * quien la consume es un mapa, y Leaflet espera números. Aquí no hay centavos
+ * que cuadrar, así que se convierte al leer.
+ */
+const coordenada = {
+  to: (valor: number | null | undefined): number | null | undefined => valor,
+  from: (valor: string | null): number | null =>
+    valor === null ? null : Number(valor),
+};
+
 // A saved delivery address belonging to a storefront customer. Sibling table,
 // bare-uuid FK, no TypeORM relation — same house convention as coverage and
 // stock_location_pickup_addresses.
@@ -70,6 +98,41 @@ export class ClientAddress {
     nullable: true,
   })
   contactPhone: string | null;
+
+  /**
+   * El punto en el mapa, **siempre opcional** (MxH-0071): la dirección escrita
+   * es la que entrega, y el punto la complementa. Nadie pierde una compra por
+   * negarle el permiso de ubicación al navegador.
+   *
+   * Las tres columnas van juntas o no van: el servicio no deja guardar media
+   * coordenada ni un punto sin procedencia. Seis decimales son unos 11 cm, de
+   * sobra para encontrar un portal.
+   */
+  @Column({
+    type: 'decimal',
+    precision: 9,
+    scale: 6,
+    nullable: true,
+    transformer: coordenada,
+  })
+  latitude: number | null;
+
+  @Column({
+    type: 'decimal',
+    precision: 9,
+    scale: 6,
+    nullable: true,
+    transformer: coordenada,
+  })
+  longitude: number | null;
+
+  @Column({
+    name: 'location_source',
+    type: 'varchar',
+    length: 10,
+    nullable: true,
+  })
+  locationSource: LocationSource | null;
 
   // At most one true per client among the non-deleted rows. Enforced in the
   // service, inside a transaction — not by a partial index, to keep the schema

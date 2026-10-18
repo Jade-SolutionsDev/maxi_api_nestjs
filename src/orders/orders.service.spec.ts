@@ -513,6 +513,9 @@ describe('OrdersService', () => {
         reference: null,
         municipalityId: 'mun-9',
         contactPhone: null,
+        latitude: null,
+        longitude: null,
+        locationSource: null,
       });
 
       await service.checkout(makeClient(), { addressId: 'addr-1' });
@@ -530,6 +533,63 @@ describe('OrdersService', () => {
             municipalityName: 'Báguanos',
             provinceName: 'Holguín',
           }),
+        }),
+      );
+    });
+
+    // MxH-0071. La foto es lo que hace que editar la dirección mañana no
+    // cambie a dónde se entregó un pedido de hoy, y el punto tiene que entrar
+    // en ella igual que la calle.
+    it('copia el punto del mapa a la foto del pedido', async () => {
+      clientAddressesService.findOneForClient.mockResolvedValue({
+        id: 'addr-1',
+        clientId: 'client-1',
+        label: 'Casa',
+        street: 'Ave 51 #11025',
+        betweenStreets: null,
+        reference: null,
+        municipalityId: 'mun-9',
+        contactPhone: null,
+        latitude: 23.102847,
+        longitude: -82.409263,
+        locationSource: 'device',
+      });
+
+      await service.checkout(makeClient(), { addressId: 'addr-1' });
+
+      expect(orderRepo.save).toHaveBeenCalledWith(
+        expect.objectContaining({
+          deliveryAddress: expect.objectContaining({
+            location: {
+              latitude: 23.102847,
+              longitude: -82.409263,
+              source: 'device',
+            },
+          }),
+        }),
+      );
+    });
+
+    it('la foto lleva `location: null` cuando la dirección no tiene punto', async () => {
+      clientAddressesService.findOneForClient.mockResolvedValue({
+        id: 'addr-1',
+        clientId: 'client-1',
+        label: 'Casa',
+        street: 'Ave 51 #11025',
+        betweenStreets: null,
+        reference: null,
+        municipalityId: 'mun-9',
+        contactPhone: null,
+        latitude: null,
+        longitude: null,
+        locationSource: null,
+      });
+
+      await service.checkout(makeClient(), { addressId: 'addr-1' });
+
+      expect(orderRepo.save).toHaveBeenCalledWith(
+        expect.objectContaining({
+          deliveryAddress: expect.objectContaining({ location: null }),
         }),
       );
     });
@@ -2187,7 +2247,17 @@ describe('OrdersService', () => {
         clientId: 'client-1',
         subtotal: '100.00',
         total: '105.00',
-        deliveryAddress: { street: 'Calle secreta 123' },
+        deliveryAddress: {
+          street: 'Calle secreta 123',
+          // MxH-0071: el punto es un dato personal — dice dónde vive alguien
+          // con mucha más precisión que la calle. Va aquí para que la prueba
+          // de abajo pueda comprobar que no sale por el enlace público.
+          location: {
+            latitude: 23.102847,
+            longitude: -82.409263,
+            source: 'device',
+          },
+        },
         ...over,
       });
 
@@ -2254,6 +2324,11 @@ describe('OrdersService', () => {
       expect(serializado).not.toContain('client-1');
       expect(serializado).not.toContain('105.00');
       expect(serializado).not.toContain(TRACK);
+      // El punto en el mapa tampoco (MxH-0071). Quien recibe un enlace de
+      // seguimiento compartido no tiene por qué saber dónde vive el cliente.
+      expect(serializado).not.toContain('23.102847');
+      expect(serializado).not.toContain('-82.409263');
+      expect(serializado).not.toContain('location');
     });
 
     // En staging salió un pedido «Cancelado» cuyo historial solo mostraba

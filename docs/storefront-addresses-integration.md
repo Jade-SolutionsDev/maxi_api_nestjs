@@ -32,6 +32,11 @@ that is not a valid customer session, is `401`.
   "provinceId": "3b7e...",            // derived, not stored
   "provinceName": "La Habana",
   "contactPhone": "55512345",         // null -> call the customer's own phone
+  "location": {                       // null when the address has no map point
+    "latitude": 23.102847,
+    "longitude": -82.409263,
+    "source": "device"                // "device" | "manual"
+  },
   "isDefault": true,
   "createdAt": "2026-08-24T13:30:00.000Z"
 }
@@ -64,7 +69,12 @@ POST /api/storefront/addresses
   "label": "Casa",               // optional
   "betweenStreets": "entre 8 y 10",
   "reference": "Edificio azul",
-  "contactPhone": "55512345"
+  "contactPhone": "55512345",
+  "location": {                  // optional, see below
+    "latitude": 23.102847,
+    "longitude": -82.409263,
+    "source": "device"
+  }
 }
 ```
 
@@ -73,6 +83,42 @@ with addresses but no default has no answer at checkout, so the API refuses to a
 
 A `municipalityId` that is not in the catalog is `404`, not `400` — it is a missing catalog row, and
 it is reported the same way the geography endpoints report one.
+
+### The map point (`location`)
+
+Optional, always. The written address is what the order is delivered against; the point only helps
+whoever drives there. **A customer who denies the browser's location permission must still be able
+to save the address and buy** — never block the form on it.
+
+It travels as **one object, not three fields**, and that shape is the contract:
+
+- **Both coordinates are required inside the object.** Half a pair is `400`, so there is no state
+  where a latitude exists without its longitude.
+- **`source` is required too**, so a point always says where it came from: `"device"` when the
+  browser's geolocation gave it, `"manual"` when somebody dragged the marker. They do not deserve
+  equal trust — the GPS one is accurate, the dragged one may be a block off — and the back-office
+  shows which is which.
+- **Send `location: null` to remove the point.** Omitting the field leaves whatever is there
+  untouched. This is the one place where `null` and "absent" mean different things, and it is what
+  makes "remove location" possible at all.
+
+Ranges are `-90..90` for latitude and `-180..180` for longitude, limits included. Anything outside
+is `400` naming the field. Coordinates must be **JSON numbers**, not strings. More than six decimal
+places is accepted and rounded when stored — six is about 11 cm, past the precision of a thumb on a
+phone.
+
+```jsonc
+PATCH /api/storefront/addresses/{id}
+{ "location": { "latitude": 23.102847, "longitude": -82.409263, "source": "manual" } }
+
+// and to clear it:
+{ "location": null }
+```
+
+**The point is copied into the order** at checkout, inside `deliveryAddress.location`, with the same
+shape. **It is never exposed on the public tracking link** — that payload is built field by field and
+excludes the address entirely, point included. Treat it as personal data: it says where somebody
+lives far more precisely than the street does.
 
 ### Editing
 
@@ -99,7 +145,7 @@ it may say something else now.
 
 | Status | When |
 |---|---|
-| `400` | Body failed validation (missing `street`, malformed `municipalityId`, field too long). |
+| `400` | Body failed validation (missing `street`, malformed `municipalityId`, field too long, half a `location`, a coordinate out of range). |
 | `401` | No session, or not a valid customer session. |
 | `404` | No such address **for this customer**, or the municipality is not in the catalog. |
 | `409` | The customer already has 20 saved addresses. |
