@@ -19,6 +19,17 @@ export class DeliveryOption {
   @PrimaryGeneratedColumn('uuid')
   id: string;
 
+  /**
+   * Quién la creó y quién la tocó por última vez. La tarifa es dinero que paga
+   * el cliente, así que un cambio sin autor no se puede auditar (MxH-0041).
+   * Nulos en las opciones anteriores a esa columna y en las sembradas.
+   */
+  @Column({ name: 'created_by', type: 'uuid', nullable: true })
+  createdBy: string | null;
+
+  @Column({ name: 'updated_by', type: 'uuid', nullable: true })
+  updatedBy: string | null;
+
   @Column({ type: 'varchar', length: 100 })
   label: string;
 
