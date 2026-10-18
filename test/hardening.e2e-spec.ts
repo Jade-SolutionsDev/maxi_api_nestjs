@@ -58,7 +58,9 @@ describe('HTTP hardening (e2e)', () => {
     ['/api/public/categories'],
     ['/api/public/departments'],
   ])('answers 400, not 500, to a malformed id on %s', async (ruta) => {
-    await request(app.getHttpServer()).get(`${ruta}/no-soy-un-uuid`).expect(400);
+    await request(app.getHttpServer())
+      .get(`${ruta}/no-soy-un-uuid`)
+      .expect(400);
   });
 
   // Control del de arriba: un UUID bien formado que no existe sigue dando 404.

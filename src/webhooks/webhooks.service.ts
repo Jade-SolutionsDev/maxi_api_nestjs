@@ -161,14 +161,37 @@ export class WebhooksService {
     return h;
   }
 
+  /**
+   * El nombre de un cliente invitado desde el back-office no viaja en
+   * `first_name`: la tienda solo le pide la contraseña, así que ese campo
+   * llega vacío. Quien invitó escribió el nombre, y la API lo guardó en la
+   * `publicMetadata` de la invitación, que Clerk copia al usuario al
+   * aceptarla. De ahí se recupera, y sin pisar nunca lo que el propio cliente
+   * haya puesto después (MxH-0141).
+   */
+  private extractNames(data: Record<string, unknown>): {
+    firstName?: string;
+    lastName?: string;
+  } {
+    const metadata = (data.public_metadata ?? {}) as Record<string, unknown>;
+    const texto = (valor: unknown): string | undefined => {
+      const limpio = typeof valor === 'string' ? valor.trim() : '';
+      return limpio ? limpio : undefined;
+    };
+
+    return {
+      firstName: texto(data.first_name) ?? texto(metadata.firstName),
+      lastName: texto(data.last_name) ?? texto(metadata.lastName),
+    };
+  }
+
   private async upsertClient(
     data: Record<string, unknown>,
     isNewAccount = false,
   ): Promise<void> {
     const clerkId = data.id as string;
     const email = this.extractPrimaryEmail(data);
-    const firstName = (data.first_name as string | null) ?? undefined;
-    const lastName = (data.last_name as string | null) ?? undefined;
+    const { firstName, lastName } = this.extractNames(data);
 
     const client = await this.clientsService.createOrUpdateFromClerk(clerkId, {
       email: email ?? undefined,
