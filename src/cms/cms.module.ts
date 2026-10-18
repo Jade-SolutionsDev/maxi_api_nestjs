@@ -11,6 +11,9 @@ import {
   CmsPagesController,
 } from './cms-pages.controller';
 import { CmsPagesService } from './cms-pages.service';
+import { CmsPopupsController } from './cms-popups.controller';
+import { CmsPopupsService } from './cms-popups.service';
+import { CmsPopup } from './entities/cms-popup.entity';
 import { CmsService } from './cms.service';
 import { CmsServicesController } from './cms-services.controller';
 import { CmsSettingsController } from './cms-settings.controller';
@@ -45,6 +48,7 @@ import { CmsHomeChangesService } from './cms-home-changes.service';
       CmsSiteSettings,
       CmsFaqCategory,
       CmsFaqQuestion,
+      CmsPopup,
       Category,
       Product,
     ]),
@@ -62,6 +66,7 @@ import { CmsHomeChangesService } from './cms-home-changes.service';
     CmsFaqController,
     CmsHomeController,
     PublicCmsController,
+    CmsPopupsController,
   ],
   providers: [
     CmsService,
@@ -69,6 +74,7 @@ import { CmsHomeChangesService } from './cms-home-changes.service';
     CmsFaqService,
     CmsHomeService,
     CmsHomeChangesService,
+    CmsPopupsService,
   ],
   exports: [CmsService, CmsFaqService],
 })
