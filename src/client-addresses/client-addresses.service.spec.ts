@@ -7,7 +7,10 @@ import {
   ClientAddressesService,
   MAX_ADDRESSES_PER_CLIENT,
 } from './client-addresses.service';
-import { ClientAddress } from './entities/client-address.entity';
+import {
+  ClientAddress,
+  LocationSource,
+} from './entities/client-address.entity';
 
 function makeAddress(overrides: Partial<ClientAddress> = {}): ClientAddress {
   return {
@@ -21,6 +24,9 @@ function makeAddress(overrides: Partial<ClientAddress> = {}): ClientAddress {
     recipientName: 'Ana Rodríguez',
     idCard: '90051512345',
     contactPhone: '+53 5251 9414',
+    latitude: null,
+    longitude: null,
+    locationSource: null,
     isDefault: true,
     createdAt: new Date('2026-01-01'),
     updatedAt: new Date('2026-01-01'),
@@ -216,6 +222,97 @@ describe('ClientAddressesService', () => {
     });
   });
 
+  // MxH-0071. Las tres columnas del punto van juntas o no van: lo que estas
+  // pruebas vigilan no es que se guarde una coordenada, es que no pueda
+  // quedarse media.
+  describe('el punto en el mapa', () => {
+    it('guarda las tres partes cuando la dirección nace con punto', async () => {
+      repository.count.mockResolvedValue(0);
+
+      const created = await service.create('client-1', {
+        street: 'Ave 51 #11025',
+        municipalityId: 'mun-1',
+        location: {
+          latitude: 23.102847,
+          longitude: -82.409263,
+          source: LocationSource.DEVICE,
+        },
+      });
+
+      expect(created.latitude).toBe(23.102847);
+      expect(created.longitude).toBe(-82.409263);
+      expect(created.locationSource).toBe(LocationSource.DEVICE);
+    });
+
+    it('deja las tres en null cuando nace sin punto', async () => {
+      repository.count.mockResolvedValue(0);
+
+      const created = await service.create('client-1', {
+        street: 'Ave 51 #11025',
+        municipalityId: 'mun-1',
+      });
+
+      expect(created.latitude).toBeNull();
+      expect(created.longitude).toBeNull();
+      expect(created.locationSource).toBeNull();
+    });
+
+    it('añade el punto a una dirección que no lo tenía', async () => {
+      repository.findOne.mockResolvedValue(makeAddress());
+
+      const updated = await service.update('client-1', 'addr-1', {
+        location: {
+          latitude: 20.021,
+          longitude: -75.829,
+          source: LocationSource.MANUAL,
+        },
+      });
+
+      expect(updated.latitude).toBe(20.021);
+      expect(updated.longitude).toBe(-75.829);
+      expect(updated.locationSource).toBe(LocationSource.MANUAL);
+    });
+
+    it('borra el punto entero cuando llega `location: null`', async () => {
+      repository.findOne.mockResolvedValue(
+        makeAddress({
+          latitude: 23.102847,
+          longitude: -82.409263,
+          locationSource: LocationSource.DEVICE,
+        }),
+      );
+
+      const updated = await service.update('client-1', 'addr-1', {
+        location: null,
+      });
+
+      expect(updated.latitude).toBeNull();
+      expect(updated.longitude).toBeNull();
+      expect(updated.locationSource).toBeNull();
+    });
+
+    it('no toca el punto cuando la edición no lo menciona', async () => {
+      repository.findOne.mockResolvedValue(
+        makeAddress({
+          latitude: 23.102847,
+          longitude: -82.409263,
+          locationSource: LocationSource.DEVICE,
+        }),
+      );
+
+      // Este es el caso que un `?? address.latitude` rompería sin avisar:
+      // editar la calle no puede borrar el punto, y mandar `null` sí.
+      const updated = await service.update('client-1', 'addr-1', {
+        street: 'Otra calle #1',
+      });
+
+      expect(updated.street).toBe('Otra calle #1');
+      expect(updated.latitude).toBe(23.102847);
+      expect(updated.longitude).toBe(-82.409263);
+      expect(updated.locationSource).toBe(LocationSource.DEVICE);
+    });
+  });
+
   describe('remove', () => {
     it('soft-deletes and promotes the newest survivor when the default goes', async () => {
       repository.findOne
@@ -305,6 +402,38 @@ describe('ClientAddressesService', () => {
 
       expect(geography.listMunicipalities).toHaveBeenCalledTimes(1);
       expect(geography.listProvinces).toHaveBeenCalledTimes(1);
+    });
+
+    it('devuelve el punto como un objeto, no como tres campos', async () => {
+      const [dto] = await service.toResponse([
+        makeAddress({
+          latitude: 23.102847,
+          longitude: -82.409263,
+          locationSource: LocationSource.DEVICE,
+        }),
+      ]);
+
+      expect(dto.location).toEqual({
+        latitude: 23.102847,
+        longitude: -82.409263,
+        source: LocationSource.DEVICE,
+      });
+    });
+
+    it('devuelve `location: null` cuando la dirección no tiene punto', async () => {
+      const [dto] = await service.toResponse([makeAddress()]);
+
+      expect(dto.location).toBeNull();
+    });
+
+    it('no enseña medio punto si una fila quedó a medias', async () => {
+      // No debería pasar —el servicio escribe las tres juntas—, pero una fila
+      // tocada a mano no puede hacer que el mapa se centre en Null Island.
+      const [dto] = await service.toResponse([
+        makeAddress({ latitude: 23.102847, longitude: null }),
+      ]);
+
+      expect(dto.location).toBeNull();
     });
 
     it('keeps an address readable when its municipality left the catalog', async () => {

@@ -158,6 +158,24 @@ const snapshotAddress = (
   municipalityName: place?.municipality ?? null,
   provinceName: place?.province ?? null,
   contactPhone: address.contactPhone ?? null,
+  /**
+   * El punto en el mapa entra en la foto como todo lo demás (MxH-0071): si el
+   * cliente mueve el marcador de su dirección el mes que viene, el pedido que
+   * ya salió sigue apuntando a donde se entregó.
+   *
+   * Las tres partes o ninguna. `null` cuando la dirección no tiene punto, para
+   * que quien lo lea pregunte una sola vez en vez de tres.
+   */
+  location:
+    address.latitude !== null &&
+    address.longitude !== null &&
+    address.locationSource !== null
+      ? {
+          latitude: address.latitude,
+          longitude: address.longitude,
+          source: address.locationSource,
+        }
+      : null,
 });
 
 /**

@@ -6,12 +6,37 @@ import {
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { GeographyService } from '../geography/geography.service';
+import { AddressLocationDto } from './dto/address-location.dto';
 import { ClientAddressResponseDto } from './dto/client-address-response.dto';
 import { ClientAddress } from './entities/client-address.entity';
 
 // A customer with more saved addresses than this is not a customer, it is a
 // filling script. The cap is deliberate and cheap to raise.
 export const MAX_ADDRESSES_PER_CLIENT = 20;
+
+/**
+ * Las tres columnas del punto se escriben **siempre juntas**, y por eso solo
+ * se tocan aquí. Media coordenada, o una coordenada sin procedencia, es una
+ * fila que nadie sabe interpretar después.
+ *
+ * El DTO ya garantiza que un `location` presente viene completo; esta función
+ * se ocupa del otro lado, el borrado: `null` deja las tres en `null`.
+ */
+const aplicarUbicacion = (
+  address: ClientAddress,
+  location: AddressLocationDto | null,
+): void => {
+  if (location === null) {
+    address.latitude = null;
+    address.longitude = null;
+    address.locationSource = null;
+    return;
+  }
+
+  address.latitude = location.latitude;
+  address.longitude = location.longitude;
+  address.locationSource = location.source;
+};
 
 export interface CreateClientAddressInput {
   recipientName?: string;
@@ -22,6 +47,8 @@ export interface CreateClientAddressInput {
   reference?: string;
   municipalityId: string;
   contactPhone?: string;
+  /** El punto en el mapa. `null` lo quita; omitirlo lo deja como estaba. */
+  location?: AddressLocationDto | null;
   isDefault?: boolean;
 }
 
@@ -68,20 +95,22 @@ export class ClientAddressesService {
 
     if (isDefault && existing > 0) await this.clearDefault(clientId);
 
-    return this.addressRepository.save(
-      this.addressRepository.create({
-        clientId,
-        label: input.label ?? null,
-        street: input.street,
-        betweenStreets: input.betweenStreets ?? null,
-        reference: input.reference ?? null,
-        municipalityId: input.municipalityId,
-        recipientName: input.recipientName ?? null,
-        idCard: input.idCard ?? null,
-        contactPhone: input.contactPhone ?? null,
-        isDefault,
-      }),
-    );
+    const address = this.addressRepository.create({
+      clientId,
+      label: input.label ?? null,
+      street: input.street,
+      betweenStreets: input.betweenStreets ?? null,
+      reference: input.reference ?? null,
+      municipalityId: input.municipalityId,
+      recipientName: input.recipientName ?? null,
+      idCard: input.idCard ?? null,
+      contactPhone: input.contactPhone ?? null,
+      isDefault,
+    });
+
+    aplicarUbicacion(address, input.location ?? null);
+
+    return this.addressRepository.save(address);
   }
 
   async findOneForClient(clientId: string, id: string): Promise<ClientAddress> {
@@ -131,6 +160,13 @@ export class ClientAddressesService {
     }
     if (input.contactPhone !== undefined) {
       address.contactPhone = input.contactPhone || null;
+    }
+
+    // `undefined` es «no toques el punto» y `null` es «quítalo». Son dos cosas
+    // distintas y aquí es donde se separan: un `?? address.latitude` las
+    // confundiría y el punto no se podría borrar nunca.
+    if (input.location !== undefined) {
+      aplicarUbicacion(address, input.location);
     }
 
     // isDefault is deliberately ignored here: promoting an address is its own
