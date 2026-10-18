@@ -7,6 +7,7 @@ import {
   IsObject,
   IsOptional,
   IsString,
+  Matches,
   Max,
   MaxLength,
   Min,
@@ -49,11 +50,23 @@ export class CreateCmsPopupDto {
   @MaxLength(60)
   buttonLabel?: string | null;
 
-  /** Sin texto de botón no hay botón, así que un enlace suelto no vale. */
+  /**
+   * Sin texto de botón no hay botón, así que un enlace suelto no vale.
+   *
+   * **Solo una ruta de la tienda o una dirección `http(s)`.** Esto acaba en un
+   * `href` que pulsa cualquiera que entre, así que un `javascript:` aquí sería
+   * código ejecutándose en el navegador de cada cliente: quien redacta avisos
+   * no tiene por qué poder hacer eso. Se rechaza también `//otro-sitio.com`,
+   * que el navegador lee como dirección externa aunque parezca una ruta.
+   */
   @ValidateIf((dto: CreateCmsPopupDto) => dto.buttonHref != null)
   @IsString()
   @IsNotEmpty()
   @MaxLength(300)
+  @Matches(/^(\/(?!\/)\S*|https?:\/\/\S+)$/i, {
+    message:
+      'El enlace tiene que ser una ruta de la tienda (/catalog) o una dirección que empiece por http:// o https://',
+  })
   buttonHref?: string | null;
 
   @IsOptional()
