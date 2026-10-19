@@ -14,6 +14,10 @@ import { ClientAddressesService } from '../client-addresses/client-addresses.ser
 import { ClientAddressResponseDto } from '../client-addresses/dto/client-address-response.dto';
 import { RequirePermission } from '../permissions/decorators/require-permission.decorator';
 import { ClientInvitationsService } from './client-invitations.service';
+import {
+  ClientReconciliationService,
+  InformeDeReconciliacion,
+} from './client-reconciliation.service';
 import { ClientsService } from './clients.service';
 import {
   ClientInvitationResponseDto,
@@ -24,6 +28,7 @@ import { UpdateClientDto } from './dto/update-client.dto';
 import { ClientResponseDto } from './dto/client-response.dto';
 import { ClientBeneficiariesResponseDto } from './dto/client-beneficiaries-response.dto';
 import { ListClientsQueryDto } from './dto/list-clients-query.dto';
+import { ReconcileClientsQueryDto } from './dto/reconcile-clients-query.dto';
 import type { PaginatedResponse } from '../common/dto/pagination.dto';
 import {
   ApiBearerAuth,
@@ -40,6 +45,7 @@ export class ClientsController {
     private readonly clientsService: ClientsService,
     private readonly invitations: ClientInvitationsService,
     private readonly addresses: ClientAddressesService,
+    private readonly reconciliation: ClientReconciliationService,
   ) {}
 
   @Get()
@@ -155,6 +161,27 @@ export class ClientsController {
   @ApiOperation({ summary: 'Retirar una invitación pendiente' })
   async revokeInvitation(@Param('id') id: string): Promise<void> {
     await this.invitations.revocar(id);
+  }
+
+  /**
+   * Cuenta cuántos clientes de Clerk se quedaron sin fila, y con `apply=true`
+   * los da de alta.
+   *
+   * El alta normal la hace el webhook `user.created`, y un webhook perdido
+   * deja a esa persona sin poder comprar y sin que nadie se entere. Entrar a
+   * la tienda ya la repara sola, pero solo si vuelve; esto alcanza también a
+   * quien no volvió.
+   */
+  @Post('reconcile')
+  @HttpCode(200)
+  @RequirePermission({ module: 'clients', action: 'create' })
+  @ApiOperation({
+    summary: 'Dar de alta a los clientes de Clerk que no tienen fila',
+  })
+  async reconcile(
+    @Query() query: ReconcileClientsQueryDto,
+  ): Promise<InformeDeReconciliacion> {
+    return this.reconciliation.reconciliar(query.apply !== true);
   }
 
   @Post()
