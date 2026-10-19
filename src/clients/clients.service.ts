@@ -17,6 +17,7 @@ import {
   sinTildes,
 } from '../common/search/accent-insensitive';
 import { repartirPagina } from '../common/pagina-con-prefijo';
+import { GeographyService } from '../geography/geography.service';
 import { ClientInvitationsService } from './client-invitations.service';
 import { CAMPOS_ORDENABLES } from './dto/list-clients-query.dto';
 import { ClientBeneficiariesResponseDto } from './dto/client-beneficiaries-response.dto';
@@ -40,6 +41,7 @@ export interface FiltroDeClientes {
 export class ClientsService {
   constructor(
     private readonly invitaciones: ClientInvitationsService,
+    private readonly geography: GeographyService,
     @InjectRepository(Client)
     private readonly clientsRepository: Repository<Client>,
   ) {}
@@ -289,6 +291,45 @@ export class ClientsService {
       await this.guardDuplicateEmail(email, id);
       client.email = email;
     }
+
+    return this.clientsRepository.save(client);
+  }
+
+  /**
+   * La zona que el cliente elige en la tienda (MxH-0040).
+   *
+   * **Se valida contra el catálogo antes de escribir.** El municipio llega del
+   * navegador, y guardar uno inventado dejaría al cliente con una zona que
+   * ninguna pantalla sabe resolver — ni este panel ni la propia tienda, que la
+   * descarta al no encontrarla en su catálogo.
+   *
+   * Se exige además que esté **de alta**: un municipio dado de baja no lo
+   * ofrece ninguna pantalla, así que llegar aquí con uno solo puede venir de
+   * una petición hecha a mano.
+   *
+   * Marca el alta como completa a propósito: es la definición que ya usa esta
+   * misma clase al crear un cliente desde el panel —tener municipio por
+   * defecto **es** haber terminado el alta—, y si no se marcara aquí, la
+   * columna «Onboarding» seguiría diciendo «Incompleto» para quien ya eligió
+   * su zona.
+   */
+  async saveDefaultMunicipality(
+    clientId: string,
+    municipalityId: string,
+  ): Promise<Client> {
+    const municipality =
+      await this.geography.getMunicipalityOrThrow(municipalityId);
+
+    if (!municipality.isActive) {
+      throw new NotFoundException(
+        `Municipality with id "${municipalityId}" not found`,
+      );
+    }
+
+    const client = await this.findOne(clientId);
+
+    client.defaultMunicipalityId = municipality.id;
+    client.onboardingCompleted = true;
 
     return this.clientsRepository.save(client);
   }

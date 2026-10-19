@@ -2,6 +2,7 @@ import { ConflictException, NotFoundException } from '@nestjs/common';
 import { Test, TestingModule } from '@nestjs/testing';
 import { getRepositoryToken } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
+import { GeographyService } from '../geography/geography.service';
 import { ClientInvitationsService } from './client-invitations.service';
 import { ClientsService } from './clients.service';
 import { CreateClientDto } from './dto/create-client.dto';
@@ -12,6 +13,7 @@ describe('ClientsService', () => {
   let service: ClientsService;
   let repository: jest.Mocked<Repository<Client>>;
   let invitaciones: { listarPendientes: jest.Mock };
+  let geography: { getMunicipalityOrThrow: jest.Mock };
 
   const client: Client = {
     id: '550e8400-e29b-41d4-a716-446655440000',
@@ -48,6 +50,7 @@ describe('ClientsService', () => {
 
   beforeEach(async () => {
     invitaciones = { listarPendientes: jest.fn(() => Promise.resolve([])) };
+    geography = { getMunicipalityOrThrow: jest.fn() };
     qb = {
       andWhere: jest.fn(() => qb),
       orderBy: jest.fn(() => qb),
@@ -64,6 +67,10 @@ describe('ClientsService', () => {
         {
           provide: ClientInvitationsService,
           useValue: invitaciones,
+        },
+        {
+          provide: GeographyService,
+          useValue: geography,
         },
         {
           provide: getRepositoryToken(Client),
@@ -397,6 +404,78 @@ describe('ClientsService', () => {
       expect(r.data.map((c) => c.id)).not.toContain('inv_1');
     });
   });
+  /**
+   * La zona que el cliente elige en la tienda (MxH-0040).
+   *
+   * Hasta ahora `default_municipality_id` solo lo escribía el panel, y en
+   * staging estaba vacío en los 24 clientes: los tres respaldos que la API ya
+   * tiene escritos —dos en pedidos y uno en entregas— no se disparaban nunca.
+   */
+  describe('saveDefaultMunicipality', () => {
+    const municipio = { id: 'mun-1', isActive: true };
+
+    beforeEach(() => {
+      repository.findOne.mockResolvedValue({ ...client });
+      repository.save.mockImplementation((entity) =>
+        Promise.resolve(entity as Client),
+      );
+    });
+
+    it('guarda la zona y da el alta por terminada', async () => {
+      geography.getMunicipalityOrThrow.mockResolvedValue(municipio);
+
+      const guardado = await service.saveDefaultMunicipality(
+        client.id,
+        'mun-1',
+      );
+
+      expect(guardado.defaultMunicipalityId).toBe('mun-1');
+      // Es la misma definición que usa el alta desde el panel: tener municipio
+      // por defecto **es** haber terminado el alta.
+      expect(guardado.onboardingCompleted).toBe(true);
+    });
+
+    it('rechaza un municipio que no existe, y no escribe nada', async () => {
+      geography.getMunicipalityOrThrow.mockRejectedValue(
+        new NotFoundException(),
+      );
+
+      await expect(
+        service.saveDefaultMunicipality(client.id, 'mun-inventado'),
+      ).rejects.toThrow(NotFoundException);
+
+      expect(repository.save).not.toHaveBeenCalled();
+    });
+
+    it('rechaza un municipio dado de baja, y tampoco escribe', async () => {
+      // Ninguna pantalla lo ofrece, así que llegar aquí con uno solo puede
+      // venir de una petición hecha a mano.
+      geography.getMunicipalityOrThrow.mockResolvedValue({
+        ...municipio,
+        isActive: false,
+      });
+
+      await expect(
+        service.saveDefaultMunicipality(client.id, 'mun-1'),
+      ).rejects.toThrow(NotFoundException);
+
+      expect(repository.save).not.toHaveBeenCalled();
+    });
+
+    it('valida el municipio antes de buscar al cliente', async () => {
+      // El orden importa poco para el resultado y mucho para la base: una
+      // zona inválida no tiene por qué costar una consulta de cliente.
+      geography.getMunicipalityOrThrow.mockRejectedValue(
+        new NotFoundException(),
+      );
+
+      await expect(
+        service.saveDefaultMunicipality(client.id, 'mun-inventado'),
+      ).rejects.toThrow(NotFoundException);
+
+      expect(repository.findOne).not.toHaveBeenCalled();
+    });
+  });
 });
 
 describe('ClientsService · findBeneficiaries', () => {
@@ -429,6 +508,10 @@ describe('ClientsService · findBeneficiaries', () => {
         {
           provide: ClientInvitationsService,
           useValue: { listarPendientes: jest.fn() },
+        },
+        {
+          provide: GeographyService,
+          useValue: { getMunicipalityOrThrow: jest.fn() },
         },
         {
           provide: getRepositoryToken(Client),
@@ -582,6 +665,10 @@ describe('ClientsService · findBeneficiaries', () => {
         {
           provide: ClientInvitationsService,
           useValue: { listarPendientes: jest.fn() },
+        },
+        {
+          provide: GeographyService,
+          useValue: { getMunicipalityOrThrow: jest.fn() },
         },
         {
           provide: getRepositoryToken(Client),
