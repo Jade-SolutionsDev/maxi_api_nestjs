@@ -29,11 +29,15 @@ export interface Perfil {
  * de gigabytes, y en vez de un volcado devuelve **pilas de llamada con el
  * fichero y la línea**.
  *
- * **Lo que mide y lo que no.** Mide asignaciones vivas por muestreo, no
- * retención: una función que asigna mucho y lo suelta también aparece. Lo
- * que convierte el perfil en una pista es compararlo consigo mismo — si una
- * entrada crece sin parar mientras el montón crece, ahí está el sospechoso.
- * No es una prueba; la prueba sigue siendo la instantánea.
+ * **Lo que mide, comprobado y no supuesto.** Cuenta solo lo que **sigue
+ * vivo** cuando se lee: en la prueba de abajo, 120 MB asignados y soltados
+ * dan 0,0 MB atribuidos, y 50 MB retenidos dan 44,9. O sea que esto no mide
+ * «quién asigna mucho» —que sería casi todo el mundo— sino **quién no
+ * suelta**, que es exactamente la pregunta de una fuga.
+ *
+ * Lo que no da es el camino de referencias que mantiene vivo cada objeto;
+ * para eso sigue haciendo falta la instantánea. Pero para señalar al
+ * culpable, el muestreo basta y cabe en kilobytes.
  *
  * Apagado salvo que `HEAP_PROFILE_ENABLED` lo encienda: abre el inspector
  * dentro del proceso y eso no se deja puesto por si acaso.
