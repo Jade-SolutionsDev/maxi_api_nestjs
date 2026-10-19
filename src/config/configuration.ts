@@ -177,6 +177,13 @@ export interface AppConfig {
    *  limiting is per-client instead of per-proxy. Set to the exact hop count
    *  (spoof-safe); 1 = a single Traefik. */
   trustProxyHops: number;
+  /**
+   * Cada cuánto se mide el montón, en milisegundos. 0 lo apaga.
+   *
+   * Un minuto da resolución de sobra para una fuga que tarda horas y
+   * cuesta 1.440 líneas de registro al día por contenedor.
+   */
+  memoryWatchIntervalMs: number;
 }
 
 /** True only for local/test — never a deployed environment. */
@@ -371,4 +378,5 @@ export default (): AppConfig => ({
   support: supportConfig(),
   nodeEnv: process.env.NODE_ENV ?? 'development',
   trustProxyHops: parseInt(process.env.TRUST_PROXY_HOPS ?? '1', 10),
+  memoryWatchIntervalMs: entero(process.env.MEMORY_WATCH_INTERVAL_MS, 60_000),
 });
