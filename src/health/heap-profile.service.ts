@@ -1,4 +1,4 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { Session } from 'node:inspector/promises';
 
@@ -43,12 +43,26 @@ export interface Perfil {
  * dentro del proceso y eso no se deja puesto por si acaso.
  */
 @Injectable()
-export class HeapProfileService {
+export class HeapProfileService implements OnModuleInit {
   private readonly logger = new Logger('PerfilDelMonton');
   private sesion?: Session;
   private desde?: number;
 
   constructor(private readonly configService: ConfigService) {}
+
+  /**
+   * Donde está encendido, el muestreo arranca solo.
+   *
+   * Tenerlo que arrancar a mano parece inofensivo hasta que cuenta: cada
+   * despliegue reinicia el proceso y se lo lleva por delante, y la medición
+   * que importa es la de la madrugada, cuando no hay nadie para darse cuenta.
+   * Tres veces se perdió en una sola noche. Si alguien encendió la variable
+   * es porque quiere medir.
+   */
+  async onModuleInit(): Promise<void> {
+    if (!this.habilitado) return;
+    await this.arrancar();
+  }
 
   get habilitado(): boolean {
     return this.configService.get<boolean>('heapProfileEnabled') ?? false;
