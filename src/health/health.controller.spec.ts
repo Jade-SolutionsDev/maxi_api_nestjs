@@ -1,5 +1,6 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { HealthController } from './health.controller';
+import { HeapProfileService } from './heap-profile.service';
 import { MemoryWatchService } from './memory-watch.service';
 
 describe('HealthController', () => {
@@ -12,6 +13,16 @@ describe('HealthController', () => {
         {
           provide: MemoryWatchService,
           useValue: { medir: jest.fn().mockReturnValue({ usoPct: 12 }) },
+        },
+        {
+          provide: HeapProfileService,
+          useValue: {
+            habilitado: false,
+            corriendo: false,
+            arrancar: jest.fn(),
+            leer: jest.fn(),
+            parar: jest.fn(),
+          },
         },
       ],
     }).compile();
@@ -41,6 +52,21 @@ describe('HealthController', () => {
 
       expect(result.status).toBe('ready');
       expect(result.timestamp).toBeDefined();
+    });
+  });
+
+  /**
+   * El perfilado abre el inspector dentro del proceso: donde no esté
+   * encendido a mano, no se arranca ni por error ni por curiosidad.
+   */
+  describe('el perfilado del montón', () => {
+    it('se niega si el entorno no lo tiene encendido', async () => {
+      await expect(controller.startHeapProfile()).rejects.toThrow(
+        /apagado en este entorno/,
+      );
+      await expect(controller.getHeapProfile()).rejects.toThrow(
+        /apagado en este entorno/,
+      );
     });
   });
 });

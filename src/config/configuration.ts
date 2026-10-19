@@ -184,6 +184,11 @@ export interface AppConfig {
    * cuesta 1.440 líneas de registro al día por contenedor.
    */
   memoryWatchIntervalMs: number;
+  /**
+   * Deja pedir el muestreo de asignaciones del montón. Apagado por omisión:
+   * abre el inspector dentro del proceso.
+   */
+  heapProfileEnabled: boolean;
 }
 
 /** True only for local/test — never a deployed environment. */
@@ -379,4 +384,5 @@ export default (): AppConfig => ({
   nodeEnv: process.env.NODE_ENV ?? 'development',
   trustProxyHops: parseInt(process.env.TRUST_PROXY_HOPS ?? '1', 10),
   memoryWatchIntervalMs: entero(process.env.MEMORY_WATCH_INTERVAL_MS, 60_000),
+  heapProfileEnabled: process.env.HEAP_PROFILE_ENABLED === 'true',
 });
