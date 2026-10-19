@@ -28,11 +28,14 @@ describe('MxH-0051 · el correo de pago lleva el comprobante', () => {
   } as unknown as Order;
 
   let service: OrderMailerService;
-  let mail: { send: jest.Mock };
+  let mail: { send: jest.Mock; alreadySent: jest.Mock };
   let pdf: { generate: jest.Mock };
 
   beforeEach(async () => {
-    mail = { send: jest.fn().mockResolvedValue({ status: EmailStatus.SENT }) };
+    mail = {
+      send: jest.fn().mockResolvedValue({ status: EmailStatus.SENT }),
+      alreadySent: jest.fn().mockResolvedValue(false),
+    };
     pdf = {
       generate: jest.fn().mockResolvedValue(Buffer.from('%PDF-1.4 fake')),
     };

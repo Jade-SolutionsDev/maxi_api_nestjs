@@ -15,6 +15,7 @@ import {
   RenderedEmail,
   orderCancelled,
   orderDelivered,
+  orderProcessing,
   orderReceived,
   orderShipped,
   paymentReceived,
@@ -94,25 +95,45 @@ export class OrderMailerService {
       orderId,
       'payment_received',
       (data) => paymentReceived(data),
-      true,
+      { conComprobante: true },
     );
   }
 
   /**
-   * Los cambios de estado que el cliente nota. **No están los seis a
-   * propósito:** de `confirmed` y `processing` no se avisa, porque el cliente
-   * acaba de recibir el correo del pago y tres avisos en una hora es la forma
-   * más rápida de que marque la tienda como spam.
+   * Los cambios de estado que el cliente nota. **No están los seis:**
+   * `confirmed` no avisa —el cliente acaba de recibir el correo del pago y
+   * dos avisos seguidos son la forma más rápida de que marque la tienda como
+   * spam— y en `pending` es donde nace el pedido.
+   *
+   * Los cuatro se mandan **una sola vez por pedido**: un estado que se
+   * deshace y se rehace no vuelve a avisar. Recibir dos veces «tu pedido fue
+   * entregado» no informa de nada y desgasta la confianza en los que sí
+   * importan.
    */
+  async processing(orderId: string): Promise<SendResult | null> {
+    return this.dispatch(
+      orderId,
+      'order_processing',
+      (data) => orderProcessing(data),
+      { unaVez: true },
+    );
+  }
+
   async shipped(orderId: string): Promise<SendResult | null> {
-    return this.dispatch(orderId, 'order_shipped', (data) =>
-      orderShipped(data),
+    return this.dispatch(
+      orderId,
+      'order_shipped',
+      (data) => orderShipped(data),
+      { unaVez: true },
     );
   }
 
   async delivered(orderId: string): Promise<SendResult | null> {
-    return this.dispatch(orderId, 'order_delivered', (data) =>
-      orderDelivered(data),
+    return this.dispatch(
+      orderId,
+      'order_delivered',
+      (data) => orderDelivered(data),
+      { unaVez: true },
     );
   }
 
@@ -129,8 +150,13 @@ export class OrderMailerService {
     motivo: MotivoCancelacion = null,
   ): Promise<SendResult | null> {
     const clave = motivo ? `order_cancelled_${motivo}` : 'order_cancelled';
-    return this.dispatch(orderId, clave, (data) =>
-      orderCancelled(data, motivo),
+    return this.dispatch(
+      orderId,
+      clave,
+      (data) => orderCancelled(data, motivo),
+      {
+        unaVez: true,
+      },
     );
   }
 
@@ -219,9 +245,19 @@ export class OrderMailerService {
     orderId: string,
     template: string,
     render: (data: OrderMailData) => RenderedEmail,
-    conComprobante = false,
+    opciones: { conComprobante?: boolean; unaVez?: boolean } = {},
   ): Promise<SendResult | null> {
+    const { conComprobante = false, unaVez = false } = opciones;
     try {
+      // El candado mira el registro, no el reloj ni el estado anterior: es lo
+      // único que sabe si esta persona ya recibió este aviso, venga el cambio
+      // del panel, del barrido de caducidad o de un pago que llegó tarde.
+      if (unaVez && (await this.mail.alreadySent(orderId, template))) {
+        this.logger.log(
+          `Correo "${template}": el pedido ${orderId} ya lo recibió; no se repite`,
+        );
+        return null;
+      }
       const order = await this.orderRepository.findOne({
         where: { id: orderId },
         relations: { client: true },
