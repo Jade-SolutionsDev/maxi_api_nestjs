@@ -51,6 +51,32 @@ describe('HeapProfileService', () => {
     expect(retenido).toHaveLength(40000);
   });
 
+  /**
+   * La propiedad que decide cómo se lee el perfil, y que conviene que una
+   * prueba defienda: **solo cuenta lo que sigue vivo**. Si contara también lo
+   * asignado y soltado, el primer puesto se lo llevaría siempre el camino más
+   * transitado y el perfil no diría nada de una fuga.
+   */
+  it('cuenta lo retenido y no lo que ya se soltó', async () => {
+    await service.arrancar(16384);
+
+    for (let vuelta = 0; vuelta < 20; vuelta += 1) {
+      let desechable: string[] = [];
+      for (let i = 0; i < 20000; i += 1) desechable.push('y'.repeat(200));
+      desechable = [];
+    }
+    const soltado = await service.leer(5);
+
+    const retenido: string[] = [];
+    for (let i = 0; i < 150000; i += 1) retenido.push('z'.repeat(200));
+    const vivo = await service.leer(5);
+
+    // Lo soltado apenas deja rastro; lo retenido pesa decenas de MB.
+    expect(soltado.totalMb).toBeLessThan(10);
+    expect(vivo.totalMb).toBeGreaterThan(20);
+    expect(retenido).toHaveLength(150000);
+  });
+
   it('arrancar dos veces no abre dos sesiones', async () => {
     await service.arrancar();
     await service.arrancar();

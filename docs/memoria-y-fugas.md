@@ -92,10 +92,20 @@ GET  /api/health/heap-profile?top=25    # lo acumulado, sin detenerlo
 POST /api/health/heap-profile/stop
 ```
 
-**Qué mide y qué no.** Mide asignaciones vivas por muestreo, **no retención**: una función que
-asigna mucho y lo suelta también sale arriba. Lo que convierte esto en una pista es **leerlo dos
-veces**: lo que crece entre una lectura y otra mientras el montón sube es el sospechoso. La
-prueba sigue siendo la instantánea; esto dice dónde mirar.
+**Qué mide, medido y no supuesto.** Cuenta solo lo que **sigue vivo** en el momento de leer.
+Comprobado el 19-oct-2026 con el mismo perfilador:
+
+| En el proceso | Atribuido por el perfil |
+|---|---|
+| 120 MB asignados y soltados | **0,0 MB** |
+| 50 MB retenidos | **44,9 MB** |
+
+Así que no señala a quien asigna mucho —que es casi todo el mundo— sino a **quien no suelta**,
+que es la pregunta de una fuga. Lo que no da es el camino de referencias que mantiene vivo cada
+objeto; para eso sigue haciendo falta la instantánea. Para señalar al culpable, esto basta.
+
+Con el montón en gigabytes, el perfil reparte esos gigabytes entre funciones con su fichero y su
+línea.
 
 ## Y el parche que no cierra la tarjeta
 
