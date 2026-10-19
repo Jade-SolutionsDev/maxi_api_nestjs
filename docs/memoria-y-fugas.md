@@ -77,6 +77,26 @@ no es la pasarela, no es el límite del contenedor —ninguna aplicación tiene
 `memoryLimit` puesto en Dokploy— y no es un acumulador a la vista en el
 código.
 
+## El atajo cuando no hay `docker`: el muestreo de asignaciones
+
+La instantánea pide entrar al contenedor. El muestreo de asignaciones de V8 no: se pide desde
+dentro del propio proceso, pesa kilobytes y devuelve **pilas de llamada con fichero y línea**.
+
+```bash
+# Encender en Dokploy, solo donde se vaya a mirar:
+HEAP_PROFILE_ENABLED=true
+
+# Con sesión de superadmin:
+POST /api/health/heap-profile/start     # ?interval=65536 (bytes entre muestras)
+GET  /api/health/heap-profile?top=25    # lo acumulado, sin detenerlo
+POST /api/health/heap-profile/stop
+```
+
+**Qué mide y qué no.** Mide asignaciones vivas por muestreo, **no retención**: una función que
+asigna mucho y lo suelta también sale arriba. Lo que convierte esto en una pista es **leerlo dos
+veces**: lo que crece entre una lectura y otra mientras el montón sube es el sospechoso. La
+prueba sigue siendo la instantánea; esto dice dónde mirar.
+
 ## Y el parche que no cierra la tarjeta
 
 Poner `memoryLimit` en Dokploy y dejar que reinicie es un parche razonable
