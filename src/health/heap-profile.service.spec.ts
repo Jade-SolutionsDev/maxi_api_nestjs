@@ -77,6 +77,19 @@ describe('HeapProfileService', () => {
     expect(retenido).toHaveLength(150000);
   });
 
+  describe('al arrancar la aplicación', () => {
+    it('se pone a medir solo donde está encendido', async () => {
+      await service.onModuleInit();
+      expect(service.corriendo).toBe(true);
+    });
+
+    it('no hace nada donde está apagado', async () => {
+      habilitado = false;
+      await service.onModuleInit();
+      expect(service.corriendo).toBe(false);
+    });
+  });
+
   it('arrancar dos veces no abre dos sesiones', async () => {
     await service.arrancar();
     await service.arrancar();

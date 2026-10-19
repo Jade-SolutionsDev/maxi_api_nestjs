@@ -82,6 +82,10 @@ código.
 La instantánea pide entrar al contenedor. El muestreo de asignaciones de V8 no: se pide desde
 dentro del propio proceso, pesa kilobytes y devuelve **pilas de llamada con fichero y línea**.
 
+Con la variable puesta, **el muestreo arranca solo al iniciar la aplicación**: así sobrevive a
+los despliegues, que si no se lo llevan por delante justo antes de la noche, que es cuando
+interesa medir.
+
 ```bash
 # Encender en Dokploy, solo donde se vaya a mirar:
 HEAP_PROFILE_ENABLED=true
