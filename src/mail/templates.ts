@@ -727,6 +727,39 @@ export type MotivoCancelacion =
   | 'payment_not_received'
   | 'paid_after_expiry_out_of_stock';
 
+/**
+ * Está en preparación: alguien lo está montando ahora mismo.
+ *
+ * El cliente no tiene nada que hacer con este aviso, y por eso se escribió
+ * corto: su razón de ser es que la espera entre «pagado» y «va en camino»
+ * deje de ser silencio, que es cuando la gente llama para preguntar.
+ */
+export const orderProcessing = (order: OrderMailData): RenderedEmail => {
+  const body = [
+    p(
+      `${greeting(order.customerName)} ya estamos preparando tu pedido <strong>${esc(order.orderNumber)}</strong>.`,
+    ),
+    p(
+      `Te avisamos otra vez en cuanto salga. No tienes que hacer nada mientras tanto.`,
+    ),
+    ...(order.trackingUrl
+      ? [button(order.trackingUrl, 'Seguir mi pedido')]
+      : []),
+  ].join('\n');
+  return {
+    subject: `Pedido ${order.orderNumber}: en preparación`,
+    ...render({
+      title: 'Estamos preparando tu pedido',
+      body,
+      whatsapp: order.whatsapp,
+      redes: order.redes,
+      storeUrl: order.storeUrl,
+      estado: { texto: 'EN PREPARACIÓN', tono: 'bien' },
+      motivo: 'Recibes este correo porque hiciste un pedido en Maxi Habana.',
+    }),
+  };
+};
+
 /** El pedido salió hacia su destino. */
 export const orderShipped = (order: OrderMailData): RenderedEmail => {
   const body = [

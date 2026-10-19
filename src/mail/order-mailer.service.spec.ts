@@ -20,12 +20,16 @@ const pedido = {
 
 describe('OrderMailerService', () => {
   let service: OrderMailerService;
-  let mail: { send: jest.Mock; configured: boolean };
+  let mail: { send: jest.Mock; alreadySent: jest.Mock; configured: boolean };
   let orderRepo: { findOne: jest.Mock };
   let config: Record<string, unknown>;
 
   beforeEach(async () => {
-    mail = { send: jest.fn().mockResolvedValue(null), configured: true };
+    mail = {
+      send: jest.fn().mockResolvedValue(null),
+      alreadySent: jest.fn().mockResolvedValue(false),
+      configured: true,
+    };
     orderRepo = { findOne: jest.fn().mockResolvedValue(pedido) };
     config = {
       support: { whatsapp: '+53 5251 9414' },
@@ -160,6 +164,79 @@ describe('OrderMailerService', () => {
       await service.orderReceived('abc-123');
       expect(mail.send).not.toHaveBeenCalledWith(
         expect.objectContaining({ template: 'order_received_back_office' }),
+      );
+    });
+  });
+
+  /**
+   * MxH-0052. Merly lo reportó el 1-oct: «el estado de En preparación no
+   * envía correo». La tabla de la tarjeta lo pedía desde el principio.
+   */
+  describe('el pedido en preparación', () => {
+    it('avisa con su propia plantilla y en el vocabulario del cliente', async () => {
+      await service.processing('abc-123');
+
+      expect(mail.send).toHaveBeenCalledWith(
+        expect.objectContaining({
+          template: 'order_processing',
+          orderId: 'abc-123',
+          subject: 'Pedido ORD-20260001: en preparación',
+        }),
+      );
+      const enviado = mail.send.mock.calls[0][0] as { html: string };
+      expect(enviado.html).toContain('EN PREPARACIÓN');
+      expect(enviado.html).not.toContain('processing');
+    });
+
+    it('no lleva el comprobante adjunto: ese es el del pago', async () => {
+      await service.processing('abc-123');
+
+      expect(mail.send).toHaveBeenCalledWith(
+        expect.not.objectContaining({ attachments: expect.anything() }),
+      );
+    });
+  });
+
+  /**
+   * «Un cambio de estado que se deshace y se rehace no manda el correo dos
+   * veces», de los criterios de MxH-0052. El candado mira `email_log`, que es
+   * lo único que sabe lo que esta persona ya recibió.
+   */
+  describe('cada aviso de estado sale una sola vez', () => {
+    it.each([
+      ['processing', 'order_processing'],
+      ['shipped', 'order_shipped'],
+      ['delivered', 'order_delivered'],
+    ])('%s no se repite si ya se mandó', async (metodo, plantilla) => {
+      mail.alreadySent.mockResolvedValue(true);
+
+      const resultado = await (
+        service as unknown as Record<string, (id: string) => Promise<unknown>>
+      )[metodo]('abc-123');
+
+      expect(mail.alreadySent).toHaveBeenCalledWith('abc-123', plantilla);
+      expect(mail.send).not.toHaveBeenCalled();
+      expect(resultado).toBeNull();
+    });
+
+    it('la cancelación distingue el motivo también en el candado', async () => {
+      mail.alreadySent.mockResolvedValue(false);
+
+      await service.cancelled('abc-123', 'payment_not_received');
+
+      expect(mail.alreadySent).toHaveBeenCalledWith(
+        'abc-123',
+        'order_cancelled_payment_not_received',
+      );
+    });
+
+    it('el aviso del pago no lleva candado: es el que no puede perderse', async () => {
+      mail.alreadySent.mockResolvedValue(true);
+
+      await service.paymentReceived('abc-123');
+
+      expect(mail.send).toHaveBeenCalledWith(
+        expect.objectContaining({ template: 'payment_received' }),
       );
     });
   });

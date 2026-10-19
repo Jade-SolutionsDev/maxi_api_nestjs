@@ -1549,17 +1549,23 @@ export class OrdersService {
   }
 
   /**
-   * Qué cambios de estado se le cuentan al cliente. Son tres de seis: de
-   * `confirmed` y `processing` no se avisa —el cliente acaba de recibir el
-   * correo del pago y no aportan nada que él pueda hacer—, y `pending` es
-   * donde nace el pedido.
+   * Qué cambios de estado se le cuentan al cliente. Son cuatro de seis: de
+   * `confirmed` no se avisa —el cliente acaba de recibir el correo del pago y
+   * no aporta nada que él pueda hacer—, y `pending` es donde nace el pedido.
+   *
+   * `processing` sí avisa desde MxH-0052: la espera entre «pagado» y «va en
+   * camino» era silencio, y el silencio es cuando la gente llama a preguntar.
+   * El correo es prescindible a efectos de cupo, así que si el plan aprieta
+   * es de los primeros que se dejan de mandar.
    */
   private avisarDelCambio(
     orderId: string,
     status: OrderStatus,
     motivo: CancellationReason | null,
   ): void {
-    if (status === OrderStatus.SHIPPED) {
+    if (status === OrderStatus.PROCESSING) {
+      void this.orderMailer.processing(orderId);
+    } else if (status === OrderStatus.SHIPPED) {
       void this.orderMailer.shipped(orderId);
     } else if (status === OrderStatus.DELIVERED) {
       void this.orderMailer.delivered(orderId);

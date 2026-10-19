@@ -348,7 +348,7 @@ export const resendConfig = (): ResendConfig => {
     reservaMensual: entero(process.env.MAIL_QUOTA_RESERVE, 200),
     reservaDiaria: entero(process.env.MAIL_DAILY_RESERVE, 20),
     plantillasPrescindibles: listaDeClaves(
-      process.env.MAIL_TEMPLATES_LOW_PRIORITY ?? 'welcome',
+      process.env.MAIL_TEMPLATES_LOW_PRIORITY ?? 'welcome,order_processing',
     ),
   };
 };

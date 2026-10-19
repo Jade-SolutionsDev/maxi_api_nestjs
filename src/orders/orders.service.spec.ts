@@ -146,6 +146,7 @@ describe('OrdersService', () => {
   let mailer: {
     orderReceived: jest.Mock;
     paymentReceived: jest.Mock;
+    processing: jest.Mock;
     shipped: jest.Mock;
     delivered: jest.Mock;
     cancelled: jest.Mock;
@@ -262,6 +263,7 @@ describe('OrdersService', () => {
     mailer = {
       orderReceived: jest.fn().mockResolvedValue(null),
       paymentReceived: jest.fn().mockResolvedValue(null),
+      processing: jest.fn().mockResolvedValue(null),
       shipped: jest.fn().mockResolvedValue(null),
       delivered: jest.fn().mockResolvedValue(null),
       cancelled: jest.fn().mockResolvedValue(null),
@@ -1381,6 +1383,23 @@ describe('OrdersService', () => {
       expect(orderRepo.save).toHaveBeenCalledWith(
         expect.objectContaining({ status: OrderStatus.PROCESSING }),
       );
+    });
+
+    // MxH-0052: la espera entre «pagado» y «va en camino» era silencio, y el
+    // silencio es cuando el cliente llama a preguntar.
+    it('avisa al cliente cuando el pedido entra en preparación', async () => {
+      orderRepo.findOne.mockReset();
+      orderRepo.findOne
+        .mockResolvedValueOnce(makeOrder({ status: OrderStatus.CONFIRMED }))
+        .mockResolvedValue(makeOrder({ items: [] }));
+
+      await service.updateStatus(
+        makeUser(Role.STAFF),
+        'order-1',
+        OrderStatus.PROCESSING,
+      );
+
+      expect(mailer.processing).toHaveBeenCalledWith('order-1');
     });
   });
 
