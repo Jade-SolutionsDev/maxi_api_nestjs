@@ -5,10 +5,13 @@ import {
   Get,
   HttpCode,
   Param,
+  ParseUUIDPipe,
   Patch,
   Post,
   Query,
 } from '@nestjs/common';
+import { ClientAddressesService } from '../client-addresses/client-addresses.service';
+import { ClientAddressResponseDto } from '../client-addresses/dto/client-address-response.dto';
 import { RequirePermission } from '../permissions/decorators/require-permission.decorator';
 import { ClientInvitationsService } from './client-invitations.service';
 import { ClientsService } from './clients.service';
@@ -36,6 +39,7 @@ export class ClientsController {
   constructor(
     private readonly clientsService: ClientsService,
     private readonly invitations: ClientInvitationsService,
+    private readonly addresses: ClientAddressesService,
   ) {}
 
   @Get()
@@ -98,6 +102,35 @@ export class ClientsController {
     @Param('id') id: string,
   ): Promise<ClientBeneficiariesResponseDto> {
     return this.clientsService.findBeneficiaries(id);
+  }
+
+  /**
+   * La libreta de direcciones de este cliente (MxH-0178).
+   *
+   * **Solo lectura, y no es la dirección de un pedido.** La libreta la gestiona
+   * el cliente desde la tienda, y cada pedido guarda su propia copia congelada
+   * al comprar (`snapshotAddress`). Mirar aquí dice dónde vive hoy, no a dónde
+   * se entregó algo ya vendido; para eso está el detalle del pedido.
+   *
+   * Mismo permiso que ver la ficha, y por el mismo motivo que los
+   * beneficiarios: son direcciones de casas, con teléfono y a veces carné.
+   *
+   * El `ParseUUIDPipe` no está de adorno: `GET /clients/:id` responde 500 con
+   * un id mal formado porque no lo valida (**MxH-0143**), y esta ruta nueva no
+   * repite el fallo.
+   */
+  @Get(':id/addresses')
+  @RequirePermission({ module: 'clients', action: 'read' })
+  @ApiOperation({ summary: 'Direcciones guardadas de este cliente' })
+  @ApiOkResponse({ type: [ClientAddressResponseDto] })
+  async findAddresses(
+    @Param('id', ParseUUIDPipe) id: string,
+  ): Promise<ClientAddressResponseDto[]> {
+    // Comprobar que el cliente existe antes de listar: un cliente inventado
+    // responde 404, y no una libreta vacía como si la cuenta fuera real.
+    await this.clientsService.findOne(id);
+
+    return this.addresses.toResponse(await this.addresses.findAllForClient(id));
   }
 
   /**
