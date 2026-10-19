@@ -6,6 +6,7 @@ import { MailModule } from '../mail/mail.module';
 import { ClientInvitationsService } from './client-invitations.service';
 import { ClientsController } from './clients.controller';
 import { ClientsService } from './clients.service';
+import { ClientReconciliationService } from './client-reconciliation.service';
 import { ClientRecoveryService } from './client-recovery.service';
 import { CustomerProvisioningService } from './customer-provisioning.service';
 import { Client } from './entities/client.entity';
@@ -25,6 +26,7 @@ import { Client } from './entities/client.entity';
   providers: [
     ClientsService,
     ClientInvitationsService,
+    ClientReconciliationService,
     ClientRecoveryService,
     CustomerProvisioningService,
   ],

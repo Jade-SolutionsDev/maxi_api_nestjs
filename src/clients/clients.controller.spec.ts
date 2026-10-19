@@ -15,6 +15,7 @@ import {
 } from '../permissions/permissions.service';
 import { Role } from '../users/entities/user.entity';
 import type { ClientInvitationsService } from './client-invitations.service';
+import { ClientReconciliationService } from './client-reconciliation.service';
 import { ClientsController } from './clients.controller';
 import type { ClientsService } from './clients.service';
 
@@ -114,6 +115,7 @@ describe('ClientsController · la libreta de direcciones', () => {
         clientes as ClientsService,
         {} as ClientInvitationsService,
         addresses as unknown as ClientAddressesService,
+        {} as ClientReconciliationService,
       );
 
       return { controller, addresses };
