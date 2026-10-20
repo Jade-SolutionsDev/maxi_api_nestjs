@@ -37,6 +37,7 @@ describe('FulfillmentService', () => {
   let service: FulfillmentService;
   let optionRepo: {
     find: jest.Mock;
+    count: jest.Mock;
     findOne: jest.Mock;
     save: jest.Mock;
     create: jest.Mock;
@@ -61,6 +62,9 @@ describe('FulfillmentService', () => {
     pickupPoints = [point()];
     optionRepo = {
       find: jest.fn().mockResolvedValue([]),
+      // Cuántas opciones hay dadas de alta en toda la tienda, sin mirar zona:
+      // es lo que separa «no hay nada configurado» de «no llega aquí».
+      count: jest.fn().mockResolvedValue(0),
       findOne: jest.fn(),
       save: jest.fn().mockImplementation((o: unknown) => Promise.resolve(o)),
       create: jest.fn().mockImplementation((o: unknown) => o),
@@ -183,6 +187,63 @@ describe('FulfillmentService', () => {
       const offer = await service.availableForClient('mun-1');
 
       expect(offer.pickupPoints.map((p) => p.locationId)).toEqual(['loc-1']);
+    });
+
+    /**
+     * MxH-0093. Los dos casos salían con el mismo texto —«no podemos procesar
+     * pedidos en línea»—, que suena a avería general. Son cosas distintas: en
+     * uno falta configurar la tienda y en el otro el cliente puede cambiar de
+     * zona y seguir comprando.
+     */
+    describe('por qué no hay entrega', () => {
+      const sinNada = () => {
+        pickupPoints = [];
+        optionRepo.find.mockResolvedValue([]);
+        optionRepo.count.mockResolvedValue(0);
+      };
+
+      it('sin nada dado de alta, dice que falta configurar la tienda', async () => {
+        sinNada();
+
+        const offer = await service.availableForClient('mun-1');
+
+        expect(offer.unavailableReason).toBe('sin_configurar');
+        expect(offer.unavailableMessage).not.toBeNull();
+      });
+
+      it('con opciones que no llegan a esta zona, dice que es la zona', async () => {
+        sinNada();
+        // Las hay en la tienda; lo que pasa es que ninguna alcanza aquí.
+        optionRepo.count.mockResolvedValue(3);
+
+        const offer = await service.availableForClient('mun-1');
+
+        expect(offer.unavailableReason).toBe('fuera_de_zona');
+      });
+
+      it('con mostradores que no sirven a esta zona, también es la zona', async () => {
+        pickupPoints = [];
+        optionRepo.find.mockResolvedValue([]);
+        optionRepo.count.mockResolvedValue(0);
+        // Sin puntos para esta zona, pero la tienda sí tiene mostradores.
+        const todos = [point({ id: 'pick-9', locationId: 'loc-9' })];
+        settingsRepo.manager.query.mockResolvedValue([]);
+        pickupPoints = todos;
+        products.coveringLocationIds.mockResolvedValue([]);
+
+        const offer = await service.availableForClient('mun-1');
+
+        expect(offer.pickupPoints).toEqual([]);
+        expect(offer.unavailableReason).toBe('fuera_de_zona');
+      });
+
+      // El control: cuando sí se puede despachar, no hay motivo que contar.
+      it('cuando hay por dónde, no hay motivo', async () => {
+        const offer = await service.availableForClient('mun-1');
+
+        expect(offer.pickupPoints).toHaveLength(1);
+        expect(offer.unavailableReason).toBeNull();
+      });
     });
 
     it('keeps the full pickup list when the customer has no municipality', async () => {

@@ -19,6 +19,7 @@ import {
   UpdateFulfillmentSettingsDto,
 } from './dto/fulfillment-settings.dto';
 import {
+  MotivoSinEntrega,
   StorefrontFulfillmentDto,
   StorefrontPickupPointDto,
 } from './dto/storefront-fulfillment.dto';
@@ -415,6 +416,9 @@ export class FulfillmentService {
 
     const nothingToOffer = options.length === 0 && points.length === 0;
     return {
+      unavailableReason: nothingToOffer
+        ? await this.porQueNoHayEntrega(settings.pickupEnabled)
+        : null,
       deliveryOptions: options.map((option) => ({
         id: option.id,
         label: option.label,
@@ -431,6 +435,32 @@ export class FulfillmentService {
       pickupPromiseDays: settings.pickupPromiseDays ?? null,
       unavailableMessage: nothingToOffer ? settings.supportMessage : null,
     };
+  }
+
+  /**
+   * Cuál de los dos casos deja al cliente sin forma de recibir su pedido
+   * (MxH-0093).
+   *
+   * No es lo mismo que la tienda no tenga **nada** configurado —una
+   * instalación recién hecha, donde no se vende hasta que alguien dé de alta
+   * una entrega— que tenerlo y que no llegue a esta zona, donde el cliente
+   * puede cambiar de zona y seguir comprando. Hasta ahora los dos salían con
+   * el mismo texto, que sonaba a avería y no dejaba hacer nada.
+   */
+  private async porQueNoHayEntrega(
+    pickupEnabled: boolean,
+  ): Promise<MotivoSinEntrega> {
+    const opciones = await this.optionRepository.count({
+      where: { enabled: true, deletedAt: IsNull() },
+    });
+    if (opciones > 0) return MotivoSinEntrega.FUERA_DE_ZONA;
+
+    if (pickupEnabled) {
+      const mostradores = await this.pickupPointsQuery().getRawMany();
+      if (mostradores.length > 0) return MotivoSinEntrega.FUERA_DE_ZONA;
+    }
+
+    return MotivoSinEntrega.SIN_CONFIGURAR;
   }
 
   /**
