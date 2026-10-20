@@ -8,6 +8,15 @@ import {
 } from '@yosle/tropipayjs';
 import { PaymentsConfig, TropipayConfig } from '../../../config/configuration';
 
+/**
+ * Lo único que nos hace falta del cliente de axios que el SDK lleva dentro.
+ * Sus propios tipos no llegan resueltos hasta aquí, y para apagar un
+ * interceptor no vale la pena arrastrar axios entero.
+ */
+interface ClienteDelSdk {
+  request?: { interceptors?: { request?: { clear?: () => void } } };
+}
+
 /** One account movement, reduced to what payment confirmation needs. */
 export interface TropipayMovement {
   reference?: string;
@@ -20,14 +29,28 @@ export interface TropipayMovement {
 }
 
 /**
- * Thin wrapper around the Tropipay SDK: one lazily-built instance (the SDK
- * caches the OAuth token statically and refreshes it on expiry), plus the
- * signature check. Everything payment-shaped lives in TropipayGateway.
+ * Thin wrapper around the Tropipay SDK: one lazily-built instance, the session
+ * kept fresh here, plus the signature check. Everything payment-shaped lives
+ * in TropipayGateway.
  */
 @Injectable()
 export class TropipayClient implements OnModuleInit {
   private readonly logger = new Logger(TropipayClient.name);
   private instance: Tropipay | null = null;
+
+  /**
+   * Cada cuánto se vuelve a autenticar, en milisegundos.
+   *
+   * No se usa el `expires_in` que devuelve la pasarela porque el SDK lo guarda
+   * tal cual llega y su propio código lo compara con una marca de tiempo, así
+   * que no hay forma de saber desde fuera si es una duración o un instante.
+   * Media hora queda corta frente a cualquiera de las dos lecturas, y una
+   * autenticación de más cada media hora no le cuesta nada a nadie.
+   */
+  private static readonly VIGENCIA_MS = 30 * 60 * 1000;
+
+  /** Cuándo toca volver a autenticarse, en milisegundos desde la época. */
+  private renovarDespuesDe = 0;
 
   constructor(private readonly configService: ConfigService) {}
 
@@ -40,15 +63,13 @@ export class TropipayClient implements OnModuleInit {
   onModuleInit(): void {
     if (!this.config.configured) return;
 
-    void this.sdk
-      .login()
-      .catch((err: unknown) =>
-        this.logger.warn(
-          `Could not pre-authenticate with Tropipay: ${
-            err instanceof Error ? err.message : String(err)
-          }`,
-        ),
-      );
+    void this.autenticar().catch((err: unknown) =>
+      this.logger.warn(
+        `Could not pre-authenticate with Tropipay: ${
+          err instanceof Error ? err.message : String(err)
+        }`,
+      ),
+    );
   }
 
   get config(): TropipayConfig {
@@ -59,7 +80,12 @@ export class TropipayClient implements OnModuleInit {
     if (!this.config.configured) {
       throw new Error('Tropipay is not configured');
     }
-    this.instance ??= new Tropipay({
+    this.instance ??= this.nuevaInstancia();
+    return this.instance;
+  }
+
+  private nuevaInstancia(): Tropipay {
+    const instancia = new Tropipay({
       clientId: this.config.clientId as string,
       clientSecret: this.config.clientSecret as string,
       serverMode: this.config.serverMode,
@@ -71,12 +97,51 @@ export class TropipayClient implements OnModuleInit {
         'ALLOW_GET_MOVEMENT_LIST',
       ],
     });
-    return this.instance;
+    this.quitarElRefrescoRecursivo(instancia);
+    return instancia;
+  }
+
+  /**
+   * El interceptor de peticiones del SDK renueva el token llamando a `login()`,
+   * y `login()` manda su POST por este mismo cliente de axios: entra otra vez
+   * en el interceptor, que lo vuelve a ver caducado, y así sin fondo.
+   *
+   * No es una fuga lenta. El montón pasa de 70 MB al techo de 4 GB en menos de
+   * un minuto y Node muere con `heap out of memory`, llevándose por delante la
+   * compra que lo disparó y todo lo demás que estuviera en marcha. En staging
+   * pasaba cada madrugada con la primera compra de la suite; en producción, el
+   * 14-oct-2026 (MxH-0166).
+   *
+   * Se quita entero. Los dos únicos métodos que usamos, `paymentCards.create` y
+   * `movements`, ya se autentican solos si falta el token y ponen la cabecera
+   * ellos mismos, así que el interceptor no hacía falta para nada más. De que
+   * la sesión no envejezca se encarga `conSesion`.
+   */
+  private quitarElRefrescoRecursivo(instancia: Tropipay): void {
+    const cliente = instancia as unknown as ClienteDelSdk;
+    cliente.request?.interceptors?.request?.clear?.();
+  }
+
+  /**
+   * Deja una sesión fresca y entonces habla con la pasarela.
+   *
+   * Hace falta porque sin el interceptor nadie renueva el token: con uno
+   * caducado la pasarela respondería 401 y el cliente leería «no se puede
+   * pagar con tarjeta» cuando sí se puede.
+   */
+  private async conSesion<T>(llamada: () => Promise<T>): Promise<T> {
+    if (Date.now() >= this.renovarDespuesDe) await this.autenticar();
+    return llamada();
+  }
+
+  private async autenticar(): Promise<void> {
+    await this.sdk.login();
+    this.renovarDespuesDe = Date.now() + TropipayClient.VIGENCIA_MS;
   }
 
   async createPaymentLink(payload: PaymentLinkPayload): Promise<PaymentLink> {
     try {
-      return await this.sdk.paymentCards.create(payload);
+      return await this.conSesion(() => this.sdk.paymentCards.create(payload));
     } catch (err) {
       // The top-level message is always "Invalid Parameter"; `details` is the
       // only place the rejected field appears.
@@ -97,7 +162,7 @@ export class TropipayClient implements OnModuleInit {
   async findMovementByReference(
     reference: string,
   ): Promise<TropipayMovement | undefined> {
-    const result = (await this.sdk.movements(0, 50)) as
+    const result = (await this.conSesion(() => this.sdk.movements(0, 50))) as
       | TropipayMovement[]
       | { rows?: TropipayMovement[] };
     const rows = Array.isArray(result) ? result : (result?.rows ?? []);
