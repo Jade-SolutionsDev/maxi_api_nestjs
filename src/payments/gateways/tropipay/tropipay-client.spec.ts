@@ -1,5 +1,6 @@
 import { ConfigService } from '@nestjs/config';
 import { Test, TestingModule } from '@nestjs/testing';
+import { Tropipay } from '@yosle/tropipayjs';
 import { TropipayClient } from './tropipay-client';
 
 const login = jest.fn<Promise<unknown>, unknown[]>();
@@ -8,14 +9,19 @@ const movimientos = jest.fn<Promise<unknown>, unknown[]>();
 const limpiarInterceptores = jest.fn();
 
 jest.mock('@yosle/tropipayjs', () => ({
-  Tropipay: jest.fn().mockImplementation(() => ({
-    login: (...args: unknown[]): Promise<unknown> => login(...args),
-    paymentCards: {
-      create: (...args: unknown[]): Promise<unknown> => crearEnlace(...args),
-    },
-    movements: (...args: unknown[]): Promise<unknown> => movimientos(...args),
-    request: { interceptors: { request: { clear: limpiarInterceptores } } },
-  })),
+  Tropipay: Object.assign(
+    jest.fn().mockImplementation(() => ({
+      login: (...args: unknown[]): Promise<unknown> => login(...args),
+      paymentCards: {
+        create: (...args: unknown[]): Promise<unknown> => crearEnlace(...args),
+      },
+      movements: (...args: unknown[]): Promise<unknown> => movimientos(...args),
+      request: { interceptors: { request: { clear: limpiarInterceptores } } },
+    })),
+    // Estáticos del SDK: el token de refresco vive en la clase, no en la
+    // instancia, y el código lo pone a null antes de cada autenticación.
+    { accessToken: null, refreshToken: null, expiresIn: null },
+  ),
   ServerSideUtils: { verifySignature: jest.fn() },
 }));
 
@@ -41,6 +47,9 @@ describe('TropipayClient', () => {
     crearEnlace.mockReset().mockResolvedValue({ shortUrl: 'https://x/y' });
     movimientos.mockReset().mockResolvedValue([]);
     limpiarInterceptores.mockReset();
+    Tropipay.accessToken = null;
+    Tropipay.refreshToken = null;
+    Tropipay.expiresIn = null;
     tropipay = {
       configured: true,
       clientId: 'id',
@@ -117,6 +126,36 @@ describe('TropipayClient', () => {
     await client.createPaymentLink({} as never);
     expect(login).toHaveBeenCalledTimes(2);
 
+    reloj.mockRestore();
+  });
+
+  /**
+   * MxH-0166, segunda parte. `login()` del SDK elige el camino según tenga o
+   * no un `refresh_token` guardado, y contra nuestra cuenta el del refresco
+   * responde «App not found»: el 20-oct-2026, en staging, la primera
+   * renovación tras media hora dejó un pedido sin poder cobrarse.
+   */
+  it('se autentica con las credenciales, nunca con el token de refresco', async () => {
+    Tropipay.refreshToken = 'del-login-anterior';
+
+    await client.createPaymentLink({} as never);
+
+    expect(Tropipay.refreshToken).toBeNull();
+    expect(login).toHaveBeenCalled();
+  });
+
+  it('también lo descarta en las renovaciones siguientes', async () => {
+    const reloj = jest.spyOn(Date, 'now');
+    reloj.mockReturnValue(0);
+    await client.createPaymentLink({} as never);
+
+    // El SDK lo guarda al autenticarse; en la próxima renovación estorba.
+    Tropipay.refreshToken = 'guardado-por-el-sdk';
+    reloj.mockReturnValue(31 * 60 * 1000);
+    await client.createPaymentLink({} as never);
+
+    expect(Tropipay.refreshToken).toBeNull();
+    expect(login).toHaveBeenCalledTimes(2);
     reloj.mockRestore();
   });
 

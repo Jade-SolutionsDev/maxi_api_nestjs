@@ -134,7 +134,24 @@ export class TropipayClient implements OnModuleInit {
     return llamada();
   }
 
+  /**
+   * Se autentica **siempre con clientId y clientSecret**, nunca con el
+   * `refresh_token` que el SDK guardó de la vez anterior.
+   *
+   * `login()` elige el camino mirando si tiene un `refresh_token` a mano, y
+   * contra nuestra cuenta ese camino responde **«App not found»**: medido en
+   * staging el 20-oct-2026, la primera renovación tras media hora dejaba la
+   * tarjeta sin poder cobrar, mientras que el arranque —que no tiene
+   * `refresh_token` todavía— entraba sin problema. Antes del PR #85 esto no
+   * se veía nunca, porque la recursión del interceptor mataba el proceso
+   * antes de que la petición llegara a salir.
+   *
+   * Para un servidor el refresco no aporta nada: las credenciales están aquí
+   * y pedir una sesión nueva cuesta lo mismo. Es un camino menos que puede
+   * romperse.
+   */
   private async autenticar(): Promise<void> {
+    Tropipay.refreshToken = null;
     await this.sdk.login();
     this.renovarDespuesDe = Date.now() + TropipayClient.VIGENCIA_MS;
   }
