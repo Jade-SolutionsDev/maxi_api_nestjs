@@ -9,7 +9,10 @@ import {
 } from 'typeorm';
 
 /** Known nomenclator categories. Extend here when a new catalog appears. */
-export const NOMENCLATOR_CATEGORIES = ['contact-motive'] as const;
+export const NOMENCLATOR_CATEGORIES = [
+  'contact-motive',
+  'complaint-motive',
+] as const;
 export type NomenclatorCategory = (typeof NOMENCLATOR_CATEGORIES)[number];
 
 /**

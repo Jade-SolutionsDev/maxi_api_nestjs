@@ -109,6 +109,10 @@ export const MODULE_ACTIONS: Record<string, readonly string[]> = {
   // Support inbox + reply templates share one module; `reply` is split from
   // `update` so triage and customer-facing replies are separately grantable.
   contact: [...CRUD, 'reply'],
+  // Quejas del Call Center. `close` va aparte de `update` a propósito: quien
+  // atiende el teléfono registra y gestiona, pero dar un caso por resuelto es
+  // otra cosa y se concede a quien supervisa (MxH-0064).
+  complaints: ['list', 'read', 'create', 'update', 'close'],
   // `create` es crear un pedido en nombre de un cliente, desde el panel: para
   // quien compra por WhatsApp o por teléfono. Va aparte de `update-status`
   // porque mueve stock e inventa deuda, que no es lo mismo que avanzar un
