@@ -189,6 +189,25 @@ const enlacesDelPie = (storeUrl: string | null | undefined): FooterLink[] => {
   ];
 };
 
+/**
+ * El enlace de contacto por WhatsApp, por el dominio propio cuando se puede.
+ *
+ * Resend avisa de que un correo que sale de maxihabana.com y enlaza a `wa.me`
+ * no cuadra, y algunos filtros de spam puntúan esa discrepancia (MxH-0136).
+ * La tienda tiene `/whatsapp`, que lee el número de los ajustes del sitio y
+ * redirige; enlazando ahí, el número deja de estar repetido en las plantillas.
+ *
+ * Sin la raíz de la tienda configurada se enlaza directo a `wa.me`, como hasta
+ * ahora: un botón que no lleva a ninguna parte es peor que el aviso de Resend.
+ */
+const enlaceDeWhatsApp = (
+  whatsapp: string,
+  storeUrl: string | null | undefined,
+): string =>
+  storeUrl
+    ? `${storeUrl.replace(/\/+$/, '')}/whatsapp`
+    : `https://wa.me/${whatsapp.replace(/[^0-9]/g, '')}`;
+
 const footerLinks = (links: FooterLink[]): string =>
   links.length
     ? `<p style="margin:0 0 10px;font-size:12px;line-height:1.9;">${links
@@ -253,7 +272,7 @@ ${cabecera()}${franja(estado)}
           <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="border-top:1px solid #e6ebe8;">
             <tr><td style="padding-top:14px;font-size:13px;line-height:1.7;color:#6b7a73;">
               ¿Alguna duda? Escríbenos por WhatsApp al
-              <a href="https://wa.me/${whatsapp.replace(/[^0-9]/g, '')}" style="color:#1e3d30;font-weight:bold;text-decoration:none;">${esc(whatsapp)}</a>
+              <a href="${enlaceDeWhatsApp(whatsapp, storeUrl)}" style="color:#1e3d30;font-weight:bold;text-decoration:none;">${esc(whatsapp)}</a>
               o responde a este correo.
             </td></tr>
           </table>
