@@ -17,6 +17,7 @@ import { DashboardModule } from './dashboard/dashboard.module';
 import { ClientAddressesModule } from './client-addresses/client-addresses.module';
 import { ClientsModule } from './clients/clients.module';
 import { ContactModule } from './contact/contact.module';
+import { ComplaintsModule } from './complaints/complaints.module';
 import { AuthGuard } from './common/guards/auth.guard';
 import { RolesGuard } from './common/guards/roles.guard';
 import { FulfillmentModule } from './fulfillment/fulfillment.module';
@@ -91,6 +92,7 @@ import { WebhooksModule } from './webhooks/webhooks.module';
     CmsModule,
     NomenclatorsModule,
     ContactModule,
+    ComplaintsModule,
     ProductsModule,
     CartModule,
     GeographyModule,
