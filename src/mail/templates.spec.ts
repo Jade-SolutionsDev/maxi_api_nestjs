@@ -306,4 +306,47 @@ describe('plantillas de correo', () => {
     const barato = paymentReceived({ ...order, total: '60.00' });
     expect(barato.text).toContain('$60.00');
   });
+
+  /**
+   * MxH-0136. Resend avisa de que un correo que sale de maxihabana.com y
+   * enlaza a `wa.me` no cuadra, y algunos filtros de spam puntúan esa
+   * discrepancia. La tienda tiene `/whatsapp`, que redirige.
+   */
+  describe('el contacto del pie', () => {
+    it('va por el dominio propio cuando hay tienda configurada', () => {
+      const con = paymentReceived({
+        ...order,
+        storeUrl: 'https://www.maxihabana.com',
+      });
+
+      expect(con.html).toContain('href="https://www.maxihabana.com/whatsapp"');
+      expect(con.html).not.toContain('https://wa.me/');
+    });
+
+    it('no duplica la barra de una raíz que ya la trae', () => {
+      const con = paymentReceived({
+        ...order,
+        storeUrl: 'https://www.maxihabana.com/',
+      });
+
+      expect(con.html).toContain('href="https://www.maxihabana.com/whatsapp"');
+    });
+
+    // Un botón que no lleva a ninguna parte es peor que el aviso de Resend.
+    it('sin tienda configurada enlaza directo a wa.me', () => {
+      const sin = paymentReceived({ ...order, storeUrl: null });
+
+      expect(sin.html).toContain('href="https://wa.me/5352519414"');
+    });
+
+    // El número sigue a la vista: lo que cambia es a dónde lleva el enlace.
+    it('el número se sigue leyendo en el texto', () => {
+      const con = paymentReceived({
+        ...order,
+        storeUrl: 'https://www.maxihabana.com',
+      });
+
+      expect(con.html).toContain('+53 5251 9414');
+    });
+  });
 });
