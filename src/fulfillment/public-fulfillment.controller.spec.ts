@@ -1,6 +1,9 @@
 import { PublicFulfillmentController } from './public-fulfillment.controller';
 import { FulfillmentService } from './fulfillment.service';
-import { StorefrontFulfillmentDto } from './dto/storefront-fulfillment.dto';
+import {
+  MotivoSinEntrega,
+  StorefrontFulfillmentDto,
+} from './dto/storefront-fulfillment.dto';
 
 /**
  * P-046. Este endpoint existe para decir antes del checkout lo que hoy se dice
@@ -17,6 +20,7 @@ describe('PublicFulfillmentController', () => {
     pickupEnabled: true,
     pickupPromiseDays: null,
     unavailableMessage: null,
+    unavailableReason: null,
     ...parcial,
   });
 
@@ -45,6 +49,7 @@ describe('PublicFulfillmentController', () => {
     await expect(controlador.availability('mun-1')).resolves.toEqual({
       fulfillable: true,
       unavailableMessage: null,
+      unavailableReason: null,
     });
   });
 
@@ -64,13 +69,34 @@ describe('PublicFulfillmentController', () => {
 
   it('sin mostrador ni entrega, no se puede, y se dice con qué palabras', async () => {
     const { controlador } = montar(
-      oferta({ unavailableMessage: 'Escríbenos y lo coordinamos.' }),
+      oferta({
+        unavailableMessage: 'Escríbenos y lo coordinamos.',
+        unavailableReason: MotivoSinEntrega.SIN_CONFIGURAR,
+      }),
     );
 
     await expect(controlador.availability('mun-1')).resolves.toEqual({
       fulfillable: false,
       unavailableMessage: 'Escríbenos y lo coordinamos.',
+      unavailableReason: MotivoSinEntrega.SIN_CONFIGURAR,
     });
+  });
+
+  /**
+   * MxH-0093: la tienda avisa en el carrito, antes del checkout, y necesita
+   * saber cuál de los dos casos es para decir si cambiar de zona sirve de algo.
+   */
+  it('deja pasar el motivo, no solo el mensaje', async () => {
+    const { controlador } = montar(
+      oferta({
+        unavailableMessage: 'Escríbenos y lo coordinamos.',
+        unavailableReason: MotivoSinEntrega.FUERA_DE_ZONA,
+      }),
+    );
+
+    const res = await controlador.availability('mun-1');
+
+    expect(res.unavailableReason).toBe(MotivoSinEntrega.FUERA_DE_ZONA);
   });
 
   it('un mostrador con la recogida apagada no cuenta como vía', async () => {
@@ -95,6 +121,7 @@ describe('PublicFulfillmentController', () => {
     expect(Object.keys(res).sort()).toEqual([
       'fulfillable',
       'unavailableMessage',
+      'unavailableReason',
     ]);
     expect(JSON.stringify(res)).not.toContain('Calle 1 #2');
   });

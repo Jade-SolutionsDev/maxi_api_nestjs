@@ -26,6 +26,20 @@ export class StorefrontPickupPointDto {
   hours: string | null;
 }
 
+/**
+ * Por qué la tienda no puede despachar aquí (MxH-0093).
+ *
+ * Los dos casos piden cosas distintas del cliente, y hasta ahora los dos
+ * salían con el mismo texto: «no podemos procesar pedidos en línea», que
+ * suena a avería general y no deja hacer nada.
+ */
+export enum MotivoSinEntrega {
+  /** No hay ninguna forma de entrega dada de alta en toda la tienda. */
+  SIN_CONFIGURAR = 'sin_configurar',
+  /** Las hay, pero ninguna llega a esta zona: cambiar de zona sí sirve. */
+  FUERA_DE_ZONA = 'fuera_de_zona',
+}
+
 export class StorefrontFulfillmentDto {
   deliveryOptions: StorefrontDeliveryOptionDto[];
   pickupPoints: StorefrontPickupPointDto[];
@@ -43,4 +57,10 @@ export class StorefrontFulfillmentDto {
    * keep the customer from submitting.
    */
   unavailableMessage: string | null;
+  /**
+   * Cuál de los dos casos es, cuando no hay nada que ofrecer. La tienda elige
+   * qué contar a partir de esto; el mensaje de arriba lo sigue poniendo el
+   * administrador y vale para los dos.
+   */
+  unavailableReason: MotivoSinEntrega | null;
 }

@@ -44,6 +44,7 @@ export class PublicFulfillmentController {
     return {
       fulfillable: hayVia,
       unavailableMessage: hayVia ? null : offer.unavailableMessage,
+      unavailableReason: hayVia ? null : offer.unavailableReason,
     };
   }
 }

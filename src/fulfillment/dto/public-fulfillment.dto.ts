@@ -1,4 +1,5 @@
 import { ApiProperty } from '@nestjs/swagger';
+import { MotivoSinEntrega } from './storefront-fulfillment.dto';
 
 export class PublicFulfillmentDto {
   @ApiProperty({
@@ -14,4 +15,13 @@ export class PublicFulfillmentDto {
       'What to tell the customer when nothing can be fulfilled. Null when it can.',
   })
   unavailableMessage: string | null;
+
+  @ApiProperty({
+    nullable: true,
+    enum: MotivoSinEntrega,
+    description:
+      'Which of the two cases it is: nothing configured anywhere, or ' +
+      'configured but out of this zone. Null when it can be fulfilled.',
+  })
+  unavailableReason: MotivoSinEntrega | null;
 }

@@ -32,6 +32,7 @@ describe('FulfillmentController', () => {
       pickupPoints: [],
       pickupEnabled: true,
       pickupPromiseDays: 2,
+      unavailableReason: null,
       unavailableMessage: null,
     };
     fulfillmentService.availableForClient.mockResolvedValue(offer);
