@@ -21,6 +21,7 @@ import { PaginatedResponse } from '../common/dto/pagination.dto';
 import { RequirePermission } from '../permissions/decorators/require-permission.decorator';
 import { ComplaintsService } from './complaints.service';
 import {
+  AddComplaintNoteDto,
   ChangeComplaintStatusDto,
   ComplaintResponseDto,
   ComplaintsQueryDto,
@@ -138,9 +139,9 @@ export class ComplaintsController {
   @ApiOperation({ summary: 'Añadir una nota al historial' })
   addNote(
     @Param('id', ParseUUIDPipe) id: string,
-    @Body() dto: ChangeComplaintStatusDto,
+    @Body() dto: AddComplaintNoteDto,
     @Req() req: AuthenticatedUserRequest,
   ): Promise<ComplaintResponseDto> {
-    return this.complaintsService.addNote(id, dto.note ?? '', req.user.id);
+    return this.complaintsService.addNote(id, dto.note, req.user.id);
   }
 }

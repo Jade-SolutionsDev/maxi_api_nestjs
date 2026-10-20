@@ -60,6 +60,19 @@ export class ChangeComplaintStatusDto {
   note?: string;
 }
 
+/**
+ * Una nota suelta en el historial.
+ *
+ * Va aparte de `ChangeComplaintStatusDto` porque añadir una nota no cambia de
+ * estado, y reutilizar aquel obligaba a mandar un `status` que el servidor
+ * ignoraba: un campo que miente sobre lo que hace la llamada.
+ */
+export class AddComplaintNoteDto {
+  @IsString()
+  @Length(3, 2000)
+  note: string;
+}
+
 export class ComplaintsQueryDto extends PaginationQueryDto {
   @IsOptional()
   @IsString()
