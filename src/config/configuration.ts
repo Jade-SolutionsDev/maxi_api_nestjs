@@ -171,6 +171,13 @@ export interface AppConfig {
   storefront: StorefrontConfig;
   resend: ResendConfig;
   support: SupportConfig;
+  /**
+   * Dirección pública del panel, sin barra final. Solo se usa para poner un
+   * enlace en los correos internos —el aviso de ticket asignado (MxH-0065)—.
+   * Sin ella el correo sale igual, sin botón: un aviso sin enlace sirve, un
+   * enlace a `undefined/tickets/...` no.
+   */
+  adminUrl: string | undefined;
   nodeEnv: string;
   /** Number of reverse proxies in front of the API (Express `trust proxy`).
    *  Makes req.ip resolve to the real client from X-Forwarded-For, so rate
@@ -360,7 +367,8 @@ export const resendConfig = (): ResendConfig => {
     reservaMensual: entero(process.env.MAIL_QUOTA_RESERVE, 200),
     reservaDiaria: entero(process.env.MAIL_DAILY_RESERVE, 20),
     plantillasPrescindibles: listaDeClaves(
-      process.env.MAIL_TEMPLATES_LOW_PRIORITY ?? 'welcome,order_processing',
+      process.env.MAIL_TEMPLATES_LOW_PRIORITY ??
+        'welcome,order_processing,ticket_assigned',
     ),
   };
 };
@@ -381,6 +389,7 @@ export default (): AppConfig => ({
   storefront: storefrontConfig(),
   resend: resendConfig(),
   support: supportConfig(),
+  adminUrl: process.env.ADMIN_URL?.replace(/\/+$/, '') || undefined,
   nodeEnv: process.env.NODE_ENV ?? 'development',
   trustProxyHops: parseInt(process.env.TRUST_PROXY_HOPS ?? '1', 10),
   memoryWatchIntervalMs: entero(process.env.MEMORY_WATCH_INTERVAL_MS, 60_000),

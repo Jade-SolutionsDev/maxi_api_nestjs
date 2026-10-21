@@ -165,11 +165,27 @@ describe('PermissionsService', () => {
         expect.objectContaining({ systemKey: 'WEB_MANAGER', isSystem: false }),
       );
 
-      // El Jefe de almacén nace con lo que MxH-0036 define: 12 permisos para GROCER,
-      // 8 para KARDIST.
+      // El Jefe de almacén nace con lo que MxH-0036 define: 12 permisos para
+      // GROCER y 8 para KARDIST, más los 3 de tickets que MxH-0065 añadió a
+      // todas las plantillas —abrir una incidencia interna no se le niega a
+      // nadie del equipo—.
       const grantCalls = rolePermissionRepo.save.mock.calls;
-      expect(grantCalls[0][0]).toHaveLength(12);
-      expect(grantCalls[1][0]).toHaveLength(8);
+      expect(grantCalls[0][0]).toHaveLength(12 + 3);
+      expect(grantCalls[1][0]).toHaveLength(8 + 3);
+      for (const [indice, rol] of [
+        [0, 'GROCER'],
+        [1, 'KARDIST'],
+      ] as const) {
+        expect(grantCalls[indice][0]).toContainEqual({
+          roleId: `role-${rol}`,
+          permissionId: 'tickets:create',
+        });
+        // Abrir sí, cerrar no: cerrar se concede a mano (MxH-0065).
+        expect(grantCalls[indice][0]).not.toContainEqual({
+          roleId: `role-${rol}`,
+          permissionId: 'tickets:close',
+        });
+      }
       expect(grantCalls[0][0]).toContainEqual({
         roleId: 'role-GROCER',
         permissionId: 'inventory:create-operation',
@@ -265,9 +281,16 @@ describe('PermissionsService', () => {
           'products:list',
           'departments:list',
           'categories:list',
+          // MxH-0065: también abre incidencias internas, como todas las
+          // plantillas. Pero no las cierra.
+          'tickets:list',
+          'tickets:read',
+          'tickets:create',
         ]),
       );
-      expect(concedidos).toHaveLength(21);
+      expect(concedidos).not.toContain('tickets:close');
+      expect(concedidos).not.toContain('tickets:update');
+      expect(concedidos).toHaveLength(21 + 3);
       expect(
         concedidos.filter(
           (p) =>

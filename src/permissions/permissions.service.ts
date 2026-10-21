@@ -113,6 +113,10 @@ export const MODULE_ACTIONS: Record<string, readonly string[]> = {
   // atiende el teléfono registra y gestiona, pero dar un caso por resuelto es
   // otra cosa y se concede a quien supervisa (MxH-0064).
   complaints: ['list', 'read', 'create', 'update', 'close'],
+  // Incidencias internas de la tienda. `close` va aparte de `update` por lo
+  // mismo que en las quejas, y aquí además gobierna el reabrir: quien arregla
+  // dice «resuelto», quien supervisa dice «cerrado» (MxH-0065).
+  tickets: ['list', 'read', 'create', 'update', 'close'],
   // `create` es crear un pedido en nombre de un cliente, desde el panel: para
   // quien compra por WhatsApp o por teléfono. Va aparte de `update-status`
   // porque mueve stock e inventa deuda, que no es lo mismo que avanzar un
@@ -184,6 +188,7 @@ const BASE_ROLES: ReadonlyArray<{
     // Es una plantilla editable, así que quien necesite más se lo concede desde
     // la pantalla de roles — pero nace por lo mínimo, no por lo máximo.
     grants: {
+      tickets: ['list', 'read', 'create'],
       products: ['list', 'read'],
       categories: ['list', 'read'],
       departments: ['list', 'read'],
@@ -197,6 +202,7 @@ const BASE_ROLES: ReadonlyArray<{
     description:
       'Permisos iniciales del rol Kardista. Ajústalos o retíralos según lo que necesite tu equipo.',
     grants: {
+      tickets: ['list', 'read', 'create'],
       categories: ['list', 'read'],
       departments: ['list', 'read'],
       inventory: ['read', 'aggregate', 'history'],
@@ -212,6 +218,7 @@ const BASE_ROLES: ReadonlyArray<{
     // lecturas que piden sus selectores. El catálogo solo lo consulta:
     // destacar un producto no es editarlo.
     grants: {
+      tickets: ['list', 'read', 'create'],
       'cms-home': ['read', 'update', 'publish'],
       'cms-banners': CRUD,
       'cms-pages': [...CRUD, 'publish'],

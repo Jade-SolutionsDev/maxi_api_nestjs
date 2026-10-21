@@ -12,6 +12,7 @@ import {
 export const NOMENCLATOR_CATEGORIES = [
   'contact-motive',
   'complaint-motive',
+  'ticket-category',
 ] as const;
 export type NomenclatorCategory = (typeof NOMENCLATOR_CATEGORIES)[number];
 
