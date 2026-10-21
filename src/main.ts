@@ -19,6 +19,7 @@ import { IncomingMessage, ServerResponse } from 'http';
 import { DataSource } from 'typeorm';
 import { AppModule } from './app.module';
 import { comprobarConfiguracion } from './config/startup-checks';
+import { comprobarOrigen } from './config/cors-origen';
 import { AllExceptionsFilter } from './common/filters/all-exceptions.filter';
 import { ResponseInterceptor } from './common/interceptors/response.interceptor';
 import { ConfigService } from '@nestjs/config';
@@ -115,16 +116,12 @@ async function bootstrap() {
     credentials: false,
   };
   app.enableCors({
-    origin: (
-      origin: string | undefined,
-      callback: (err: Error | null, allow?: boolean) => void,
-    ) => {
-      if (!origin || cors.origins.includes(origin)) {
-        callback(null, true);
-      } else {
-        callback(new Error(`Origin ${origin} not allowed by CORS`), false);
-      }
-    },
+    // Una línea por rechazo, sin traza: el filtro no registra nada por
+    // debajo de 500, y un frontend con el dominio mal puesto tiene que dejar
+    // rastro en alguna parte.
+    origin: comprobarOrigen(cors.origins, (mensaje) =>
+      new Logger('Cors').warn(mensaje),
+    ),
     credentials: cors.credentials,
     methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
     allowedHeaders: ['Content-Type', 'Authorization'],
