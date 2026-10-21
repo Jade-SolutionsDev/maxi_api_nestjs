@@ -18,6 +18,7 @@ import { ClientAddressesModule } from './client-addresses/client-addresses.modul
 import { ClientsModule } from './clients/clients.module';
 import { ContactModule } from './contact/contact.module';
 import { ComplaintsModule } from './complaints/complaints.module';
+import { TicketsModule } from './tickets/tickets.module';
 import { AuthGuard } from './common/guards/auth.guard';
 import { RolesGuard } from './common/guards/roles.guard';
 import { FulfillmentModule } from './fulfillment/fulfillment.module';
@@ -93,6 +94,7 @@ import { WebhooksModule } from './webhooks/webhooks.module';
     NomenclatorsModule,
     ContactModule,
     ComplaintsModule,
+    TicketsModule,
     ProductsModule,
     CartModule,
     GeographyModule,
