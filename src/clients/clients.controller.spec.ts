@@ -150,3 +150,36 @@ describe('ClientsController · la libreta de direcciones', () => {
     });
   });
 });
+
+describe('ClientsController · buscar por clerkId', () => {
+  /**
+   * `GET /clients/lookup` devolvía **500 cuando no venía `clerkId`**
+   * (MxH-0181): el parámetro llegaba `undefined`, entraba en el `where` de
+   * TypeORM y este se niega a construirlo. Lo que se fija aquí es que el
+   * identificador **llega al servicio**; que una petición sin él responde 400
+   * lo fija `ClerkLookupQueryDto`, que es quien lo valida.
+   */
+  const controlador = () => {
+    const clientes = { findByClerkId: jest.fn().mockResolvedValue(null) };
+    const controller = new ClientsController(
+      clientes as unknown as ClientsService,
+      {} as ClientInvitationsService,
+      {} as ClientAddressesService,
+      {} as ClientReconciliationService,
+    );
+    return { controller, clientes };
+  };
+
+  it('le pasa al servicio el clerkId que vino en la consulta', async () => {
+    const { controller, clientes } = controlador();
+    await controller.findByClerkId({ clerkId: 'user_2abcDEF' });
+    expect(clientes.findByClerkId).toHaveBeenCalledWith('user_2abcDEF');
+  });
+
+  it('una cuenta que no está devuelve null, no un error', async () => {
+    const { controller } = controlador();
+    expect(await controller.findByClerkId({ clerkId: 'user_no_existe' })).toBe(
+      null,
+    );
+  });
+});

@@ -11,6 +11,7 @@ import {
   Query,
 } from '@nestjs/common';
 import { ClientAddressesService } from '../client-addresses/client-addresses.service';
+import { ClerkLookupQueryDto } from '../common/dto/clerk-lookup-query.dto';
 import { ClientAddressResponseDto } from '../client-addresses/dto/client-address-response.dto';
 import { RequirePermission } from '../permissions/decorators/require-permission.decorator';
 import { ClientInvitationsService } from './client-invitations.service';
@@ -80,9 +81,9 @@ export class ClientsController {
   @Get('lookup')
   @RequirePermission({ module: 'clients', action: 'list' })
   async findByClerkId(
-    @Query('clerkId') clerkId: string,
+    @Query() query: ClerkLookupQueryDto,
   ): Promise<ClientResponseDto | null> {
-    const client = await this.clientsService.findByClerkId(clerkId);
+    const client = await this.clientsService.findByClerkId(query.clerkId);
     return client ? ClientResponseDto.fromEntity(client) : null;
   }
 
