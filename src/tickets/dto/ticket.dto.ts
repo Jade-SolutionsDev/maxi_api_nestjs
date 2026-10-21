@@ -20,6 +20,32 @@ import {
 /** Tope de fotos por ticket. Una incidencia que necesita más es dos. */
 export const MAX_IMAGENES = 6;
 
+/**
+ * Cómo se valida la dirección de una foto.
+ *
+ * `require_protocol` y la lista de protocolos van **explícitos**. Sin ellos,
+ * `@IsUrl()` rechaza `javascript:` y `data:` igual —por el valor por omisión de
+ * su lista interna— pero **acepta `tickets/a.png`**, una ruta relativa sin
+ * esquema: no es un ataque, es un valor que se guarda y luego se pinta como un
+ * enlace relativo a la página en la que estés. Comprobado con las ocho
+ * variantes de abajo.
+ *
+ * Que la protección contra `javascript:` dependa de un valor por omisión que
+ * nadie escribió es lo que lo hacía frágil: basta que alguien añada una opción
+ * a este decorador para perderla sin darse cuenta.
+ *
+ * `require_tld: false` se queda porque en desarrollo el almacenamiento es
+ * `http://localhost:9000`. Lo que **no** se comprueba aquí es que la dirección
+ * salga de nuestro almacenamiento: el host cambia por entorno —Cloudinary en
+ * producción, MinIO en local— y fijarlo en el DTO obligaría a desplegar para
+ * cambiar de proveedor. Quien escribe aquí ya tiene `tickets:create`.
+ */
+export const IMAGEN_URL = {
+  require_protocol: true,
+  require_tld: false,
+  protocols: ['http', 'https'],
+};
+
 export class CreateTicketDto {
   @IsString()
   @Length(5, 160)
@@ -44,7 +70,7 @@ export class CreateTicketDto {
   @IsOptional()
   @IsArray()
   @ArrayMaxSize(MAX_IMAGENES)
-  @IsUrl({ require_tld: false }, { each: true })
+  @IsUrl(IMAGEN_URL, { each: true })
   images?: string[];
 }
 
@@ -76,7 +102,7 @@ export class UpdateTicketDto {
   @IsOptional()
   @IsArray()
   @ArrayMaxSize(MAX_IMAGENES)
-  @IsUrl({ require_tld: false }, { each: true })
+  @IsUrl(IMAGEN_URL, { each: true })
   images?: string[];
 }
 
