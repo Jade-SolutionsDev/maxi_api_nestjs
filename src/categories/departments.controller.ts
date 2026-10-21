@@ -4,6 +4,7 @@ import {
   Delete,
   Get,
   Param,
+  ParseUUIDPipe,
   Patch,
   Post,
   Query,
@@ -40,7 +41,7 @@ export class DepartmentsController {
   @Get(':id')
   @RequirePermission({ module: 'departments', action: 'read' })
   async findOne(
-    @Param('id') id: string,
+    @Param('id', ParseUUIDPipe) id: string,
     @Req() request: AuthenticatedUserRequest,
   ): Promise<CategoryResponseDto> {
     return CategoryResponseDto.fromEntity(
@@ -62,7 +63,7 @@ export class DepartmentsController {
   @Patch(':id')
   @RequirePermission({ module: 'departments', action: 'update' })
   async update(
-    @Param('id') id: string,
+    @Param('id', ParseUUIDPipe) id: string,
     @Body() dto: UpdateDepartmentDto,
     @Req() request: AuthenticatedUserRequest,
   ): Promise<CategoryResponseDto> {
@@ -74,7 +75,7 @@ export class DepartmentsController {
   @Delete(':id')
   @RequirePermission({ module: 'departments', action: 'delete' })
   async remove(
-    @Param('id') id: string,
+    @Param('id', ParseUUIDPipe) id: string,
     @Req() request: AuthenticatedUserRequest,
   ): Promise<void> {
     await this.categoriesService.removeDepartment(request.user, id);

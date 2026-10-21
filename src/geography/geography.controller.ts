@@ -1,4 +1,11 @@
-import { Controller, Get, Header, Param, Query } from '@nestjs/common';
+import {
+  Controller,
+  Get,
+  Header,
+  Param,
+  ParseUUIDPipe,
+  Query,
+} from '@nestjs/common';
 import { ApiTags } from '@nestjs/swagger';
 import { Public } from '../common/decorators/public.decorator';
 import {
@@ -37,7 +44,7 @@ export class GeographyController {
   @Get('provinces/:id/municipalities')
   @Header('Cache-Control', GEOGRAPHY_CACHE)
   async listByProvince(
-    @Param('id') id: string,
+    @Param('id', ParseUUIDPipe) id: string,
     @Query('all') all?: string,
   ): Promise<MunicipalityResponseDto[]> {
     const municipalities = await this.geographyService.listMunicipalities(id, {

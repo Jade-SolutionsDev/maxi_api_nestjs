@@ -4,6 +4,7 @@ import {
   Delete,
   Get,
   Param,
+  ParseUUIDPipe,
   Patch,
   Post,
   Query,
@@ -64,7 +65,9 @@ export class UsersController {
   }
 
   @Get(':id')
-  async findOne(@Param('id') id: string): Promise<UserResponseDto> {
+  async findOne(
+    @Param('id', ParseUUIDPipe) id: string,
+  ): Promise<UserResponseDto> {
     return UserResponseDto.fromEntity(await this.usersService.findOne(id));
   }
 
@@ -80,7 +83,7 @@ export class UsersController {
 
   @Patch(':id')
   async update(
-    @Param('id') id: string,
+    @Param('id', ParseUUIDPipe) id: string,
     @Body() updateUserDto: UpdateUserDto,
     @CurrentUser() actor: User,
   ): Promise<UserResponseDto> {
@@ -91,7 +94,7 @@ export class UsersController {
 
   @Patch(':id/password')
   async setPassword(
-    @Param('id') id: string,
+    @Param('id', ParseUUIDPipe) id: string,
     @Body() dto: SetPasswordDto,
     @CurrentUser() actor: User,
   ): Promise<void> {
@@ -100,7 +103,7 @@ export class UsersController {
 
   @Delete(':id')
   async remove(
-    @Param('id') id: string,
+    @Param('id', ParseUUIDPipe) id: string,
     @CurrentUser() actor: User,
   ): Promise<void> {
     await this.usersService.remove(id, actor);
@@ -108,7 +111,9 @@ export class UsersController {
 
   @Post(':id/restore')
   @Roles(Role.SUPER_ADMIN)
-  async restore(@Param('id') id: string): Promise<UserResponseDto> {
+  async restore(
+    @Param('id', ParseUUIDPipe) id: string,
+  ): Promise<UserResponseDto> {
     return UserResponseDto.fromEntity(await this.usersService.restore(id));
   }
 
@@ -124,7 +129,7 @@ export class UsersController {
 
   @Post('invitations/:id/revoke')
   async revokeInvitation(
-    @Param('id') id: string,
+    @Param('id', ParseUUIDPipe) id: string,
   ): Promise<InvitationResponseDto> {
     return InvitationResponseDto.fromEntity(
       await this.invitationsService.revoke(id),
@@ -133,7 +138,7 @@ export class UsersController {
 
   @Post('invitations/:id/resend')
   async resendInvitation(
-    @Param('id') id: string,
+    @Param('id', ParseUUIDPipe) id: string,
     @CurrentUser() actor: User,
   ): Promise<InvitationResponseDto> {
     return InvitationResponseDto.fromEntity(

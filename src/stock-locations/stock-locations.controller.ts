@@ -4,6 +4,7 @@ import {
   Delete,
   Get,
   Param,
+  ParseUUIDPipe,
   Patch,
   Post,
   Query,
@@ -58,7 +59,7 @@ export class StockLocationsController {
   @Get(':id')
   @RequirePermission({ module: 'stock-locations', action: 'read' })
   async findOne(
-    @Param('id') id: string,
+    @Param('id', ParseUUIDPipe) id: string,
     @Req() request: AuthenticatedUserRequest,
   ): Promise<StockLocationResponseDto> {
     return this.stockLocationsService.findOne(request.user, id);
@@ -76,7 +77,7 @@ export class StockLocationsController {
   @Patch(':id')
   @RequirePermission({ module: 'stock-locations', action: 'update' })
   async update(
-    @Param('id') id: string,
+    @Param('id', ParseUUIDPipe) id: string,
     @Body() dto: UpdateStockLocationDto,
     @Req() request: AuthenticatedUserRequest,
   ): Promise<StockLocationResponseDto> {
@@ -85,7 +86,7 @@ export class StockLocationsController {
 
   @Delete(':id')
   @RequirePermission({ module: 'stock-locations', action: 'delete' })
-  async remove(@Param('id') id: string): Promise<void> {
+  async remove(@Param('id', ParseUUIDPipe) id: string): Promise<void> {
     await this.stockLocationsService.remove(id);
   }
 }
