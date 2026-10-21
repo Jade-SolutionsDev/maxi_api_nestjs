@@ -1,7 +1,12 @@
 import 'reflect-metadata';
 import { plainToInstance } from 'class-transformer';
 import { validate } from 'class-validator';
-import { CreateTicketDto } from './ticket.dto';
+import {
+  ChangeTicketStatusDto,
+  CloseTicketDto,
+  CreateTicketDto,
+  ReopenTicketDto,
+} from './ticket.dto';
 
 /**
  * Qué direcciones de imagen entran en un ticket.
@@ -61,5 +66,47 @@ describe('las imágenes de un ticket', () => {
     const buena = 'https://res.cloudinary.com/x/image/upload/v1/tickets/a.png';
     expect(await conImagenes(Array(6).fill(buena))).toBe(false);
     expect(await conImagenes(Array(7).fill(buena))).toBe(true);
+  });
+});
+
+/**
+ * Lo que acepta el cuerpo de cada ruta, que es lo que comprueba el
+ * `ValidationPipe` **antes** de que el controlador exista.
+ *
+ * Esto faltaba, y por eso el fallo llegó a staging: las pruebas del
+ * controlador llaman a su método directamente y **se saltan el tubo**, así que
+ * un cuerpo que el tubo rechaza pasa en verde ahí dentro. `POST
+ * /tickets/:id/close` con el cuerpo vacío —el que tiene sentido escribir—
+ * respondía 400 pidiendo un `status` que la ruta ignora.
+ */
+describe('el cuerpo de cerrar y reabrir', () => {
+  const errores = async (
+    Clase: new () => object,
+    cuerpo: Record<string, unknown>,
+  ) => validate(plainToInstance(Clase, cuerpo));
+
+  it('cerrar acepta el cuerpo vacío: el estado lo pone la ruta', async () => {
+    expect(await errores(CloseTicketDto, {})).toHaveLength(0);
+  });
+
+  it('cerrar acepta una nota, por si hay algo que añadir', async () => {
+    expect(await errores(CloseTicketDto, { note: 'Comprobado' })).toHaveLength(
+      0,
+    );
+  });
+
+  it('reabrir exige la nota: deshacer un visto bueno se explica', async () => {
+    const e = await errores(ReopenTicketDto, {});
+    expect(e.map((x) => x.property)).toContain('note');
+  });
+
+  it('reabrir no acepta una nota de dos letras', async () => {
+    const e = await errores(ReopenTicketDto, { note: 'ok' });
+    expect(e.map((x) => x.property)).toContain('note');
+  });
+
+  it('mover de estado sí sigue exigiendo el estado', async () => {
+    const e = await errores(ChangeTicketStatusDto, {});
+    expect(e.map((x) => x.property)).toContain('status');
   });
 });

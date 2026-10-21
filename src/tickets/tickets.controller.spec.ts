@@ -95,13 +95,10 @@ describe('TicketsController', () => {
     });
 
     it('cerrar fuerza el estado «cerrado» y sí lo trae', async () => {
-      await controller.close(
-        't1',
-        // Aunque el cuerpo diga otra cosa, la ruta decide: si no, esta ruta
-        // sería un atajo para hacer cualquier cambio con el permiso de cerrar.
-        { status: TicketStatus.ABIERTO, note: 'confirmado' },
-        peticion,
-      );
+      // El cuerpo de esta ruta ya no admite `status`: lo decide la ruta. Si lo
+      // admitiera, sería un atajo para hacer cualquier cambio con el permiso
+      // de cerrar.
+      await controller.close('t1', { note: 'confirmado' }, peticion);
       expect(service.changeStatus).toHaveBeenCalledWith(
         't1',
         { status: TicketStatus.CERRADO, note: 'confirmado' },
@@ -111,11 +108,7 @@ describe('TicketsController', () => {
     });
 
     it('reabrir fuerza «en curso» y lo trae', async () => {
-      await controller.reopen(
-        't1',
-        { status: TicketStatus.ABIERTO, note: 'volvió a pasar' },
-        peticion,
-      );
+      await controller.reopen('t1', { note: 'volvió a pasar' }, peticion);
       expect(service.changeStatus).toHaveBeenCalledWith(
         't1',
         { status: TicketStatus.EN_CURSO, note: 'volvió a pasar' },

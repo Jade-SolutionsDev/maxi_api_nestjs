@@ -22,7 +22,9 @@ import { RequirePermission } from '../permissions/decorators/require-permission.
 import {
   AddTicketCommentDto,
   ChangeTicketStatusDto,
+  CloseTicketDto,
   CreateTicketDto,
+  ReopenTicketDto,
   TicketResponseDto,
   TicketsQueryDto,
   UpdateTicketDto,
@@ -121,11 +123,12 @@ export class TicketsController {
     summary: 'Cerrar el ticket: confirmar que lo resuelto está resuelto',
     description:
       'No borra ni reescribe lo que escribió quien lo arregló: le pone fecha ' +
-      'al visto bueno. Solo se puede cerrar un ticket que esté «resuelto».',
+      'al visto bueno. Solo se puede cerrar un ticket que esté «resuelto». El ' +
+      'cuerpo puede ir vacío: el estado lo decide la ruta.',
   })
   close(
     @Param('id', ParseUUIDPipe) id: string,
-    @Body() dto: ChangeTicketStatusDto,
+    @Body() dto: CloseTicketDto,
     @Req() req: AuthenticatedUserRequest,
   ): Promise<TicketResponseDto> {
     return this.ticketsService.changeStatus(
@@ -147,7 +150,7 @@ export class TicketsController {
   })
   reopen(
     @Param('id', ParseUUIDPipe) id: string,
-    @Body() dto: ChangeTicketStatusDto,
+    @Body() dto: ReopenTicketDto,
     @Req() req: AuthenticatedUserRequest,
   ): Promise<TicketResponseDto> {
     return this.ticketsService.changeStatus(
