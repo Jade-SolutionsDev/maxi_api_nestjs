@@ -111,14 +111,47 @@ export class ChangeTicketStatusDto {
   status: TicketStatus;
 
   /**
-   * Obligatoria al pasar a «resuelto» —ahí es el qué se hizo— y al reabrir un
-   * ticket ya cerrado. En los demás pasos es una nota libre que se guarda en
-   * el historial.
+   * Obligatoria al pasar a «resuelto» —ahí es el qué se hizo—. En los demás
+   * pasos es una nota libre que se guarda en el historial.
    */
   @IsOptional()
   @IsString()
   @Length(3, 2000)
   note?: string;
+}
+
+/**
+ * Cerrar el ticket. **No lleva `status`**, y esa ausencia es el arreglo.
+ *
+ * La ruta `/close` decide el estado ella sola —para eso tiene su propio
+ * permiso—, así que exigir un `status` en el cuerpo pedía un dato que el
+ * servidor iba a ignorar: un campo que miente sobre lo que hace la llamada. Y
+ * no era teórico: una llamada con el cuerpo vacío, que es la que tiene sentido
+ * escribir, respondía 400 pidiendo un `status` que da igual cuál sea.
+ *
+ * Es el mismo error que ya se había corregido en las quejas con
+ * `AddComplaintNoteDto` (MxH-0064) y que aquí se repitió. Se encontró
+ * probando el ciclo entero contra staging, no en las pruebas: las unitarias
+ * llaman al método del controlador y **se saltan el `ValidationPipe`**, que es
+ * justo quien rechazaba.
+ */
+export class CloseTicketDto {
+  /** Opcional: por qué se da por bueno, si hay algo que añadir. */
+  @IsOptional()
+  @IsString()
+  @Length(3, 2000)
+  note?: string;
+}
+
+/**
+ * Reabrir un ticket cerrado. Tampoco lleva `status`, y la nota **sí** es
+ * obligatoria: deshacer un visto bueno sin decir por qué deja el historial sin
+ * la única parte que explica qué pasó.
+ */
+export class ReopenTicketDto {
+  @IsString()
+  @Length(3, 2000)
+  note: string;
 }
 
 /**
