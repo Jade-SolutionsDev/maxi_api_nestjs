@@ -11,6 +11,7 @@ import {
 } from '@nestjs/common';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { Roles } from '../common/decorators/roles.decorator';
+import { ClerkLookupQueryDto } from '../common/dto/clerk-lookup-query.dto';
 import { PaginatedResponse } from '../common/dto/pagination.dto';
 import { CreateUserDto } from './dto/create-user.dto';
 import { InvitationResponseDto } from './dto/invitation-response.dto';
@@ -58,9 +59,9 @@ export class UsersController {
 
   @Get('lookup')
   async findByClerkId(
-    @Query('clerkId') clerkId: string,
+    @Query() query: ClerkLookupQueryDto,
   ): Promise<UserResponseDto | null> {
-    const user = await this.usersService.findByClerkId(clerkId);
+    const user = await this.usersService.findByClerkId(query.clerkId);
     return user ? UserResponseDto.fromEntity(user) : null;
   }
 

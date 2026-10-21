@@ -88,7 +88,11 @@ describe('UsersController', () => {
 
   it('should lookup a user by clerkId', async () => {
     service.findByClerkId.mockResolvedValue(user as unknown as never);
-    const result = await controller.findByClerkId(user.clerkId!);
+    const result = await controller.findByClerkId({ clerkId: user.clerkId! });
+    // Que el clerkId llegue al servicio, y no solo que la respuesta vuelva:
+    // sin esta línea la prueba pasaba aunque el controlador mandase
+    // `undefined`, que es justo el fallo de MxH-0181.
+    expect(service.findByClerkId).toHaveBeenCalledWith(user.clerkId);
     expect(result?.clerkId).toBe(user.clerkId);
   });
 
