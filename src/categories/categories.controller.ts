@@ -4,6 +4,7 @@ import {
   Delete,
   Get,
   Param,
+  ParseUUIDPipe,
   Patch,
   Post,
   Query,
@@ -53,7 +54,9 @@ export class CategoriesController {
 
   @Get(':id')
   @RequirePermission({ module: 'categories', action: 'read' })
-  async findOne(@Param('id') id: string): Promise<CategoryResponseDto> {
+  async findOne(
+    @Param('id', ParseUUIDPipe) id: string,
+  ): Promise<CategoryResponseDto> {
     const category = await this.categoriesService.getCategory(id);
     const [asociados, disponibles] = await Promise.all([
       this.categoriesService.countProducts([id]),
@@ -79,7 +82,7 @@ export class CategoriesController {
   @Patch(':id')
   @RequirePermission({ module: 'categories', action: 'update' })
   async update(
-    @Param('id') id: string,
+    @Param('id', ParseUUIDPipe) id: string,
     @Body() dto: UpdateCategoryDto,
     @Req() request: AuthenticatedUserRequest,
   ): Promise<CategoryResponseDto> {
@@ -91,7 +94,7 @@ export class CategoriesController {
   @Delete(':id')
   @RequirePermission({ module: 'categories', action: 'delete' })
   async remove(
-    @Param('id') id: string,
+    @Param('id', ParseUUIDPipe) id: string,
     @Req() request: AuthenticatedUserRequest,
   ): Promise<void> {
     await this.categoriesService.removeCategory(request.user, id);

@@ -4,6 +4,7 @@ import {
   Controller,
   Get,
   Param,
+  ParseUUIDPipe,
   Post,
   Query,
   Req,
@@ -65,7 +66,7 @@ export class InventoryController {
   @Get('product/:productId/history')
   @RequirePermission({ module: 'inventory', action: 'history' })
   async productHistory(
-    @Param('productId') productId: string,
+    @Param('productId', ParseUUIDPipe) productId: string,
   ): Promise<InventoryHistoryEventDto[]> {
     return this.inventoryService.history({ productId });
   }
@@ -74,7 +75,7 @@ export class InventoryController {
   @Get('location/:locationId/history')
   @RequirePermission({ module: 'inventory', action: 'history' })
   async locationHistory(
-    @Param('locationId') locationId: string,
+    @Param('locationId', ParseUUIDPipe) locationId: string,
     @Req() request: AuthenticatedUserRequest,
   ): Promise<InventoryHistoryEventDto[]> {
     return this.inventoryService.locationHistory(request.user, locationId);
@@ -111,7 +112,7 @@ export class InventoryController {
   @Get('product/:productId')
   @RequirePermission({ module: 'inventory', action: 'read' })
   async stockByProduct(
-    @Param('productId') productId: string,
+    @Param('productId', ParseUUIDPipe) productId: string,
   ): Promise<ProductStockLocationDto[]> {
     return this.inventoryService.stockByProduct(productId);
   }

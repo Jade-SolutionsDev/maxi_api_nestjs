@@ -88,7 +88,9 @@ export class ClientsController {
 
   @Get(':id')
   @RequirePermission({ module: 'clients', action: 'read' })
-  async findOne(@Param('id') id: string): Promise<ClientResponseDto> {
+  async findOne(
+    @Param('id', ParseUUIDPipe) id: string,
+  ): Promise<ClientResponseDto> {
     return ClientResponseDto.fromEntity(await this.clientsService.findOne(id));
   }
 
@@ -105,7 +107,7 @@ export class ClientsController {
   })
   @ApiOkResponse({ type: ClientBeneficiariesResponseDto })
   async findBeneficiaries(
-    @Param('id') id: string,
+    @Param('id', ParseUUIDPipe) id: string,
   ): Promise<ClientBeneficiariesResponseDto> {
     return this.clientsService.findBeneficiaries(id);
   }
@@ -197,7 +199,7 @@ export class ClientsController {
   @Patch(':id')
   @RequirePermission({ module: 'clients', action: 'update' })
   async update(
-    @Param('id') id: string,
+    @Param('id', ParseUUIDPipe) id: string,
     @Body() updateClientDto: UpdateClientDto,
   ): Promise<ClientResponseDto> {
     return ClientResponseDto.fromEntity(
@@ -207,7 +209,7 @@ export class ClientsController {
 
   @Delete(':id')
   @RequirePermission({ module: 'clients', action: 'delete' })
-  async remove(@Param('id') id: string): Promise<void> {
+  async remove(@Param('id', ParseUUIDPipe) id: string): Promise<void> {
     await this.clientsService.remove(id);
   }
 }

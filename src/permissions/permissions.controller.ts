@@ -5,6 +5,7 @@ import {
   ForbiddenException,
   Get,
   Param,
+  ParseUUIDPipe,
   Patch,
   Post,
   Put,
@@ -63,7 +64,9 @@ export class PermissionsController {
   }
 
   @Get('roles/:id')
-  async getRole(@Param('id') id: string): Promise<RoleResponseDto> {
+  async getRole(
+    @Param('id', ParseUUIDPipe) id: string,
+  ): Promise<RoleResponseDto> {
     const role = await this.permissionsService.getRole(id);
     const permissionIds =
       await this.permissionsService.getRolePermissionIds(id);
@@ -72,7 +75,7 @@ export class PermissionsController {
 
   @Patch('roles/:id')
   async updateRole(
-    @Param('id') id: string,
+    @Param('id', ParseUUIDPipe) id: string,
     @Body() dto: UpdateRoleDto,
   ): Promise<RoleResponseDto> {
     const role = await this.permissionsService.updateRole(id, dto);
@@ -82,13 +85,13 @@ export class PermissionsController {
   }
 
   @Delete('roles/:id')
-  async deleteRole(@Param('id') id: string): Promise<void> {
+  async deleteRole(@Param('id', ParseUUIDPipe) id: string): Promise<void> {
     return this.permissionsService.deleteRole(id);
   }
 
   @Put('roles/:id/permissions')
   async setRolePermissions(
-    @Param('id') id: string,
+    @Param('id', ParseUUIDPipe) id: string,
     @Body() dto: SetRolePermissionsDto,
   ): Promise<RoleResponseDto> {
     const role = await this.permissionsService.getRole(id);
@@ -104,13 +107,15 @@ export class PermissionsController {
   }
 
   @Get('users/:userId/roles')
-  async getUserRoles(@Param('userId') userId: string): Promise<ManagedRole[]> {
+  async getUserRoles(
+    @Param('userId', ParseUUIDPipe) userId: string,
+  ): Promise<ManagedRole[]> {
     return this.permissionsService.getUserRoles(userId);
   }
 
   @Put('users/:userId/roles')
   async setUserRoles(
-    @Param('userId') userId: string,
+    @Param('userId', ParseUUIDPipe) userId: string,
     @Body() dto: SetUserRolesDto,
     @Req() request: AuthenticatedUserRequest,
   ): Promise<void> {
@@ -123,7 +128,7 @@ export class PermissionsController {
 
   @Get('users/:userId')
   async getUserPermissions(
-    @Param('userId') userId: string,
+    @Param('userId', ParseUUIDPipe) userId: string,
   ): Promise<UserPermissionsPayload> {
     return this.permissionsService.getUserPermissions(userId);
   }

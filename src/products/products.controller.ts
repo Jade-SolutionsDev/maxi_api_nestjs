@@ -4,6 +4,7 @@ import {
   Delete,
   Get,
   Param,
+  ParseUUIDPipe,
   Patch,
   Post,
   Query,
@@ -71,7 +72,9 @@ export class ProductsController {
 
   @Get(':id')
   @RequirePermission({ module: 'products', action: 'read' })
-  async findOne(@Param('id') id: string): Promise<ProductResponseDto> {
+  async findOne(
+    @Param('id', ParseUUIDPipe) id: string,
+  ): Promise<ProductResponseDto> {
     const product = await this.productsService.findOne(id);
     const amounts = await this.productsService.amountsFor([product.id]);
     const available = await this.productsService.availableFor([product.id]);
@@ -96,7 +99,7 @@ export class ProductsController {
   @Patch(':id')
   @RequirePermission({ module: 'products', action: 'update' })
   async update(
-    @Param('id') id: string,
+    @Param('id', ParseUUIDPipe) id: string,
     @Body() dto: UpdateProductDto,
   ): Promise<ProductResponseDto> {
     return ProductResponseDto.fromEntity(
@@ -108,7 +111,7 @@ export class ProductsController {
 
   @Delete(':id')
   @RequirePermission({ module: 'products', action: 'delete' })
-  async remove(@Param('id') id: string): Promise<void> {
+  async remove(@Param('id', ParseUUIDPipe) id: string): Promise<void> {
     await this.productsService.remove(id);
   }
 }
