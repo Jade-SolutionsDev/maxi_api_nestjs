@@ -59,7 +59,14 @@ export interface MibiConfig extends GatewayCredentials {
 export interface TropipayConfig extends GatewayCredentials {
   clientId: string | undefined;
   clientSecret: string | undefined;
-  /** "Development" hits tropipay-dev.herokuapp.com; "Production" the live account. */
+  /**
+   * "Production" va a la cuenta real; "Development", al cajón de pruebas.
+   *
+   * Ese cajón cambió de sitio con el SDK 0.3.1: antes era
+   * `tropipay-dev.herokuapp.com` y ahora es `sandbox.tropipay.me`. Son dos
+   * entornos distintos de Tropipay, así que las credenciales de uno no tienen
+   * por qué valer en el otro (MxH-0180).
+   */
   serverMode: 'Development' | 'Production';
   /** Tropipay accepts EUR and USD only — anything else 400s opaquely. */
   currency: string;
