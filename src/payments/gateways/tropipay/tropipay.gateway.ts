@@ -20,10 +20,28 @@ import {
   PaymentActionKind,
   PaymentGateway,
 } from '../../payment-gateway.interface';
+import type { PaymentLinkCurrency } from '@yosle/tropipayjs';
 import { TropipayClient } from './tropipay-client';
 
-/** Tropipay rejects anything else with an opaque 400 that never names the field. */
-const SUPPORTED_CURRENCIES = ['EUR', 'USD'];
+/**
+ * Tropipay rejects anything else with an opaque 400 that never names the field.
+ *
+ * El `satisfies` lo ata al tipo del SDK: si una versión suya deja de admitir
+ * una de las dos, el fallo sale al compilar y no en el primer cobro.
+ */
+const SUPPORTED_CURRENCIES = [
+  'EUR',
+  'USD',
+] as const satisfies readonly PaymentLinkCurrency[];
+
+type MonedaAdmitida = (typeof SUPPORTED_CURRENCIES)[number];
+
+/**
+ * `includes` sobre una lista de literales no estrecha el tipo por sí solo, y
+ * el enlace de pago exige una moneda concreta, no una cadena cualquiera.
+ */
+const esMonedaAdmitida = (valor: string): valor is MonedaAdmitida =>
+  (SUPPORTED_CURRENCIES as readonly string[]).includes(valor);
 
 /**
  * Tropipay rejects small charges with the same opaque "Invalid amount" it uses
@@ -80,7 +98,7 @@ export class TropipayGateway extends PaymentGateway {
     idempotencyKey: string,
   ): Promise<GatewayCharge> {
     const currency = this.client.config.currency;
-    if (!SUPPORTED_CURRENCIES.includes(currency)) {
+    if (!esMonedaAdmitida(currency)) {
       throw new BadRequestException(
         `Tropipay only settles in ${SUPPORTED_CURRENCIES.join(' or ')} (configured: ${currency})`,
       );

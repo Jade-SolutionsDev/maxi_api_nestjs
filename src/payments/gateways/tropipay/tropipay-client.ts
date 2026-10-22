@@ -8,13 +8,28 @@ import {
 } from '@yosle/tropipayjs';
 import { PaymentsConfig, TropipayConfig } from '../../../config/configuration';
 
+/** Lo que una petición saliente del SDK nos deja ver y tocar. */
+interface PeticionDelSdk {
+  headers: Record<string, unknown>;
+  url?: string;
+}
+
 /**
- * Lo único que nos hace falta del cliente de axios que el SDK lleva dentro.
- * Sus propios tipos no llegan resueltos hasta aquí, y para apagar un
- * interceptor no vale la pena arrastrar axios entero.
+ * Lo único que nos hace falta del cliente de axios que el SDK lleva dentro:
+ * apagar su interceptor y poner el nuestro. Sus propios tipos no llegan
+ * resueltos hasta aquí, y no vale la pena arrastrar axios entero.
  */
 interface ClienteDelSdk {
-  request?: { interceptors?: { request?: { clear?: () => void } } };
+  request?: {
+    interceptors?: {
+      request?: {
+        clear?: () => void;
+        use?: (
+          alSalir: (peticion: PeticionDelSdk) => Promise<PeticionDelSdk>,
+        ) => void;
+      };
+    };
+  };
 }
 
 /** One account movement, reduced to what payment confirmation needs. */
@@ -39,18 +54,30 @@ export class TropipayClient implements OnModuleInit {
   private instance: Tropipay | null = null;
 
   /**
-   * Cada cuánto se vuelve a autenticar, en milisegundos.
-   *
-   * No se usa el `expires_in` que devuelve la pasarela porque el SDK lo guarda
-   * tal cual llega y su propio código lo compara con una marca de tiempo, así
-   * que no hay forma de saber desde fuera si es una duración o un instante.
-   * Media hora queda corta frente a cualquiera de las dos lecturas, y una
-   * autenticación de más cada media hora no le cuesta nada a nadie.
+   * Cada cuánto se vuelve a autenticar, en milisegundos. El porqué de no usar
+   * el `expires_in` de la pasarela está en `asegurarSesion`.
    */
   private static readonly VIGENCIA_MS = 30 * 60 * 1000;
 
   /** Cuándo toca volver a autenticarse, en milisegundos desde la época. */
   private renovarDespuesDe = 0;
+
+  /**
+   * La autenticación en curso, si la hay. Sin esto, dos compras simultáneas
+   * tras caducar la vigencia piden dos sesiones a la vez y la segunda invalida
+   * el token de la primera.
+   */
+  private sesionEnCurso: Promise<void> | null = null;
+
+  /**
+   * La ruta por la que el SDK pide la sesión. Es la única petición que sale sin
+   * firmar: firmarla sería pedir una sesión para poder pedir una sesión.
+   *
+   * Se compara por el final y no por la ruta entera a propósito. La 0.2.3 la
+   * tenía bajo `/api/v2` y la 0.3.1 bajo `/api/v3`; lo que no ha cambiado
+   * nunca es el `/access/token`.
+   */
+  private static readonly FINAL_DE_LA_RUTA_DEL_TOKEN = '/access/token';
 
   constructor(private readonly configService: ConfigService) {}
 
@@ -97,41 +124,73 @@ export class TropipayClient implements OnModuleInit {
         'ALLOW_GET_MOVEMENT_LIST',
       ],
     });
-    this.quitarElRefrescoRecursivo(instancia);
+    this.ponerNuestroInterceptor(instancia);
     return instancia;
   }
 
   /**
-   * El interceptor de peticiones del SDK renueva el token llamando a `login()`,
-   * y `login()` manda su POST por este mismo cliente de axios: entra otra vez
-   * en el interceptor, que lo vuelve a ver caducado, y así sin fondo.
+   * Cambia el interceptor del SDK por uno nuestro.
    *
-   * No es una fuga lenta. El montón pasa de 70 MB al techo de 4 GB en menos de
-   * un minuto y Node muere con `heap out of memory`, llevándose por delante la
-   * compra que lo disparó y todo lo demás que estuviera en marcha. En staging
-   * pasaba cada madrugada con la primera compra de la suite; en producción, el
-   * 14-oct-2026 (MxH-0166).
+   * **Por qué no vale ninguno de los dos extremos.**
    *
-   * Se quita entero. Los dos únicos métodos que usamos, `paymentCards.create` y
-   * `movements`, ya se autentican solos si falta el token y ponen la cabecera
-   * ellos mismos, así que el interceptor no hacía falta para nada más. De que
-   * la sesión no envejezca se encarga `conSesion`.
+   * *Dejar el suyo* no vale. Decide que el token caducó comparando `expiresIn`
+   * con la hora actual en segundos, y ahí guarda el `expires_in` tal como llega
+   * de la pasarela; si eso es una duración y no un instante, la comparación da
+   * «caducado» en todas y cada una de las peticiones. Y la renovación que
+   * dispara entra por el camino del `refresh_token`, que contra nuestra cuenta
+   * responde «App not found» (ver `autenticar`).
+   *
+   * *Quitarlo sin más* tampoco, y esto es lo que cambia respecto a la 0.2.3.
+   * Allí `paymentCards.create` y `movements` se autenticaban solos y ponían
+   * `Authorization` ellos mismos, así que el PR #85 pudo apagar el interceptor
+   * y no perder nada. En la 0.3.1 esos métodos son un `request.post` pelado:
+   * **la cabecera la pone únicamente el interceptor**. Sin él, todo responde
+   * 401.
+   *
+   * Así que ponemos uno que hace lo que necesitamos y nada más: deja salir la
+   * petición del token, se asegura de que haya sesión fresca, y firma.
    */
-  private quitarElRefrescoRecursivo(instancia: Tropipay): void {
+  private ponerNuestroInterceptor(instancia: Tropipay): void {
     const cliente = instancia as unknown as ClienteDelSdk;
     cliente.request?.interceptors?.request?.clear?.();
+    cliente.request?.interceptors?.request?.use?.(async (peticion) => {
+      if (this.esLaPeticionDelToken(peticion)) return peticion;
+      await this.asegurarSesion();
+      peticion.headers = {
+        ...peticion.headers,
+        Authorization: `Bearer ${instancia.accessToken}`,
+      };
+      return peticion;
+    });
   }
 
   /**
-   * Deja una sesión fresca y entonces habla con la pasarela.
-   *
-   * Hace falta porque sin el interceptor nadie renueva el token: con uno
-   * caducado la pasarela respondería 401 y el cliente leería «no se puede
-   * pagar con tarjeta» cuando sí se puede.
+   * Se mira la ruta, y no si hay una autenticación en marcha, porque una
+   * compra que caiga justo mientras se renueva la sesión es una petición
+   * normal: tiene que esperar y salir firmada, no colarse sin cabecera y
+   * recibir un 401.
    */
-  private async conSesion<T>(llamada: () => Promise<T>): Promise<T> {
-    if (Date.now() >= this.renovarDespuesDe) await this.autenticar();
-    return llamada();
+  private esLaPeticionDelToken(peticion: PeticionDelSdk): boolean {
+    return (
+      typeof peticion.url === 'string' &&
+      peticion.url.endsWith(TropipayClient.FINAL_DE_LA_RUTA_DEL_TOKEN)
+    );
+  }
+
+  /**
+   * Deja una sesión utilizable, sin pedir dos a la vez.
+   *
+   * La vigencia la contamos nosotros y no con el `expires_in` de la pasarela,
+   * porque el SDK lo guarda tal cual llega y lo compara con una marca de
+   * tiempo, así que desde fuera no hay forma de saber si es una duración o un
+   * instante. Media hora queda corta frente a cualquiera de las dos lecturas.
+   */
+  private async asegurarSesion(): Promise<void> {
+    if (this.sdk.accessToken && Date.now() < this.renovarDespuesDe) return;
+    this.sesionEnCurso ??= this.autenticar().finally(() => {
+      this.sesionEnCurso = null;
+    });
+    await this.sesionEnCurso;
   }
 
   /**
@@ -142,23 +201,23 @@ export class TropipayClient implements OnModuleInit {
    * contra nuestra cuenta ese camino responde **«App not found»**: medido en
    * staging el 20-oct-2026, la primera renovación tras media hora dejaba la
    * tarjeta sin poder cobrar, mientras que el arranque —que no tiene
-   * `refresh_token` todavía— entraba sin problema. Antes del PR #85 esto no
-   * se veía nunca, porque la recursión del interceptor mataba el proceso
-   * antes de que la petición llegara a salir.
+   * `refresh_token` todavía— entraba sin problema. La 0.3.1 no cambia nada de
+   * esto: su `login()` sigue prefiriendo el refresco en cuanto lo tiene.
    *
    * Para un servidor el refresco no aporta nada: las credenciales están aquí
    * y pedir una sesión nueva cuesta lo mismo. Es un camino menos que puede
    * romperse.
    */
   private async autenticar(): Promise<void> {
-    Tropipay.refreshToken = null;
-    await this.sdk.login();
+    const instancia = this.sdk;
+    instancia.refreshToken = null;
+    await instancia.login();
     this.renovarDespuesDe = Date.now() + TropipayClient.VIGENCIA_MS;
   }
 
   async createPaymentLink(payload: PaymentLinkPayload): Promise<PaymentLink> {
     try {
-      return await this.conSesion(() => this.sdk.paymentCards.create(payload));
+      return await this.sdk.paymentCards.create(payload);
     } catch (err) {
       // The top-level message is always "Invalid Parameter"; `details` is the
       // only place the rejected field appears.
@@ -179,7 +238,7 @@ export class TropipayClient implements OnModuleInit {
   async findMovementByReference(
     reference: string,
   ): Promise<TropipayMovement | undefined> {
-    const result = (await this.conSesion(() => this.sdk.movements(0, 50))) as
+    const result = (await this.sdk.movements(0, 50)) as
       | TropipayMovement[]
       | { rows?: TropipayMovement[] };
     const rows = Array.isArray(result) ? result : (result?.rows ?? []);
