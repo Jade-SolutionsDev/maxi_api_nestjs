@@ -150,16 +150,84 @@ changing anything.
 
 ## Deployment
 
-When you're ready to deploy your NestJS application to production, there are some key steps you can take to ensure it runs as efficiently as possible. Check out the [deployment documentation](https://docs.nestjs.com/deployment) for more information.
+Everything runs on one VPS under [Dokploy](https://dokploy.com), in the
+`maxihabana` project. Six applications across two environments, each with its
+own Postgres.
 
-If you are looking for a cloud-based platform to deploy your NestJS application, check out [Mau](https://mau.nestjs.com), our official platform for deploying NestJS applications on AWS. Mau makes deployment straightforward and fast, requiring just a few simple steps:
+| Application | Repository | Branch | URL |
+|---|---|---|---|
+| `api` | `maxi_api_nestjs` | `master` | https://api.maxihabana.com |
+| `admin` | `maxi_admin_react` | `master` | https://admin.maxihabana.com |
+| `storefront` | `maxi_web_client_next` | `main` | https://www.maxihabana.com |
+| `api-staging` | `maxi_api_nestjs` | `develop` | https://staging-api.maxihabana.com |
+| `admin-staging` | `maxi_admin_react` | `develop` | https://staging-admin.maxihabana.com |
+| `storefront-staging` | `maxi_web_client_next` | `development` | https://staging.maxihabana.com |
+
+This API is served under the `/api` prefix (`main.ts`, `setGlobalPrefix`), so
+the health check lives at `/api/health` and not at `/health`.
+
+### Merging is deploying
+
+**All six applications have auto-deploy on, triggered by a push to the branch
+above.** There is no button to press afterwards and no tag to point Dokploy at:
+the moment a pull request lands on `master`, production starts rebuilding by
+itself.
+
+This is the one thing to know before approving a pull request against `master`,
+and it is invisible from the repository. Merging a pull request into `develop`
+likewise redeploys staging within seconds.
+
+Tags (`v1.5.0`, `v1.5.1`, …) are a **record of what was published, not a
+trigger**. Pushing a tag deploys nothing.
+
+### Migrations run at boot
+
+`migrationsRun` is on (`app.module.ts`), so **a deployment applies every pending
+migration before serving traffic**. Together with auto-deploy that means
+merging a migration into `master` runs it against the production database,
+unattended, a couple of minutes later.
+
+A migration that cannot be undone deserves a backup taken first. See the
+*Database migrations* section above for how they are written.
+
+### Checking that a deployment finished
+
+Dokploy's API answers without `sudo` or `docker`. Credentials live in
+`~/.config/maxi/dokploy.env` (`DOKPLOY_URL` already ends in `/api`):
 
 ```bash
-$ pnpm install -g @nestjs/mau
-$ mau deploy
+set -a; . ~/.config/maxi/dokploy.env; set +a
+curl -sS -H "x-api-key: $DOKPLOY_API_KEY" \
+  "$DOKPLOY_URL/deployment.all?applicationId=5tAPhA8d6nBqVonHNOd0d" \
+  | python3 -c "import sys,json; [print(d['status'], d['createdAt'], d['title'][:50]) for d in json.load(sys.stdin)[:3]]"
 ```
 
-With Mau, you can deploy your application in just a few clicks, allowing you to focus on building features rather than managing infrastructure.
+`5tAPhA8d6nBqVonHNOd0d` is production; staging is `vc39dZyZuuYpUwaI6FWYK`. A
+deployment moves from `running` to `done`, or to `error` if the build failed.
+Whether a failed build leaves the previous container serving has not been
+tested here: if a deployment goes red, check the site rather than assume it.
+
+Then check the application itself, which is what actually proves it:
+
+```bash
+curl -sS https://api.maxihabana.com/api/health
+```
+
+Beware of `application.one`: its response includes the environment variables,
+secrets and all. Read the one field you need out of it, never the whole thing.
+
+### Rolling back
+
+Auto-deploy cuts both ways: **revert the commit on `master` and the revert
+deploys itself**. That is the path with the fewest moving parts, and the one to
+reach for while production is down. Dokploy also keeps earlier deployments and
+can redeploy one from its interface — untested here, so do not find out during
+an incident.
+
+*Verified on 2026-10-24 against the Dokploy API, the live domains and the
+source. `lanzamiento-produccion.md` in the workspace root described a different
+flow — pointing Dokploy at a tag — that does not match how the server is
+configured.*
 
 ## Resources
 
