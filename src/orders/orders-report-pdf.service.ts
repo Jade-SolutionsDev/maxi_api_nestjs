@@ -16,14 +16,14 @@ const LINEA = '#dce4e0';
 const FILA_ALTERNA = '#f3f8f6';
 
 const MARGEN = 40;
-/** A4 apaisado: la tabla tiene siete columnas y de pie no caben. */
+/** A4 apaisado: la tabla tiene siete columnas, u ocho, y de pie no caben. */
 const ANCHO_PAGINA = 841.89;
 const ALTO_PAGINA = 595.28;
-const ANCHO_UTIL = ANCHO_PAGINA - MARGEN * 2;
+export const ANCHO_UTIL = ANCHO_PAGINA - MARGEN * 2;
 const ALTO_CABECERA = 62;
 const ALTO_PIE = 40;
 
-interface Columna {
+export interface Columna {
   clave: string;
   titulo: string;
   ancho: number;
@@ -31,7 +31,7 @@ interface Columna {
   derecha?: boolean;
 }
 
-const COLUMNAS: Columna[] = [
+export const COLUMNAS: Columna[] = [
   { clave: 'numero', titulo: 'PEDIDO', ancho: 95 },
   { clave: 'cliente', titulo: 'CLIENTE', ancho: 190 },
   { clave: 'estado', titulo: 'ESTADO', ancho: 80 },
@@ -40,6 +40,41 @@ const COLUMNAS: Columna[] = [
   { clave: 'total', titulo: 'TOTAL', ancho: 90, derecha: true },
   { clave: 'fecha', titulo: 'CREADO', ancho: 102 },
 ];
+
+/**
+ * Las mismas siete columnas más la fecha de entrega, con los anchos recortados
+ * para que la octava quepa en la misma hoja apaisada.
+ *
+ * Lo que se estrecha es lo que aguanta estrecharse: el nombre del cliente y el
+ * método de pago ya iban con elipsis en los casos largos. Lo que **no** se
+ * toca por debajo de lo que necesita es el estado de pago: «Reembolsado» es la
+ * palabra más larga de la tabla y cortada a «Reembols…» deja de distinguirse
+ * de un reembolso parcial.
+ */
+export const COLUMNAS_CON_ENTREGA: Columna[] = [
+  { clave: 'numero', titulo: 'PEDIDO', ancho: 92 },
+  { clave: 'cliente', titulo: 'CLIENTE', ancho: 163 },
+  { clave: 'estado', titulo: 'ESTADO', ancho: 70 },
+  { clave: 'pago', titulo: 'PAGO', ancho: 66 },
+  { clave: 'metodo', titulo: 'MÉTODO', ancho: 112 },
+  { clave: 'total', titulo: 'TOTAL', ancho: 82, derecha: true },
+  { clave: 'fecha', titulo: 'CREADO', ancho: 88 },
+  { clave: 'entrega', titulo: 'ENTREGADO', ancho: 88 },
+];
+
+/**
+ * La columna de la entrega sale cuando hay alguna entrega que enseñar.
+ *
+ * Es lo que pidió Jade —filtrar por «Entregado» y ver cuándo se entregó cada
+ * uno—, pero atado al dato y no al filtro: un reporte sin filtrar que incluya
+ * pedidos ya entregados también la enseña, y uno de pendientes de pago no
+ * gasta en una columna de guiones el ancho que le hace falta al nombre del
+ * cliente.
+ */
+const columnasPara = (pedidos: OrderResponseDto[]): Columna[] =>
+  pedidos.some((pedido) => pedido.deliveredAt != null)
+    ? COLUMNAS_CON_ENTREGA
+    : COLUMNAS;
 
 const ESTADOS: Record<string, string> = {
   pending: 'Pendiente',
@@ -272,7 +307,8 @@ export class OrdersReportPdfService {
       return;
     }
 
-    this.cabeceraDeTabla(doc);
+    const columnas = columnasPara(pedidos);
+    this.cabeceraDeTabla(doc, columnas);
     doc.font('Helvetica').fontSize(8.5);
 
     pedidos.forEach((pedido, i) => {
@@ -282,7 +318,7 @@ export class OrdersReportPdfService {
       if (doc.y > ALTO_PAGINA - MARGEN - ALTO_PIE - 24) {
         doc.addPage();
         doc.y = MARGEN + ALTO_CABECERA;
-        this.cabeceraDeTabla(doc);
+        this.cabeceraDeTabla(doc, columnas);
         doc.font('Helvetica').fontSize(8.5);
       }
 
@@ -302,10 +338,11 @@ export class OrdersReportPdfService {
         metodo: pedido.paymentMethod?.label ?? '—',
         total: dinero(pedido.total),
         fecha: fechaCorta(pedido.createdAt),
+        entrega: fechaCorta(pedido.deliveredAt),
       };
 
       let x = MARGEN;
-      for (const col of COLUMNAS) {
+      for (const col of columnas) {
         doc.fillColor(TINTA).text(valores[col.clave] ?? '—', x + 4, y, {
           width: col.ancho - 8,
           align: col.derecha ? 'right' : 'left',
@@ -318,7 +355,7 @@ export class OrdersReportPdfService {
     });
   }
 
-  private cabeceraDeTabla(doc: PDFKit.PDFDocument): void {
+  private cabeceraDeTabla(doc: PDFKit.PDFDocument, columnas: Columna[]): void {
     const y = doc.y;
     doc
       .rect(MARGEN, y - 4, ANCHO_UTIL, 18)
@@ -327,7 +364,7 @@ export class OrdersReportPdfService {
 
     let x = MARGEN;
     doc.font('Helvetica-Bold').fontSize(8).fillColor('#ffffff');
-    for (const col of COLUMNAS) {
+    for (const col of columnas) {
       doc.text(col.titulo, x + 4, y, {
         width: col.ancho - 8,
         align: col.derecha ? 'right' : 'left',
